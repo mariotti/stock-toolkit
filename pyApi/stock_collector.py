@@ -44,6 +44,10 @@ API_KEYS = {
     "marketstack":  "",     # https://marketstack.com/signup/free
 }
 
+# Set to True if you have a paid Finnhub plan.
+# Unlocks /stock/candle (OHLCV bars) for both live and historical collection.
+FINNHUB_PAID = False
+
 # Where to write data
 OUTPUT_DIR      = Path(__file__).parent           # same folder as this script
 DB_PATH         = OUTPUT_DIR / "stock_data.db"           # default: SQLite
@@ -357,8 +361,7 @@ def fetch_alphavantage(symbols: list[str], state: dict) -> list[dict]:
 def fetch_finnhub(symbols: list[str], state: dict) -> list[dict]:
     """
     /quote — real-time last price snapshot (free tier).
-    Note: /stock/candle (OHLCV bars) requires a paid Finnhub plan and is
-    therefore skipped.  Quote rows use interval="quote" in the DB.
+    /stock/candle — OHLCV bars (paid tier, enabled via FINNHUB_PAID = True).
     Free: 60 calls/min, no daily cap.
     """
     key = API_KEYS["finnhub"]
@@ -366,7 +369,11 @@ def fetch_finnhub(symbols: list[str], state: dict) -> list[dict]:
         return []
 
     rows = []
+    now_ts  = int(time.time())
+    from_ts = int((datetime.now(timezone.utc) - timedelta(days=30)).timestamp())
+
     for sym in symbols:
+        # real-time quote — always available on free tier
         q = safe_get("https://finnhub.io/api/v1/quote",
                      params={"symbol": sym, "token": key})
         sleep_for_rate("finnhub")
@@ -380,6 +387,23 @@ def fetch_finnhub(symbols: list[str], state: dict) -> list[dict]:
             log.info(f"[finnhub] {sym}: quote c={q.get('c')}")
         else:
             log.warning(f"[finnhub] {sym}: empty or error response")
+
+        # daily candles — paid tier only
+        if FINNHUB_PAID:
+            c = safe_get("https://finnhub.io/api/v1/stock/candle",
+                         params={"symbol": sym, "resolution": "D",
+                                 "from": from_ts, "to": now_ts, "token": key})
+            sleep_for_rate("finnhub")
+            if c and c.get("s") == "ok":
+                for i, ts in enumerate(c["t"]):
+                    rows.append(make_row(
+                        sym, "finnhub", date.fromtimestamp(ts), "1d",
+                        c["o"][i], c["h"][i], c["l"][i], c["c"][i], c["v"][i],
+                        vwap=c.get("vwap", [None]*len(c["t"]))[i] if "vwap" in c else None,
+                    ))
+                log.info(f"[finnhub] {sym}: {len(c['t'])} daily candles")
+            else:
+                log.warning(f"[finnhub] {sym}: candle error — {c.get('s') if c else 'no response'}")
     return rows
 
 
@@ -679,11 +703,36 @@ def _hist_alphavantage(symbols, db_path, date_from, date_to, state) -> list:
 
 def _hist_finnhub(symbols, db_path, date_from, date_to, state) -> list:
     """
-    Finnhub /stock/candle requires a paid plan — skipped on the free tier.
-    Finnhub is still used for live /quote snapshots via fetch_finnhub().
+    Finnhub candle: arbitrary Unix timestamp range (paid tier only).
+    Skipped automatically when FINNHUB_PAID = False.
     """
-    log.info("[hist/finnhub] skipped — candle endpoint requires paid plan")
-    return []
+    key = API_KEYS["finnhub"]
+    if not key or not FINNHUB_PAID:
+        log.info("[hist/finnhub] skipped — set FINNHUB_PAID = True to enable")
+        return []
+    rows = []
+    from_ts = int(datetime(date_from.year, date_from.month, date_from.day,
+                           tzinfo=timezone.utc).timestamp())
+    to_ts   = int(datetime(date_to.year, date_to.month, date_to.day, 23, 59, 59,
+                           tzinfo=timezone.utc).timestamp())
+    for sym in symbols:
+        if _hist_has_data(db_path, sym, "finnhub", date_from, date_to):
+            log.info(f"[hist/finnhub] {sym}: already in DB, skipping")
+            continue
+        c = safe_get("https://finnhub.io/api/v1/stock/candle",
+                     params={"symbol": sym, "resolution": "D",
+                             "from": from_ts, "to": to_ts, "token": key})
+        sleep_for_rate("finnhub")
+        if not c or c.get("s") != "ok":
+            log.warning(f"[hist/finnhub] {sym}: {c.get('s') if c else 'no response'}")
+            continue
+        for i, ts in enumerate(c["t"]):
+            rows.append(make_row(
+                sym, "finnhub", date.fromtimestamp(ts), "1d",
+                c["o"][i], c["h"][i], c["l"][i], c["c"][i], c["v"][i],
+            ))
+        log.info(f"[hist/finnhub] {sym}: {len(c['t'])} bars")
+    return rows
 
 
 def _hist_polygon(symbols, db_path, date_from, date_to, state) -> list:
