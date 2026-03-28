@@ -30,41 +30,91 @@ from datetime import datetime, date, timedelta, timezone
 from pathlib import Path
 
 # ─────────────────────────────────────────────
-#  CONFIG — edit this section
+#  CONFIG — loaded from config.env, with
+#           hardcoded defaults as fallback
 # ─────────────────────────────────────────────
 
-SYMBOLS = ["AAPL", "MSFT", "GOOGL", "AMZN", "TSLA"]   # tickers to track
+def _load_config(config_path: Path) -> dict:
+    """
+    Parse a simple KEY=VALUE config file.
+    - Lines starting with # are comments.
+    - Inline comments (value # comment) are stripped.
+    - Quoted values ("value" or 'value') have quotes stripped.
+    - Missing file is silently ignored (defaults apply).
+    """
+    cfg: dict = {}
+    if not config_path.exists():
+        return cfg
+    with open(config_path) as f:
+        for raw in f:
+            line = raw.strip()
+            if not line or line.startswith("#"):
+                continue
+            if "=" not in line:
+                continue
+            key, _, val = line.partition("=")
+            key = key.strip()
+            val = val.strip()
+            # strip inline comment (covers both "value # comment" and "  # comment")
+            if val.startswith("#"):
+                val = ""
+            elif " #" in val:
+                val = val[:val.index(" #")].strip()
+            # strip matching quotes
+            if (val.startswith('"') and val.endswith('"')) or \
+               (val.startswith("'") and val.endswith("'")):
+                val = val[1:-1]
+            cfg[key] = val
+    return cfg
+
+
+# Config file sits next to this script — keep it out of git (see .gitignore)
+_CONFIG_PATH = Path(__file__).parent / "config.env"
+_cfg = _load_config(_CONFIG_PATH)
+
+if _cfg:
+    _src = str(_CONFIG_PATH)
+else:
+    _src = "built-in defaults (config.env not found)"
+
+# ── symbols ───────────────────────────────────────────────────────────────────
+
+# SYMBOLS in config.env is a comma-separated list, e.g.:
+#   SYMBOLS=AAPL,MSFT,GOOGL,AMZN,TSLA
+_sym_raw = _cfg.get("SYMBOLS", "AAPL,MSFT,GOOGL,AMZN,TSLA")
+SYMBOLS = [s.strip().upper() for s in _sym_raw.split(",") if s.strip()]
+
+# ── API keys ──────────────────────────────────────────────────────────────────
 
 API_KEYS = {
-    "alphavantage": "***REMOVED***",     # https://www.alphavantage.co/support/#api-key
-    "finnhub":      "***REMOVED***",     # https://finnhub.io/register
-    "polygon":      "",     # https://polygon.io/dashboard/signup
-    "fmp":          "",     # https://financialmodelingprep.com/developer/docs
-    "twelvedata":   "",     # https://twelvedata.com/register
-    "marketstack":  "",     # https://marketstack.com/signup/free
+    "alphavantage": _cfg.get("ALPHAVANTAGE_KEY", ""),
+    "finnhub":      _cfg.get("FINNHUB_KEY",      ""),
+    "polygon":      _cfg.get("POLYGON_KEY",       ""),
+    "fmp":          _cfg.get("FMP_KEY",           ""),
+    "twelvedata":   _cfg.get("TWELVEDATA_KEY",    ""),
+    "marketstack":  _cfg.get("MARKETSTACK_KEY",   ""),
 }
 
-# Set to True if you have a paid Finnhub plan.
-# Unlocks /stock/candle (OHLCV bars) for both live and historical collection.
-FINNHUB_PAID = False
+# ── paid tier flags ───────────────────────────────────────────────────────────
 
-# Set to True if you have a paid Alpha Vantage plan.
-# Unlocks TIME_SERIES_DAILY_ADJUSTED (split/dividend-adjusted closes).
-# Free tier uses TIME_SERIES_DAILY (unadjusted closes).
-ALPHAVANTAGE_PAID = False
+# FINNHUB_PAID=true    → unlocks /stock/candle (OHLCV bars)
+# ALPHAVANTAGE_PAID=true → unlocks TIME_SERIES_DAILY_ADJUSTED + full history
+FINNHUB_PAID      = _cfg.get("FINNHUB_PAID",      "false").lower() == "true"
+ALPHAVANTAGE_PAID = _cfg.get("ALPHAVANTAGE_PAID", "false").lower() == "true"
 
-# Where to write data
-OUTPUT_DIR      = Path(__file__).parent           # same folder as this script
-DB_PATH         = OUTPUT_DIR / "stock_data.db"           # default: SQLite
-CSV_PATH        = OUTPUT_DIR / "stock_data.csv"          # legacy: --csv flag
-STATE_PATH      = OUTPUT_DIR / ".collector_state.json"  # tracks daily call counts
-LOG_PATH        = OUTPUT_DIR / "collector.log"
-GNUPLOT_DIR     = OUTPUT_DIR / "gnuplot-data"            # --plot-gnuplot output
-MATPLOTLIB_DIR  = OUTPUT_DIR / "matplot"                 # --plot-matplotlib output
-HIST_DIR        = OUTPUT_DIR / "data"                    # --historical DBs
+# ── paths ─────────────────────────────────────────────────────────────────────
 
-# Rate-limit budgets for the FREE tier of each API.
-# The collector checks these before making calls so you never exceed your quota.
+OUTPUT_DIR     = Path(_cfg.get("OUTPUT_DIR", str(Path(__file__).parent)))
+DB_PATH        = OUTPUT_DIR / _cfg.get("DB_FILE",      "stock_data.db")
+CSV_PATH       = OUTPUT_DIR / _cfg.get("CSV_FILE",     "stock_data.csv")
+STATE_PATH     = OUTPUT_DIR / _cfg.get("STATE_FILE",   ".collector_state.json")
+LOG_PATH       = OUTPUT_DIR / _cfg.get("LOG_FILE",     "collector.log")
+GNUPLOT_DIR    = OUTPUT_DIR / _cfg.get("GNUPLOT_DIR",  "gnuplot-data")
+MATPLOTLIB_DIR = OUTPUT_DIR / _cfg.get("MATPLOT_DIR",  "matplot")
+HIST_DIR       = OUTPUT_DIR / _cfg.get("HIST_DIR",     "data")
+
+# ── rate limits (not user-configurable via config.env) ───────────────────────
+
 DAILY_LIMITS = {
     "alphavantage": 25,    # 25 calls / day
     "finnhub":      None,  # 60 calls / minute — no daily cap, handled below
@@ -74,7 +124,6 @@ DAILY_LIMITS = {
     "marketstack":  3,     # 100 calls / month → ~3/day safety budget
 }
 
-# Per-minute rate limits (requests.get calls are spaced accordingly)
 MINUTE_LIMITS = {
     "finnhub":  60,
     "polygon":  5,
@@ -93,6 +142,7 @@ logging.basicConfig(
     ],
 )
 log = logging.getLogger(__name__)
+log.debug(f"Config loaded from: {_src}")
 
 # ─────────────────────────────────────────────
 #  STATE — persists daily call counts across runs
@@ -587,6 +637,9 @@ def fetch_twelvedata(symbols: list[str], state: dict) -> list[dict]:
         if "values" in data:
             data = {syms[0]: data}  # single symbol
         for sym, payload in data.items():
+            if not isinstance(payload, dict):
+                log.warning(f"[twelvedata] {sym} {interval}: unexpected response type {type(payload).__name__}: {payload}")
+                continue
             if "values" not in payload:
                 log.warning(f"[twelvedata] {sym} {interval}: {payload.get('message','?')}")
                 continue
@@ -1327,4 +1380,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
