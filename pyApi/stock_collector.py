@@ -33,7 +33,7 @@ from pathlib import Path
 #  CONFIG — edit this section
 # ─────────────────────────────────────────────
 
-SYMBOLS = ["AAPL", "MSFT", "GOOGL", "AMZN", "TSLA"]   # tickers to track
+SYMBOLS = ["AAPL", "ARM", "AMD", "AMZN", "TSLA", "CSMIB.MI"]   # tickers to track
 
 API_KEYS = {
     "alphavantage": "***REMOVED***",     # https://www.alphavantage.co/support/#api-key
