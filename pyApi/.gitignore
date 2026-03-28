@@ -1,0 +1,22 @@
+# databases
+*.db
+*.db-shm
+*.db-wal
+
+# CSV exports
+stock_data.csv
+
+# logs and state
+collector.log
+.collector_state.json
+
+# Python
+__pycache__/
+*.pyc
+.env
+
+# plot outputs (optional — commit if you want to share them)
+gnuplot-data/
+matplot/
+data/
+
