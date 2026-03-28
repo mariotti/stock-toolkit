@@ -36,8 +36,8 @@ from pathlib import Path
 SYMBOLS = ["AAPL", "MSFT", "GOOGL", "AMZN", "TSLA"]   # tickers to track
 
 API_KEYS = {
-    "alphavantage": "",     # https://www.alphavantage.co/support/#api-key
-    "finnhub":      "",     # https://finnhub.io/register
+    "alphavantage": "***REMOVED***",     # https://www.alphavantage.co/support/#api-key
+    "finnhub":      "***REMOVED***",     # https://finnhub.io/register
     "polygon":      "",     # https://polygon.io/dashboard/signup
     "fmp":          "",     # https://financialmodelingprep.com/developer/docs
     "twelvedata":   "",     # https://twelvedata.com/register
