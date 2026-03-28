@@ -48,6 +48,11 @@ API_KEYS = {
 # Unlocks /stock/candle (OHLCV bars) for both live and historical collection.
 FINNHUB_PAID = False
 
+# Set to True if you have a paid Alpha Vantage plan.
+# Unlocks TIME_SERIES_DAILY_ADJUSTED (split/dividend-adjusted closes).
+# Free tier uses TIME_SERIES_DAILY (unadjusted closes).
+ALPHAVANTAGE_PAID = False
+
 # Where to write data
 OUTPUT_DIR      = Path(__file__).parent           # same folder as this script
 DB_PATH         = OUTPUT_DIR / "stock_data.db"           # default: SQLite
@@ -321,14 +326,36 @@ def fetch_yfinance(symbols: list[str]) -> list[dict]:
 
 
 # ── 2. Alpha Vantage ─────────────────────────
+def _av_error(data: dict) -> str:
+    """Extract human-readable error from an Alpha Vantage response."""
+    for key in ("Note", "Information", "Error Message"):
+        if key in data:
+            return data[key].split(".")[0]   # first sentence is enough
+    keys = list(data.keys())[:3]
+    return f"unexpected keys: {keys}"
+
 def fetch_alphavantage(symbols: list[str], state: dict) -> list[dict]:
     """
-    TIME_SERIES_DAILY_ADJUSTED — EOD OHLCV + split/dividend adjusted close.
-    Free: 25 calls/day.  Each symbol = 1 call, so limit symbols accordingly.
+    Free:  TIME_SERIES_DAILY          — unadjusted OHLCV.
+    Paid:  TIME_SERIES_DAILY_ADJUSTED — split/dividend-adjusted close.
+    Toggle via ALPHAVANTAGE_PAID = True in the config section.
+    Free: 25 calls/day, 1 call/symbol.
     """
     key = API_KEYS["alphavantage"]
     if not key:
         return []
+
+    if ALPHAVANTAGE_PAID:
+        av_function = "TIME_SERIES_DAILY_ADJUSTED"
+        close_field  = "5. adjusted close"
+        vol_field    = "6. volume"
+        extra_fields = lambda bar: {"split_coefficient": bar.get("8. split coefficient"),
+                                    "dividend":          bar.get("7. dividend amount")}
+    else:
+        av_function  = "TIME_SERIES_DAILY"
+        close_field  = "4. close"
+        vol_field    = "5. volume"
+        extra_fields = lambda bar: {}
 
     rows = []
     for sym in symbols:
@@ -336,23 +363,25 @@ def fetch_alphavantage(symbols: list[str], state: dict) -> list[dict]:
             break
         data = safe_get(
             "https://www.alphavantage.co/query",
-            params={"function": "TIME_SERIES_DAILY_ADJUSTED", "symbol": sym,
+            params={"function": av_function, "symbol": sym,
                     "outputsize": "compact", "apikey": key}
         )
         record_call(state, "alphavantage")
         if not data or "Time Series (Daily)" not in data:
-            log.warning(f"[alphavantage] {sym}: unexpected response")
+            reason = _av_error(data) if data else "no response"
+            log.warning(f"[alphavantage] {sym}: {reason}")
             continue
 
         for date_str, bar in data["Time Series (Daily)"].items():
             rows.append(make_row(
                 sym, "alphavantage", date_str, "1d",
                 bar.get("1. open"), bar.get("2. high"),
-                bar.get("3. low"),  bar.get("5. adjusted close"),  # adjusted
-                bar.get("6. volume"),
-                extra={"split_coefficient": bar.get("8. split coefficient")}
+                bar.get("3. low"),  bar.get(close_field),
+                bar.get(vol_field),
+                extra=extra_fields(bar) or None
             ))
-        log.info(f"[alphavantage] {sym}: {len(data['Time Series (Daily)'])} days")
+        tier = "adjusted" if ALPHAVANTAGE_PAID else "unadjusted"
+        log.info(f"[alphavantage] {sym}: {len(data['Time Series (Daily)'])} days ({tier})")
         time.sleep(12)   # free tier: max 5 calls/min
     return rows
 
@@ -661,12 +690,26 @@ def _hist_yfinance(symbols, db_path, date_from, date_to, state) -> list:
 def _hist_alphavantage(symbols, db_path, date_from, date_to, state) -> list:
     """
     outputsize=full returns 20+ years in one call per symbol.
-    Response is filtered to the requested range.
+    Free:  TIME_SERIES_DAILY (unadjusted).
+    Paid:  TIME_SERIES_DAILY_ADJUSTED — set ALPHAVANTAGE_PAID = True.
     Costs 1 call/symbol from the 25/day budget.
     """
     key = API_KEYS["alphavantage"]
     if not key:
         return []
+
+    if ALPHAVANTAGE_PAID:
+        av_function  = "TIME_SERIES_DAILY_ADJUSTED"
+        close_field  = "5. adjusted close"
+        vol_field    = "6. volume"
+        extra_fields = lambda bar: {"split_coefficient": bar.get("8. split coefficient"),
+                                    "dividend":          bar.get("7. dividend amount")}
+    else:
+        av_function  = "TIME_SERIES_DAILY"
+        close_field  = "4. close"
+        vol_field    = "5. volume"
+        extra_fields = lambda bar: {}
+
     rows = []
     for sym in symbols:
         if not budget_ok(state, "alphavantage"):
@@ -676,12 +719,13 @@ def _hist_alphavantage(symbols, db_path, date_from, date_to, state) -> list:
             continue
         data = safe_get(
             "https://www.alphavantage.co/query",
-            params={"function": "TIME_SERIES_DAILY_ADJUSTED", "symbol": sym,
+            params={"function": av_function, "symbol": sym,
                     "outputsize": "full", "apikey": key}
         )
         record_call(state, "alphavantage")
         if not data or "Time Series (Daily)" not in data:
-            log.warning(f"[hist/alphavantage] {sym}: unexpected response")
+            reason = _av_error(data) if data else "no response"
+            log.warning(f"[hist/alphavantage] {sym}: {reason}")
             continue
         kept = 0
         for date_str, bar in data["Time Series (Daily)"].items():
@@ -691,12 +735,13 @@ def _hist_alphavantage(symbols, db_path, date_from, date_to, state) -> list:
             rows.append(make_row(
                 sym, "alphavantage", date_str, "1d",
                 bar.get("1. open"), bar.get("2. high"),
-                bar.get("3. low"),  bar.get("5. adjusted close"),
-                bar.get("6. volume"),
-                extra={"split_coefficient": bar.get("8. split coefficient")}
+                bar.get("3. low"),  bar.get(close_field),
+                bar.get(vol_field),
+                extra=extra_fields(bar) or None
             ))
             kept += 1
-        log.info(f"[hist/alphavantage] {sym}: {kept} bars in range")
+        tier = "adjusted" if ALPHAVANTAGE_PAID else "unadjusted"
+        log.info(f"[hist/alphavantage] {sym}: {kept} bars in range ({tier})")
         time.sleep(12)
     return rows
 
