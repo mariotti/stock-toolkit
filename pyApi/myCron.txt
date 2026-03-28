@@ -1,0 +1,13 @@
+# Simple, reliable, covers everything year-round
+*/30 7-21 * * 1-5   /usr/bin/python3 /Users/mariotti/GIT/stock_py_api/pyApi/stock_collector.py
+
+# End-of-day definitive close
+0 22 * * 1-5        /usr/bin/python3 /Users/mariotti/GIT/stock_py_api/pyApi/stock_collector.py
+
+# Alerts during both sessions
+*/30 7-21 * * 1-5   /usr/bin/python3 /Users/mariotti/GIT/stock_py_api/pyApi/stock_alerts.py \
+    -s AAPL ARM AMD CSMIB.MI TSLA ENEL.MI \
+    --when "rsi14 < 30" \
+    --when "change_pct < -3" \
+    --notify email
+
