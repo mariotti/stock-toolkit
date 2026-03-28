@@ -499,10 +499,16 @@ def fetch_fmp(symbols: list[str], state: dict) -> list[dict]:
 
     rows = []
     # --- bulk quote (1 call for all symbols) ---
-    sym_str = ",".join(symbols)
-    q_data = safe_get(f"https://financialmodelingprep.com/api/v3/quote/{sym_str}",
-                      params={"apikey": key})
-    record_call(state, "fmp")
+    # Only fetch quote for symbols not already collected today
+    quote_pending = [s for s in symbols if not _live_has_today(s, "fmp", "quote")]
+    if not quote_pending:
+        log.info("[fmp] all symbols already have today's quote, skipping bulk quote")
+        q_data = []
+    else:
+        sym_str = ",".join(quote_pending)
+        q_data = safe_get(f"https://financialmodelingprep.com/api/v3/quote/{sym_str}",
+                          params={"apikey": key})
+        record_call(state, "fmp")
     if isinstance(q_data, list):
         for q in q_data:
             rows.append(make_row(
@@ -584,9 +590,10 @@ def fetch_twelvedata(symbols: list[str], state: dict) -> list[dict]:
             if "values" not in payload:
                 log.warning(f"[twelvedata] {sym} {interval}: {payload.get('message','?')}")
                 continue
+            stored_interval = "1d" if interval == "1day" else interval
             for bar in payload["values"]:
                 rows.append(make_row(
-                    sym, "twelvedata", bar["datetime"], interval,
+                    sym, "twelvedata", bar["datetime"], stored_interval,
                     bar.get("open"), bar.get("high"), bar.get("low"), bar.get("close"),
                     bar.get("volume"),
                 ))
@@ -961,9 +968,10 @@ def _hist_twelvedata(symbols, db_path, date_from, date_to, state) -> list:
             if "values" not in payload:
                 log.warning(f"[hist/twelvedata] {sym}: {payload.get('message','?')}")
                 continue
+            stored_interval = "1d"   # normalize "1day" → "1d"
             for bar in payload["values"]:
                 rows.append(make_row(
-                    sym, "twelvedata", bar["datetime"], "1d",
+                    sym, "twelvedata", bar["datetime"], stored_interval,
                     bar.get("open"), bar.get("high"), bar.get("low"),
                     bar.get("close"), bar.get("volume"),
                 ))
