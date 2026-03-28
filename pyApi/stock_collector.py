@@ -33,11 +33,11 @@ from pathlib import Path
 #  CONFIG — edit this section
 # ─────────────────────────────────────────────
 
-SYMBOLS = ["AAPL", "ARM", "AMD", "AMZN", "TSLA", "CSMIB.MI"]   # tickers to track
+SYMBOLS = ["AAPL", "MSFT", "GOOGL", "AMZN", "TSLA"]   # tickers to track
 
 API_KEYS = {
-    "alphavantage": "***REMOVED***",     # https://www.alphavantage.co/support/#api-key
-    "finnhub":      "***REMOVED***",     # https://finnhub.io/register
+    "alphavantage": "",     # https://www.alphavantage.co/support/#api-key
+    "finnhub":      "",     # https://finnhub.io/register
     "polygon":      "",     # https://polygon.io/dashboard/signup
     "fmp":          "",     # https://financialmodelingprep.com/developer/docs
     "twelvedata":   "",     # https://twelvedata.com/register
@@ -297,26 +297,37 @@ def fetch_yfinance(symbols: list[str]) -> list[dict]:
     start = (today - timedelta(days=7)).isoformat()  # last 7 days of daily bars
 
     for sym in symbols:
+        daily_done  = _live_has_today(sym, "yfinance", "1d")
+        hourly_done = _live_has_today(sym, "yfinance", "1h")
+        if daily_done and hourly_done:
+            log.info(f"[yfinance] {sym}: already collected today, skipping")
+            continue
         try:
             ticker = yf.Ticker(sym)
 
             # --- historical daily bars ---
-            hist = ticker.history(start=start, interval="1d")
-            for ts, bar in hist.iterrows():
-                rows.append(make_row(
-                    sym, "yfinance", ts.date(), "1d",
-                    bar.get("Open"), bar.get("High"), bar.get("Low"), bar.get("Close"),
-                    bar.get("Volume"),
-                ))
+            if not daily_done:
+                hist = ticker.history(start=start, interval="1d")
+                for ts, bar in hist.iterrows():
+                    rows.append(make_row(
+                        sym, "yfinance", ts.date(), "1d",
+                        bar.get("Open"), bar.get("High"), bar.get("Low"), bar.get("Close"),
+                        bar.get("Volume"),
+                    ))
+            else:
+                hist = []
 
             # --- intraday 1-hour bars (last 5 days) ---
-            intra = ticker.history(period="5d", interval="1h")
-            for ts, bar in intra.iterrows():
-                rows.append(make_row(
-                    sym, "yfinance", ts.isoformat(), "1h",
-                    bar.get("Open"), bar.get("High"), bar.get("Low"), bar.get("Close"),
-                    bar.get("Volume"),
-                ))
+            if not hourly_done:
+                intra = ticker.history(period="5d", interval="1h")
+                for ts, bar in intra.iterrows():
+                    rows.append(make_row(
+                        sym, "yfinance", ts.isoformat(), "1h",
+                        bar.get("Open"), bar.get("High"), bar.get("Low"), bar.get("Close"),
+                        bar.get("Volume"),
+                    ))
+            else:
+                intra = []
 
             log.info(f"[yfinance] {sym}: {len(hist)} daily + {len(intra)} hourly bars")
             time.sleep(0.5)   # gentle pacing
@@ -402,6 +413,9 @@ def fetch_finnhub(symbols: list[str], state: dict) -> list[dict]:
     from_ts = int((datetime.now(timezone.utc) - timedelta(days=30)).timestamp())
 
     for sym in symbols:
+        if _live_has_today(sym, "finnhub", "quote"):
+            log.info(f"[finnhub] {sym}: already collected today, skipping")
+            continue
         # real-time quote — always available on free tier
         q = safe_get("https://finnhub.io/api/v1/quote",
                      params={"symbol": sym, "token": key})
@@ -451,6 +465,9 @@ def fetch_polygon(symbols: list[str], state: dict) -> list[dict]:
     from_date = (date.today() - timedelta(days=30)).isoformat()
 
     for sym in symbols:
+        if _live_has_today(sym, "polygon"):
+            log.info(f"[polygon] {sym}: already collected today, skipping")
+            continue
         if not budget_ok(state, "polygon"):
             break
         url = f"https://api.polygon.io/v2/aggs/ticker/{sym}/range/1/day/{from_date}/{to_date}"
@@ -500,6 +517,9 @@ def fetch_fmp(symbols: list[str], state: dict) -> list[dict]:
 
     # --- historical EOD per symbol ---
     for sym in symbols:
+        if _live_has_today(sym, "fmp"):
+            log.info(f"[fmp] {sym}: already collected today, skipping")
+            continue
         if not budget_ok(state, "fmp"):
             break
         h_data = safe_get(
@@ -535,13 +555,23 @@ def fetch_twelvedata(symbols: list[str], state: dict) -> list[dict]:
 
     rows = []
     sym_str = ",".join(symbols)
+    # filter to symbols not yet collected today for each interval
+    symbols_1d = [s for s in symbols if not _live_has_today(s, "twelvedata", "1d")]
+    symbols_1h = [s for s in symbols if not _live_has_today(s, "twelvedata", "1h")]
+    if not symbols_1d:
+        log.info("[twelvedata] all symbols already collected today (1d), skipping")
+    if not symbols_1h:
+        log.info("[twelvedata] all symbols already collected today (1h), skipping")
 
     def fetch_series(interval: str, outputsize: int = 30) -> None:
+        syms = symbols_1d if interval == "1day" else symbols_1h
+        if not syms:
+            return
         if not budget_ok(state, "twelvedata"):
             return
         data = safe_get(
             "https://api.twelvedata.com/time_series",
-            params={"symbol": sym_str, "interval": interval,
+            params={"symbol": ",".join(syms), "interval": interval,
                     "outputsize": outputsize, "apikey": key}
         )
         record_call(state, "twelvedata")
@@ -549,7 +579,7 @@ def fetch_twelvedata(symbols: list[str], state: dict) -> list[dict]:
             return
         # response is {SYM: {values: [...]}} when multiple symbols
         if "values" in data:
-            data = {symbols[0]: data}  # single symbol
+            data = {syms[0]: data}  # single symbol
         for sym, payload in data.items():
             if "values" not in payload:
                 log.warning(f"[twelvedata] {sym} {interval}: {payload.get('message','?')}")
@@ -580,8 +610,13 @@ def fetch_marketstack(symbols: list[str], state: dict) -> list[dict]:
     if not budget_ok(state, "marketstack"):
         return []
 
+    # skip if all symbols already have today's data
+    pending = [s for s in symbols if not _live_has_today(s, "marketstack")]
+    if not pending:
+        log.info("[marketstack] all symbols already collected today, skipping")
+        return []
     rows = []
-    sym_str = ",".join(symbols)
+    sym_str = ",".join(pending)
     data = safe_get(
         "http://api.marketstack.com/v1/eod",
         params={"access_key": key, "symbols": sym_str, "limit": 100}
@@ -656,6 +691,37 @@ def _hist_has_data(db_path: "Path", symbol: str, source: str,
         return False
 
 
+
+def _live_has_today(symbol: str, source: str, interval: str = "1d") -> bool:
+    """
+    Return True if (symbol, source, interval) already has a row dated today
+    in the live DB.  Used by live fetchers to skip redundant API calls.
+    Checks both exact date match (daily) and any row from today (intraday).
+    """
+    if not DB_PATH.exists():
+        return False
+    today_str = str(date.today())
+    try:
+        con = sqlite3.connect(DB_PATH)
+        if interval == "1d":
+            n = con.execute(
+                "SELECT COUNT(*) FROM prices "
+                "WHERE symbol=? AND source=? AND interval=? AND data_date=?",
+                (symbol, source, interval, today_str)
+            ).fetchone()[0]
+        else:
+            # intraday: check for any row whose data_date starts with today
+            n = con.execute(
+                "SELECT COUNT(*) FROM prices "
+                "WHERE symbol=? AND source=? AND interval=? AND data_date LIKE ?",
+                (symbol, source, interval, today_str + "%")
+            ).fetchone()[0]
+        con.close()
+        return n > 0
+    except Exception:
+        return False
+
+
 # ── historical fetchers (one per API) ───────────────────────────────
 
 def _hist_yfinance(symbols, db_path, date_from, date_to, state) -> list:
@@ -717,10 +783,14 @@ def _hist_alphavantage(symbols, db_path, date_from, date_to, state) -> list:
         if _hist_has_data(db_path, sym, "alphavantage", date_from, date_to):
             log.info(f"[hist/alphavantage] {sym}: already in DB, skipping")
             continue
+        outputsize = "full" if ALPHAVANTAGE_PAID else "compact"
+        if not ALPHAVANTAGE_PAID:
+            log.info(f"[hist/alphavantage] {sym}: free tier — compact only "
+                     f"(~100 days). Upgrade to paid or use yfinance/FMP for full history.")
         data = safe_get(
             "https://www.alphavantage.co/query",
             params={"function": av_function, "symbol": sym,
-                    "outputsize": "full", "apikey": key}
+                    "outputsize": outputsize, "apikey": key}
         )
         record_call(state, "alphavantage")
         if not data or "Time Series (Daily)" not in data:
