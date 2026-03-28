@@ -1,0 +1,39 @@
+# ─────────────────────────────────────────────────────────────────
+# Stock data collector crontab
+# Adjust UTC offsets for your timezone and DST manually,
+# or use a wrapper that handles TZ (see note below).
+# ─────────────────────────────────────────────────────────────────
+
+# ── European markets (Milan, London, Frankfurt) ───────────────────
+# Open: ~07:00 UTC (summer) / 08:00 UTC (winter)
+# Close: ~15:30 UTC (summer) / 16:30 UTC (winter)
+# Run every 30 min, 07:00–16:00 UTC Mon–Fri
+*/30 7-16 * * 1-5   /usr/bin/python3 /path/to/stock_collector.py
+
+# ── US markets (NYSE, NASDAQ) ─────────────────────────────────────
+# Open: 13:30 UTC (summer) / 14:30 UTC (winter)
+# Close: 20:00 UTC (summer) / 21:00 UTC (winter)
+# Run every 30 min, 13:00–21:00 UTC Mon–Fri
+*/30 13-21 * * 1-5  /usr/bin/python3 /path/to/stock_collector.py
+
+# ── End-of-day snapshot (both markets safely closed) ─────────────
+# Captures the definitive close prices for the day
+# 22:00 UTC = well after all markets close
+0 22 * * 1-5        /usr/bin/python3 /path/to/stock_collector.py
+
+# ── Alerts: same schedule as collection ──────────────────────────
+*/30 7-16  * * 1-5  /usr/bin/python3 /path/to/stock_alerts.py \
+    -s AAPL ARM AMD TSLA CSMIB.MI ENEL.MI \
+    --when "rsi14 < 30" \
+    --when "bbands_squeeze" \
+    --when "change_pct < -3" \
+    --notify email
+
+*/30 13-21 * * 1-5  /usr/bin/python3 /path/to/stock_alerts.py \
+    -s AAPL ARM AMD TSLA \
+    --when "rsi14 < 30" \
+    --when "bbands_squeeze" \
+    --when "change_pct < -3" \
+    --notify email
+
+
