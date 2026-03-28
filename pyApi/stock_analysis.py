@@ -1130,7 +1130,7 @@ def list_symbols():
 def main():
     parser = argparse.ArgumentParser(
         description="Analysis tool for stock data collected by stock_collector.py",
-        formatter_class=argparse.RawDescriptionHelpFormatter,
+        formatter_class=argparse.RawTextHelpFormatter,
         epilog="""
 examples:
   python3 stock_analysis.py --list-symbols
@@ -1193,8 +1193,28 @@ examples:
                         choices=VALID_ANALYSES,
                         metavar="TOOL",
                         help=(
-                            f"One or more analyses to run (default: summary). "
-                            f"Choices: {', '.join(VALID_ANALYSES)}"
+                            "One or more analyses to run (default: summary).\n\n"
+                            "Available tools:\n"
+                            "  summary     descriptive stats: mean, std, total return, "
+                                          "annualised volatility, Sharpe ratio\n"
+                            "  regression  linear trend vs time: slope, R\u00b2, p-value, "
+                                          "annualised trend %%, 95%% confidence band\n"
+                            "  returns     periodic return distribution: histogram, "
+                                          "mean, Sharpe, %% positive bars\n"
+                            "  volatility  rolling annualised volatility  (see --window)\n"
+                            "  correlation Pearson return correlation matrix "
+                                          "(needs 2+ symbols); heatmap with --plot\n"
+                            "  sma         moving average overlay  (see --sma-windows)\n"
+                            "  drawdown    max drawdown, duration, recovery, Calmar ratio; "
+                                          "underwater chart with --plot\n"
+                            "  rsi         Relative Strength Index, overbought/oversold "
+                                          "signals  (see --window)\n"
+                            "  bbands      Bollinger Bands (SMA \u00b12\u03c3), bandwidth, "
+                                          "squeeze signal  (see --window)\n"
+                            "  montecarlo  GBM price simulation, fan chart, terminal "
+                                          "distribution  (see --mc-paths, --mc-horizon)\n"
+                            "  hurst       Hurst exponent: trending H>0.5 / random H\u22480.5 "
+                                          "/ mean-reverting H<0.5"
                         ))
 
     parser.add_argument("--window", type=int, default=30,
