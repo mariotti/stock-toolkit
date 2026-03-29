@@ -1,0 +1,192 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# crontab.demo
+# Stock Toolkit — example crontab for macOS and Linux
+#
+# Install:
+#   crontab -e
+#   (paste the relevant lines, adjust STOCK_DIR)
+#
+# Verify what is installed:
+#   crontab -l
+#
+# macOS note: cron is unreliable after sleep/wake cycles.
+# Use the launchd section at the bottom for more reliable scheduling.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# ─────────────────────────────────────────────────────────────────────────────
+# VARIABLES
+# Adjust STOCK_DIR to where your scripts live.
+# PYTHON can be a virtualenv path for full isolation.
+# ─────────────────────────────────────────────────────────────────────────────
+
+STOCK_DIR=/Users/mariotti/GIT/stock_py_api/pyApi
+PYTHON=/usr/bin/python3
+# PYTHON=/Users/mariotti/GIT/stock_py_api/pyApi/venv/bin/python
+
+# Optional: log output to a file instead of letting cron email it
+# LOGFILE=/Users/mariotti/GIT/stock_py_api/pyApi/cron.log
+
+# ─────────────────────────────────────────────────────────────────────────────
+# MARKET HOURS (UTC — adjust for DST by widening the window)
+#
+# European markets (Milan, Frankfurt, London):
+#   Winter: 08:00–16:30 UTC
+#   Summer: 07:00–15:30 UTC
+#   Safe window: 07:00–17:00 UTC
+#
+# US markets (NYSE, NASDAQ):
+#   Winter: 14:30–21:00 UTC
+#   Summer: 13:30–20:00 UTC
+#   Safe window: 13:00–21:30 UTC
+#
+# Combined window covering both: 07:00–21:30 UTC year-round
+# Includes 30 min before open and after close as buffer.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# ─────────────────────────────────────────────────────────────────────────────
+# COLLECT — live data
+# Every 30 minutes, Mon–Fri, 07:00–21:00 UTC
+# Covers both European and US sessions year-round (DST-safe)
+# ─────────────────────────────────────────────────────────────────────────────
+
+*/30 7-21 * * 1-5   cd $STOCK_DIR && $PYTHON stock_collector.py
+
+# ─────────────────────────────────────────────────────────────────────────────
+# END-OF-DAY SNAPSHOT
+# 22:00 UTC — well after all markets close
+# Captures definitive closing prices for the day
+# ─────────────────────────────────────────────────────────────────────────────
+
+0 22 * * 1-5        cd $STOCK_DIR && $PYTHON stock_collector.py
+
+# ─────────────────────────────────────────────────────────────────────────────
+# ALERTS — during both sessions
+# Run after each collection so alerts reflect the latest data
+# Adjust symbols and conditions to match your watchlist
+# ─────────────────────────────────────────────────────────────────────────────
+
+# European session (07:00–17:00 UTC)
+*/30 7-17 * * 1-5   cd $STOCK_DIR && $PYTHON stock_alerts.py \
+    -s CSMIB.MI ENEL.MI \
+    --when "rsi14 < 30" \
+    --when "bbands_pct_b < 0.1" \
+    --when "change_pct < -3" \
+    --notify console
+
+# US session (13:00–21:30 UTC)
+*/30 13-21 * * 1-5  cd $STOCK_DIR && $PYTHON stock_alerts.py \
+    -s AAPL ARM AMD AMZN MSFT GOOGL TSLA \
+    --when "rsi14 < 30" \
+    --when "bbands_pct_b < 0.1" \
+    --when "change_pct < -3" \
+    --notify console
+
+# ─────────────────────────────────────────────────────────────────────────────
+# WEEKLY SCORING — Monday morning before EU open
+# Ranks all symbols by investment score for the week ahead
+# Output goes to cron.log (redirect as needed)
+# ─────────────────────────────────────────────────────────────────────────────
+
+0 6 * * 1           cd $STOCK_DIR && $PYTHON stock_score.py \
+    --from 2023-01-01 \
+    --horizon quarter \
+    --top 5
+
+# ─────────────────────────────────────────────────────────────────────────────
+# DATABASE MAINTENANCE — Sunday midnight UTC
+# VACUUM reclaims fragmentation; ANALYZE refreshes query planner stats
+# ─────────────────────────────────────────────────────────────────────────────
+
+0 0 * * 0           for db in $STOCK_DIR/stock_data.db $STOCK_DIR/data/*.db; \
+                        do [ -f "$db" ] && sqlite3 "$db" "VACUUM; ANALYZE;"; \
+                    done
+
+# ─────────────────────────────────────────────────────────────────────────────
+# LIVE API TESTS — Sunday morning (after maintenance, before week starts)
+# Only runs if keys are configured; costs ≤4 API calls total
+# ─────────────────────────────────────────────────────────────────────────────
+
+30 0 * * 0          cd $STOCK_DIR && RUN_LIVE=1 $PYTHON test_live_apis.py
+
+
+# =============================================================================
+# macOS ALTERNATIVE — launchd plist
+# =============================================================================
+#
+# cron on macOS is unreliable after sleep/wake cycles.
+# launchd is more robust for laptops. Two example plists below.
+#
+# Install:
+#   cp com.stock.collector.plist ~/Library/LaunchAgents/
+#   launchctl load ~/Library/LaunchAgents/com.stock.collector.plist
+#
+# Uninstall:
+#   launchctl unload ~/Library/LaunchAgents/com.stock.collector.plist
+#
+# Check status:
+#   launchctl list | grep stock
+#
+# ─────────────────────────────────────────────────────────────────────────────
+# FILE: ~/Library/LaunchAgents/com.stock.collector.plist
+# Runs every 1800 seconds (30 minutes) regardless of market hours.
+# The collector's skip logic means it costs nothing outside market hours.
+# ─────────────────────────────────────────────────────────────────────────────
+#
+# <?xml version="1.0" encoding="UTF-8"?>
+# <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+#   "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+# <plist version="1.0">
+# <dict>
+#   <key>Label</key>
+#   <string>com.stock.collector</string>
+#   <key>ProgramArguments</key>
+#   <array>
+#     <string>/usr/bin/python3</string>
+#     <string>/Users/mariotti/GIT/stock_py_api/pyApi/stock_collector.py</string>
+#   </array>
+#   <key>StartInterval</key>
+#   <integer>1800</integer>
+#   <key>RunAtLoad</key>
+#   <true/>
+#   <key>StandardOutPath</key>
+#   <string>/Users/mariotti/GIT/stock_py_api/pyApi/cron.log</string>
+#   <key>StandardErrorPath</key>
+#   <string>/Users/mariotti/GIT/stock_py_api/pyApi/cron_err.log</string>
+# </dict>
+# </plist>
+#
+# ─────────────────────────────────────────────────────────────────────────────
+# FILE: ~/Library/LaunchAgents/com.stock.alerts.plist
+# Runs alerts every 30 minutes. Adjust symbols and conditions.
+# ─────────────────────────────────────────────────────────────────────────────
+#
+# <?xml version="1.0" encoding="UTF-8"?>
+# <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+#   "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+# <plist version="1.0">
+# <dict>
+#   <key>Label</key>
+#   <string>com.stock.alerts</string>
+#   <key>ProgramArguments</key>
+#   <array>
+#     <string>/usr/bin/python3</string>
+#     <string>/Users/mariotti/GIT/stock_py_api/pyApi/stock_alerts.py</string>
+#     <string>-s</string>
+#     <string>AAPL</string>
+#     <string>CSMIB.MI</string>
+#     <string>ENEL.MI</string>
+#     <string>--when</string>
+#     <string>rsi14 &lt; 30</string>
+#     <string>--notify</string>
+#     <string>console</string>
+#   </array>
+#   <key>StartInterval</key>
+#   <integer>1800</integer>
+#   <key>RunAtLoad</key>
+#   <false/>
+#   <key>StandardOutPath</key>
+#   <string>/Users/mariotti/GIT/stock_py_api/pyApi/alerts.log</string>
+#   <key>StandardErrorPath</key>
+#   <string>/Users/mariotti/GIT/stock_py_api/pyApi/alerts_err.log</string>
+# </dict>
+# </plist>
