@@ -95,6 +95,7 @@ stock_alerts.py
 stock_ui.py                 ← Streamlit dashboard
 test_toolkit.py             ← offline test suite (no API calls)
 test_live_apis.py           ← live API connectivity tests
+make_dist.py                ← create a clean public distribution
 crontab.demo                ← example crontab (copy and edit)
 config.env                  ← API keys and symbols (keep out of git)
 README.md
@@ -1030,6 +1031,7 @@ stock_alerts.py      ✓
 stock_ui.py          ✓
 test_toolkit.py      ✓
 test_live_apis.py    ✓
+make_dist.py         ✓
 crontab.demo         ✓
 README.md            ✓
 ANALYSIS.md          ✓
