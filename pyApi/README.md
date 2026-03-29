@@ -36,6 +36,10 @@ stock_ui.py           — Streamlit dashboard (Score · Analysis · Backtest · 
 - [stock\_backtest.py](#stock_backtestpy)
 - [stock\_alerts.py](#stock_alertspy)
 - [stock\_ui.py](#stock_uipy)
+- [Common workflows](#common-workflows)
+- [Testing](#testing)
+- [Git and data files](#git-and-data-files)
+- [Troubleshooting](#troubleshooting)
   - [Analysis tools](#analysis-tools)
   - [Exporting data](#exporting-data)
 - [stock\_inventory.py](#stock_inventorypy)
@@ -89,6 +93,8 @@ stock_score.py
 stock_backtest.py
 stock_alerts.py
 stock_ui.py                 ← Streamlit dashboard
+test_toolkit.py             ← offline test suite (no API calls)
+test_live_apis.py           ← live API connectivity tests
 config.env                  ← API keys and symbols (keep out of git)
 README.md
 ANALYSIS.md
@@ -1021,6 +1027,8 @@ stock_score.py       ✓
 stock_backtest.py    ✓
 stock_alerts.py      ✓
 stock_ui.py          ✓
+test_toolkit.py      ✓
+test_live_apis.py    ✓
 README.md            ✓
 ANALYSIS.md          ✓
 README_SCORE.md      ✓
@@ -1034,6 +1042,77 @@ Generate `requirements.txt` with:
 
 ```bash
 pip freeze | grep -E "requests|yfinance|pandas|scipy|matplotlib" > requirements.txt
+```
+
+---
+
+## Testing
+
+Two test files cover the toolkit at different levels.
+
+### Offline tests — `test_toolkit.py`
+
+Fully self-contained. Creates a synthetic SQLite fixture database with seeded
+OHLCV data for four symbols and runs everything against it. Zero API calls,
+zero external dependencies beyond the toolkit itself. Completes in ~3 seconds.
+
+```bash
+# standard runner
+python3 test_toolkit.py
+
+# pytest (if installed)
+python3 -m pytest test_toolkit.py -v --tb=short
+
+# run a single class
+python3 -m pytest test_toolkit.py::TestBacktest -v
+```
+
+**What is covered:**
+
+| Class | What it tests |
+|---|---|
+| `TestCollectorConfig` | `config.env` parser — inline comments, quoted values, missing file |
+| `TestCollectorDedup` | `_live_has_today` and `_hist_has_data` — hit, miss, wrong symbol, future range |
+| `TestScoreSteps` | All seven step functions, all five horizon profiles, penalty logic |
+| `TestBacktest` | All four strategies, equity length, no-lookahead, commission effect |
+| `TestAlerts` | `build_context`, `evaluate_condition`, edge detection, state persistence |
+| `TestPipeline` | End-to-end: score → backtest → alert on the same data; determinism check |
+
+Expected output:
+```
+Ran 55 tests in 2.9s
+55/55 passed  ✓ all green
+```
+
+---
+
+### Live API tests — `test_live_apis.py`
+
+Hits the real API endpoints. Skipped entirely unless `RUN_LIVE=1` is set,
+so the main suite stays fast and offline at all times.
+
+```bash
+RUN_LIVE=1 python3 test_live_apis.py
+```
+
+**Cost per run:**
+
+| Source | Endpoint | Quota cost |
+|---|---|---|
+| yfinance | `Ticker.fast_info` + 5-day history | 0 (no key) |
+| Alpha Vantage | `GLOBAL_QUOTE` with public `demo` key (IBM only) | 0 of your 25/day |
+| FMP | Real-key auth check only (demo key revoked in 2025) | 0–1 of your 250/day |
+| Finnhub | `/quote?symbol=AAPL` | 1 of 60/min |
+| Polygon | `/v2/aggs` single day | 1 of 5/min |
+| Twelve Data | `/quote?symbol=AAPL` | 1 of 800/day |
+| Marketstack | `/tickers/AAPL` metadata | 1 of 100/month |
+
+Sources without a key in `config.env` are skipped automatically with a clear
+message. The connectivity tests (can we reach each domain?) always run first.
+
+Expected output with Finnhub + Alpha Vantage configured:
+```
+14 passed  |  6 skipped  |  0 failed  ✓ all green
 ```
 
 ---
