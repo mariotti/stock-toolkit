@@ -58,16 +58,14 @@ PYTHON=/usr/bin/python3
 # _quote_is_fresh() ensures we only skip if the last collection was < 25 min ago,
 # so every cron run gets a genuinely fresh price.
 
-*/30 7-21 * * 1-5   cd $STOCK_DIR && $PYTHON stock_collector.py \
-                        --sources finnhub fmp
+*/30 7-21 * * 1-5   collect --sources finnhub fmp
 
 # ── Tier 2: Hourly bar sources — every hour ───────────────────────────────────
 # yfinance and Twelve Data return hourly OHLCV bars.
 # _hourly_bar_is_current() skips only if the current hour is already stored,
 # so each cron run adds the latest completed hour bar.
 
-0 7-21 * * 1-5      cd $STOCK_DIR && $PYTHON stock_collector.py \
-                        --sources yfinance twelvedata
+0 7-21 * * 1-5      collect --sources yfinance twelvedata
 
 # ── Tier 3: Daily-close sources — once per day ────────────────────────────────
 # Alpha Vantage (25 calls/day), Polygon, and Marketstack (100 calls/month)
@@ -75,8 +73,7 @@ PYTHON=/usr/bin/python3
 # quota and returns the same data.
 # 22:00 UTC = well after NYSE close (21:00 UTC winter, 20:00 UTC summer).
 
-0 22 * * 1-5        cd $STOCK_DIR && $PYTHON stock_collector.py \
-                        --sources alphavantage polygon marketstack
+0 22 * * 1-5        collect --sources alphavantage polygon marketstack
 
 # ─────────────────────────────────────────────────────────────────────────────
 # ALERTS — during both sessions
@@ -84,7 +81,7 @@ PYTHON=/usr/bin/python3
 # ─────────────────────────────────────────────────────────────────────────────
 
 # European session (07:00–17:00 UTC)
-*/30 7-17 * * 1-5   cd $STOCK_DIR && $PYTHON stock_alerts.py \
+*/30 7-17 * * 1-5   alerts \
     -s CSMIB.MI ENEL.MI \
     --when "rsi14 < 30" \
     --when "bbands_pct_b < 0.1" \
@@ -92,7 +89,7 @@ PYTHON=/usr/bin/python3
     --notify console
 
 # US session (13:00–21:30 UTC)
-*/30 13-21 * * 1-5  cd $STOCK_DIR && $PYTHON stock_alerts.py \
+*/30 13-21 * * 1-5  alerts \
     -s AAPL ARM AMD AMZN MSFT GOOGL TSLA \
     --when "rsi14 < 30" \
     --when "bbands_pct_b < 0.1" \
@@ -105,7 +102,7 @@ PYTHON=/usr/bin/python3
 # Output goes to cron.log (redirect as needed)
 # ─────────────────────────────────────────────────────────────────────────────
 
-0 6 * * 1           cd $STOCK_DIR && $PYTHON stock_score.py \
+0 6 * * 1           score \
     --from 2023-01-01 \
     --horizon quarter \
     --top 5
@@ -124,7 +121,7 @@ PYTHON=/usr/bin/python3
 # Only runs if keys are configured; costs ≤4 API calls total
 # ─────────────────────────────────────────────────────────────────────────────
 
-30 0 * * 0          cd $STOCK_DIR && RUN_LIVE=1 $PYTHON test_live_apis.py
+30 0 * * 0          cd $STOCK_DIR && RUN_LIVE=1 $PYTHON test_live_apis.py  # no wrapper needed
 
 
 # =============================================================================

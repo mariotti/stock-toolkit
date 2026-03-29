@@ -1,5 +1,8 @@
 # Stock Toolkit — Python dependencies
 # Install with: pip install -r requirements.txt
+#
+# Python 3.10 or higher required
+# (uses str | None type hint syntax introduced in 3.10)
 
 requests>=2.31.0
 yfinance>=0.2.40

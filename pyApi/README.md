@@ -189,8 +189,13 @@ Fetches the latest data from all configured sources and appends it to
 `stock_data.db`.
 
 ```bash
-# collect all configured symbols
+# collect all configured symbols (all sources)
 python3 stock_collector.py
+
+# collect only specific sources — useful for tiered cron scheduling
+python3 stock_collector.py --sources finnhub fmp          # real-time quotes only
+python3 stock_collector.py --sources yfinance twelvedata  # hourly bars only
+python3 stock_collector.py --sources alphavantage polygon marketstack  # daily only
 
 # collect a single symbol only
 python3 stock_collector.py -s AAPL
@@ -1163,4 +1168,3 @@ hourly data exists before using `--interval 1h`.
 yfinance is an unofficial web scraper and can be rate-limited or blocked. It
 is suitable for personal use and prototyping but not for production. For
 reliable data, use FMP, Alpha Vantage, or Twelve Data with proper API keys.
-

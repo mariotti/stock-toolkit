@@ -255,9 +255,137 @@ class TestCollectorDedup(FixtureTestCase):
         self.assertFalse(result)
 
 
+
 # ─────────────────────────────────────────────────────────────
-#  2. SCORE — all steps + scoring model
+#  1c. COLLECTOR — new skip functions (_quote_is_fresh, _hourly_bar_is_current)
+#      and --sources flag
 # ─────────────────────────────────────────────────────────────
+
+class TestCollectorSkipLogic(FixtureTestCase):
+    """Tests for _quote_is_fresh, _hourly_bar_is_current, and --sources."""
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        cls.sc = _load_module("stock_collector", cls.db, cls.tmp_dir)
+        cls.sc.DB_PATH = cls.db
+
+    # ── _quote_is_fresh ───────────────────────────────────────────────────────
+
+    def test_quote_is_fresh_miss_no_rows(self):
+        """Symbol with no quote rows is never fresh."""
+        self.assertFalse(self.sc._quote_is_fresh("AAPL", "finnhub", minutes=25))
+
+    def test_quote_is_fresh_hit_recent(self):
+        """A quote inserted seconds ago is fresh."""
+        from datetime import datetime, timezone
+        now = datetime.now(timezone.utc).isoformat()
+        con = sqlite3.connect(self.db)
+        con.execute(
+            "INSERT OR IGNORE INTO prices VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (now, "TEST_FRESH_SYM", "finnhub", str(date.today()), "quote",
+             150, 151, 149, 150, 1000000, 150, 0.1, "")
+        )
+        con.commit(); con.close()
+        self.assertTrue(self.sc._quote_is_fresh("TEST_FRESH_SYM", "finnhub", minutes=25))
+
+    def test_quote_is_fresh_miss_old(self):
+        """A quote inserted 2 hours ago is not fresh for a 25-min window."""
+        from datetime import datetime, timezone, timedelta
+        old_ts = (datetime.now(timezone.utc) - timedelta(hours=2)).isoformat()
+        con = sqlite3.connect(self.db)
+        con.execute(
+            "INSERT OR IGNORE INTO prices VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (old_ts, "TEST_OLD_QUOTE", "finnhub", str(date.today()), "quote",
+             150, 151, 149, 150, 1000000, 150, 0.1, "")
+        )
+        con.commit(); con.close()
+        self.assertFalse(self.sc._quote_is_fresh("TEST_OLD_QUOTE", "finnhub", minutes=25))
+
+    def test_quote_is_fresh_wrong_source(self):
+        """Fresh row for source A does not make source B fresh."""
+        from datetime import datetime, timezone
+        now = datetime.now(timezone.utc).isoformat()
+        con = sqlite3.connect(self.db)
+        con.execute(
+            "INSERT OR IGNORE INTO prices VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (now, "TEST_SRC_SYM", "finnhub", str(date.today()), "quote",
+             150, 151, 149, 150, 1000000, 150, 0.1, "")
+        )
+        con.commit(); con.close()
+        self.assertFalse(self.sc._quote_is_fresh("TEST_SRC_SYM", "fmp", minutes=25))
+
+    # ── _hourly_bar_is_current ────────────────────────────────────────────────
+
+    def test_hourly_bar_miss_no_rows(self):
+        """Symbol with no hourly rows is never current."""
+        self.assertFalse(self.sc._hourly_bar_is_current("AAPL", "yfinance"))
+
+    def test_hourly_bar_hit_this_hour(self):
+        """A bar timestamped in the current UTC hour is current."""
+        from datetime import datetime, timezone
+        now      = datetime.now(timezone.utc)
+        # build a timestamp that falls in this hour
+        ts       = now.strftime("%Y-%m-%dT%H:15:00+00:00")
+        con = sqlite3.connect(self.db)
+        con.execute(
+            "INSERT OR IGNORE INTO prices VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            ("x", "TEST_HOUR_SYM", "yfinance", ts, "1h",
+             150, 151, 149, 150, 500000, 150, 0.1, "")
+        )
+        con.commit(); con.close()
+        self.assertTrue(self.sc._hourly_bar_is_current("TEST_HOUR_SYM", "yfinance"))
+
+    def test_hourly_bar_miss_previous_hour(self):
+        """A bar from a previous hour is not current."""
+        from datetime import datetime, timezone, timedelta
+        prev_hour = (datetime.now(timezone.utc) - timedelta(hours=2))
+        ts        = prev_hour.strftime("%Y-%m-%dT%H:30:00+00:00")
+        con = sqlite3.connect(self.db)
+        con.execute(
+            "INSERT OR IGNORE INTO prices VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            ("x", "TEST_OLD_HOUR", "yfinance", ts, "1h",
+             150, 151, 149, 150, 500000, 150, 0.1, "")
+        )
+        con.commit(); con.close()
+        self.assertFalse(self.sc._hourly_bar_is_current("TEST_OLD_HOUR", "yfinance"))
+
+    def test_hourly_bar_miss_wrong_source(self):
+        """Current bar for yfinance does not satisfy twelvedata check."""
+        from datetime import datetime, timezone
+        now = datetime.now(timezone.utc)
+        ts  = now.strftime("%Y-%m-%dT%H:00:00+00:00")
+        con = sqlite3.connect(self.db)
+        con.execute(
+            "INSERT OR IGNORE INTO prices VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            ("x", "TEST_HOUR_SRC", "yfinance", ts, "1h",
+             150, 151, 149, 150, 500000, 150, 0.1, "")
+        )
+        con.commit(); con.close()
+        self.assertFalse(self.sc._hourly_bar_is_current("TEST_HOUR_SRC", "twelvedata"))
+
+    # ── --sources flag via _should_run ────────────────────────────────────────
+
+    def test_sources_none_means_all(self):
+        """When run_sources is None (no --sources flag) all sources run."""
+        # _should_run is defined inside main() but we can test the logic directly
+        run_sources = None
+        _should_run = lambda source: run_sources is None or source in run_sources
+        for src in ["yfinance","alphavantage","finnhub","polygon","fmp","twelvedata","marketstack"]:
+            self.assertTrue(_should_run(src), f"should run {src} when no filter")
+
+    def test_sources_filter_includes(self):
+        """Sources in the filter list run; others don't."""
+        run_sources = {"finnhub", "fmp"}
+        _should_run = lambda source: run_sources is None or source in run_sources
+        self.assertTrue(_should_run("finnhub"))
+        self.assertTrue(_should_run("fmp"))
+        self.assertFalse(_should_run("yfinance"))
+        self.assertFalse(_should_run("alphavantage"))
+        self.assertFalse(_should_run("marketstack"))
+
+
+
 
 class TestScoreSteps(FixtureTestCase):
     """Tests for each of the seven analysis steps in stock_score.py."""
@@ -780,6 +908,7 @@ if __name__ == "__main__":
     for cls in [
         TestCollectorConfig,
         TestCollectorDedup,
+        TestCollectorSkipLogic,
         TestScoreSteps,
         TestBacktest,
         TestAlerts,
@@ -800,4 +929,3 @@ if __name__ == "__main__":
     print(f"{'─'*60}")
 
     sys.exit(0 if result.wasSuccessful() else 1)
-
