@@ -314,10 +314,16 @@ def make_row(symbol, source, data_date, interval, o, h, l, c, v,
 def safe_get(url: str, params: dict = None, timeout: int = 10) -> dict | None:
     try:
         r = requests.get(url, params=params, timeout=timeout)
+        if r.status_code == 403:
+            # return a typed sentinel so callers can give a clearer message
+            return {"_error": 403}
         r.raise_for_status()
         return r.json()
+    except requests.exceptions.HTTPError as e:
+        log.warning(f"HTTP error: {e}  url={url}")
+        return None
     except Exception as e:
-        log.error(f"HTTP error: {e}  url={url}")
+        log.error(f"Request failed: {e}  url={url}")
         return None
 
 def sleep_for_rate(source: str):
@@ -348,9 +354,9 @@ def fetch_yfinance(symbols: list[str]) -> list[dict]:
 
     for sym in symbols:
         daily_done  = _live_has_today(sym, "yfinance", "1d")
-        hourly_done = _live_has_today(sym, "yfinance", "1h")
+        hourly_done = _hourly_bar_is_current(sym, "yfinance")
         if daily_done and hourly_done:
-            log.info(f"[yfinance] {sym}: already collected today, skipping")
+            log.info(f"[yfinance] {sym}: daily done + hourly current, skipping")
             continue
         try:
             ticker = yf.Ticker(sym)
@@ -463,13 +469,17 @@ def fetch_finnhub(symbols: list[str], state: dict) -> list[dict]:
     from_ts = int((datetime.now(timezone.utc) - timedelta(days=30)).timestamp())
 
     for sym in symbols:
-        if _live_has_today(sym, "finnhub", "quote"):
-            log.info(f"[finnhub] {sym}: already collected today, skipping")
+        if _quote_is_fresh(sym, "finnhub"):
+            log.info(f"[finnhub] {sym}: quote is fresh, skipping")
             continue
-        # real-time quote — always available on free tier
+        # real-time quote — free for US symbols; international needs paid plan
         q = safe_get("https://finnhub.io/api/v1/quote",
                      params={"symbol": sym, "token": key})
         sleep_for_rate("finnhub")
+        if isinstance(q, dict) and q.get("_error") == 403:
+            log.info(f"[finnhub] {sym}: not available on free tier "
+                     f"(international symbols need a paid plan) — skipping")
+            continue
         if q and q.get("c"):
             rows.append(make_row(
                 sym, "finnhub", datetime.now(timezone.utc).date(), "quote",
@@ -479,7 +489,7 @@ def fetch_finnhub(symbols: list[str], state: dict) -> list[dict]:
             ))
             log.info(f"[finnhub] {sym}: quote c={q.get('c')}")
         else:
-            log.warning(f"[finnhub] {sym}: empty or error response")
+            log.warning(f"[finnhub] {sym}: empty or unexpected response")
 
         # daily candles — paid tier only
         if FINNHUB_PAID:
@@ -550,9 +560,9 @@ def fetch_fmp(symbols: list[str], state: dict) -> list[dict]:
     rows = []
     # --- bulk quote (1 call for all symbols) ---
     # Only fetch quote for symbols not already collected today
-    quote_pending = [s for s in symbols if not _live_has_today(s, "fmp", "quote")]
+    quote_pending = [s for s in symbols if not _quote_is_fresh(s, "fmp")]
     if not quote_pending:
-        log.info("[fmp] all symbols already have today's quote, skipping bulk quote")
+        log.info("[fmp] all symbols have fresh quotes, skipping bulk quote")
         q_data = []
     else:
         sym_str = ",".join(quote_pending)
@@ -613,11 +623,11 @@ def fetch_twelvedata(symbols: list[str], state: dict) -> list[dict]:
     sym_str = ",".join(symbols)
     # filter to symbols not yet collected today for each interval
     symbols_1d = [s for s in symbols if not _live_has_today(s, "twelvedata", "1d")]
-    symbols_1h = [s for s in symbols if not _live_has_today(s, "twelvedata", "1h")]
+    symbols_1h = [s for s in symbols if not _hourly_bar_is_current(s, "twelvedata")]
     if not symbols_1d:
         log.info("[twelvedata] all symbols already collected today (1d), skipping")
     if not symbols_1h:
-        log.info("[twelvedata] all symbols already collected today (1h), skipping")
+        log.info("[twelvedata] all hourly bars current, skipping 1h fetch")
 
     def fetch_series(interval: str, outputsize: int = 30) -> None:
         syms = symbols_1d if interval == "1day" else symbols_1h
@@ -776,6 +786,57 @@ def _live_has_today(symbol: str, source: str, interval: str = "1d") -> bool:
                 "WHERE symbol=? AND source=? AND interval=? AND data_date LIKE ?",
                 (symbol, source, interval, today_str + "%")
             ).fetchone()[0]
+        con.close()
+        return n > 0
+    except Exception:
+        return False
+
+
+
+def _quote_is_fresh(symbol: str, source: str, minutes: int = 25) -> bool:
+    """
+    Return True if (symbol, source, interval='quote') has a row inserted
+    within the last `minutes` minutes.  Used by real-time quote fetchers
+    (Finnhub, FMP) so a 30-min cron gets a fresh snapshot every run instead
+    of being blocked by the first collection of the day.
+    """
+    if not DB_PATH.exists():
+        return False
+    try:
+        from datetime import datetime, timezone, timedelta
+        cutoff = (datetime.now(timezone.utc) - timedelta(minutes=minutes)).isoformat()
+        con = sqlite3.connect(DB_PATH)
+        n = con.execute(
+            "SELECT COUNT(*) FROM prices "
+            "WHERE symbol=? AND source=? AND interval='quote' "
+            "AND fetched_at >= ?",
+            (symbol, source, cutoff)
+        ).fetchone()[0]
+        con.close()
+        return n > 0
+    except Exception:
+        return False
+
+
+def _hourly_bar_is_current(symbol: str, source: str) -> bool:
+    """
+    Return True if (symbol, source, interval='1h') already has a bar whose
+    data_date falls within the current UTC hour.  Allows hourly-bar fetchers
+    to collect fresh bars on each cron run within the same day.
+    """
+    if not DB_PATH.exists():
+        return False
+    try:
+        from datetime import datetime, timezone
+        now        = datetime.now(timezone.utc)
+        hour_start = now.strftime("%Y-%m-%dT%H:")   # e.g. "2026-03-31T14:"
+        con = sqlite3.connect(DB_PATH)
+        n = con.execute(
+            "SELECT COUNT(*) FROM prices "
+            "WHERE symbol=? AND source=? AND interval='1h' "
+            "AND data_date LIKE ?",
+            (symbol, source, hour_start + "%")
+        ).fetchone()[0]
         con.close()
         return n > 0
     except Exception:
@@ -1270,6 +1331,19 @@ def main():
         help="Write to CSV instead of SQLite (legacy mode)",
     )
     parser.add_argument(
+        "--sources",
+        nargs="+",
+        metavar="SOURCE",
+        choices=["yfinance","alphavantage","finnhub","polygon","fmp","twelvedata","marketstack"],
+        help=(
+            "Run only these data sources (default: all configured).\n"
+            "Useful for cron jobs targeting specific collection frequencies:\n"
+            "  --sources finnhub fmp          (every 30 min — real-time quotes)\n"
+            "  --sources yfinance twelvedata  (every hour  — hourly bars)\n"
+            "  --sources alphavantage polygon marketstack  (once/day — daily bars)"
+        )
+    )
+    parser.add_argument(
         "--historical",
         metavar="RANGE",
         help=(
@@ -1301,10 +1375,16 @@ def main():
     symbols    = [args.symbol.upper()] if args.symbol else SYMBOLS
     use_csv    = args.csv
     plot_field = args.plot_data
+    # sources filter — None means run all
+    run_sources = set(args.sources) if args.sources else None
+    def _should_run(source: str) -> bool:
+        return run_sources is None or source in run_sources
 
     log.info("=" * 60)
     log.info("Stock collector starting")
     log.info(f"Symbols: {symbols}")
+    if args.sources:
+        log.info(f"Sources filter: {args.sources}")
 
     state = load_state()
     log.info(f"Daily call counts so far: {state['calls']}")
@@ -1332,26 +1412,33 @@ def main():
 
     all_rows: list[dict] = []
 
-    log.info("── yfinance ─────────────────────────────────────────")
-    all_rows += fetch_yfinance(symbols)
+    if _should_run("yfinance"):
+        log.info("── yfinance ─────────────────────────────────────────")
+        all_rows += fetch_yfinance(symbols)
 
-    log.info("── Alpha Vantage ────────────────────────────────────")
-    all_rows += fetch_alphavantage(symbols, state)
+    if _should_run("alphavantage"):
+        log.info("── Alpha Vantage ────────────────────────────────────")
+        all_rows += fetch_alphavantage(symbols, state)
 
-    log.info("── Finnhub ───────────────────────────────────────────────")
-    all_rows += fetch_finnhub(symbols, state)
+    if _should_run("finnhub"):
+        log.info("── Finnhub ───────────────────────────────────────────────")
+        all_rows += fetch_finnhub(symbols, state)
 
-    log.info("── Polygon.io ────────────────────────────────────────────")
-    all_rows += fetch_polygon(symbols, state)
+    if _should_run("polygon"):
+        log.info("── Polygon.io ────────────────────────────────────────────")
+        all_rows += fetch_polygon(symbols, state)
 
-    log.info("── Financial Modeling Prep (FMP) ────────────────")
-    all_rows += fetch_fmp(symbols, state)
+    if _should_run("fmp"):
+        log.info("── Financial Modeling Prep (FMP) ────────────────")
+        all_rows += fetch_fmp(symbols, state)
 
-    log.info("── Twelve Data ──────────────────────────────────────────")
-    all_rows += fetch_twelvedata(symbols, state)
+    if _should_run("twelvedata"):
+        log.info("── Twelve Data ──────────────────────────────────────────")
+        all_rows += fetch_twelvedata(symbols, state)
 
-    log.info("── Marketstack ──────────────────────────────────────────")
-    all_rows += fetch_marketstack(symbols, state)
+    if _should_run("marketstack"):
+        log.info("── Marketstack ──────────────────────────────────────────")
+        all_rows += fetch_marketstack(symbols, state)
 
     # ── persist ──────────────────────────────────────
 
@@ -1380,5 +1467,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-

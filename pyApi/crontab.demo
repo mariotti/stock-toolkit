@@ -44,25 +44,43 @@ PYTHON=/usr/bin/python3
 # ─────────────────────────────────────────────────────────────────────────────
 
 # ─────────────────────────────────────────────────────────────────────────────
-# COLLECT — live data
-# Every 30 minutes, Mon–Fri, 07:00–21:00 UTC
-# Covers both European and US sessions year-round (DST-safe)
+# COLLECTION — frequency matched to data type
+#
+# Three tiers based on how often each source's data actually changes:
+#
+#  Real-time quotes  (Finnhub, FMP)     → every 30 min during market hours
+#  Hourly bars       (yfinance, Twelve) → every hour during market hours
+#  Daily closes      (AV, Polygon, MS)  → once per day after close
 # ─────────────────────────────────────────────────────────────────────────────
 
-*/30 7-21 * * 1-5   cd $STOCK_DIR && $PYTHON stock_collector.py
+# ── Tier 1: Real-time quote sources — every 30 min ───────────────────────────
+# Finnhub /quote and FMP /quote give live snapshots.
+# _quote_is_fresh() ensures we only skip if the last collection was < 25 min ago,
+# so every cron run gets a genuinely fresh price.
 
-# ─────────────────────────────────────────────────────────────────────────────
-# END-OF-DAY SNAPSHOT
-# 22:00 UTC — well after all markets close
-# Captures definitive closing prices for the day
-# ─────────────────────────────────────────────────────────────────────────────
+*/30 7-21 * * 1-5   cd $STOCK_DIR && $PYTHON stock_collector.py \
+                        --sources finnhub fmp
 
-0 22 * * 1-5        cd $STOCK_DIR && $PYTHON stock_collector.py
+# ── Tier 2: Hourly bar sources — every hour ───────────────────────────────────
+# yfinance and Twelve Data return hourly OHLCV bars.
+# _hourly_bar_is_current() skips only if the current hour is already stored,
+# so each cron run adds the latest completed hour bar.
+
+0 7-21 * * 1-5      cd $STOCK_DIR && $PYTHON stock_collector.py \
+                        --sources yfinance twelvedata
+
+# ── Tier 3: Daily-close sources — once per day ────────────────────────────────
+# Alpha Vantage (25 calls/day), Polygon, and Marketstack (100 calls/month)
+# only publish end-of-day data. Running them more than once per day wastes
+# quota and returns the same data.
+# 22:00 UTC = well after NYSE close (21:00 UTC winter, 20:00 UTC summer).
+
+0 22 * * 1-5        cd $STOCK_DIR && $PYTHON stock_collector.py \
+                        --sources alphavantage polygon marketstack
 
 # ─────────────────────────────────────────────────────────────────────────────
 # ALERTS — during both sessions
-# Run after each collection so alerts reflect the latest data
-# Adjust symbols and conditions to match your watchlist
+# Run after each real-time collection so alerts reflect the latest prices.
 # ─────────────────────────────────────────────────────────────────────────────
 
 # European session (07:00–17:00 UTC)
@@ -128,8 +146,9 @@ PYTHON=/usr/bin/python3
 #
 # ─────────────────────────────────────────────────────────────────────────────
 # FILE: ~/Library/LaunchAgents/com.stock.collector.plist
-# Runs every 1800 seconds (30 minutes) regardless of market hours.
-# The collector's skip logic means it costs nothing outside market hours.
+# Tier 1: real-time quotes every 30 minutes (1800 seconds).
+# Duplicate this plist as com.stock.collector.hourly.plist (3600s) and
+# com.stock.collector.daily.plist (run at a fixed time) for tiers 2 and 3.
 # ─────────────────────────────────────────────────────────────────────────────
 #
 # <?xml version="1.0" encoding="UTF-8"?>
