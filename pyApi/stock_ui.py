@@ -361,6 +361,102 @@ def mc_chart(df: pd.DataFrame, n_paths: int = 500, horizon: int = 63) -> go.Figu
     return fig
 
 
+
+def price_compare_chart(dfs: dict[str, pd.DataFrame]) -> go.Figure:
+    """Normalised price comparison — all series start at 100."""
+    COLORS = ["#38bdf8","#4ade80","#fbbf24","#f87171","#a78bfa","#fb923c","#34d399","#e879f9"]
+    fig = go.Figure()
+    for i, (sym, df) in enumerate(dfs.items()):
+        s = df["close"].dropna()
+        if s.empty:
+            continue
+        norm = s / s.iloc[0] * 100
+        fig.add_trace(go.Scatter(
+            x=df["data_date"], y=norm,
+            mode="lines", name=sym,
+            line=dict(color=COLORS[i % len(COLORS)], width=1.8),
+            hovertemplate=f"{sym}<br>%{{x|%Y-%m-%d}}<br>%{{y:.1f}}<extra></extra>",
+        ))
+    fig.update_layout(**CHART_LAYOUT, title="Price — normalised to 100",
+                      yaxis_title="Indexed price (start = 100)")
+    return fig
+
+
+def drawdown_compare_chart(dfs: dict[str, pd.DataFrame]) -> go.Figure:
+    """Drawdown overlay for multiple symbols."""
+    COLORS = ["#38bdf8","#4ade80","#fbbf24","#f87171","#a78bfa","#fb923c","#34d399","#e879f9"]
+    fig = go.Figure()
+    for i, (sym, df) in enumerate(dfs.items()):
+        s   = df["close"].dropna().values
+        hwm = np.maximum.accumulate(s)
+        dd  = (s - hwm) / hwm * 100
+        fig.add_trace(go.Scatter(
+            x=df["data_date"], y=dd,
+            mode="lines", name=sym,
+            line=dict(color=COLORS[i % len(COLORS)], width=1.5),
+            hovertemplate=f"{sym}  %{{y:.1f}}%<extra></extra>",
+        ))
+    fig.update_layout(**CHART_LAYOUT, title="Drawdown comparison (%)",
+                      yaxis_tickformat=".1f")
+    return fig
+
+
+def correlation_heatmap(dfs: dict[str, pd.DataFrame]) -> go.Figure:
+    """Pearson correlation matrix of weekly returns."""
+    series = {}
+    for sym, df in dfs.items():
+        w = df.set_index("data_date")["close"].resample("W-FRI").last().dropna()
+        if len(w) > 5:
+            series[sym] = w.pct_change().dropna()
+
+    if len(series) < 2:
+        return go.Figure()
+
+    aligned = pd.DataFrame(series).dropna()
+    corr    = aligned.corr()
+    syms    = list(corr.columns)
+    z       = corr.values
+
+    fig = go.Figure(go.Heatmap(
+        z=z, x=syms, y=syms,
+        colorscale=[[0,"#f87171"],[0.5,"#1e2f40"],[1,"#4ade80"]],
+        zmin=-1, zmax=1,
+        text=[[f"{v:.2f}" for v in row] for row in z],
+        texttemplate="%{text}",
+        hovertemplate="%{y} / %{x}: %{z:.3f}<extra></extra>",
+        showscale=True,
+    ))
+    lo = {k: v for k, v in CHART_LAYOUT.items() if k not in ("xaxis","yaxis")}
+    fig.update_layout(**lo, title="Return correlation (weekly)")
+    return fig
+
+
+def summary_table(dfs: dict[str, pd.DataFrame]) -> pd.DataFrame:
+    """Summary stats table for multiple symbols."""
+    rows = []
+    for sym, df in dfs.items():
+        r = ss.step_summary(df, ann_factor=52)
+        g = ss.step_regression(df)
+        d = ss.step_drawdown(df)
+        e = ss.step_entry_timing(df)
+        if not r:
+            continue
+        rows.append({
+            "Symbol":     sym,
+            "Last":       fmt_val(r.get("last")),
+            "Total ret":  fmt_pct(r.get("total_ret")),
+            "Sharpe":     fmt_val(r.get("sharpe")),
+            "Vol":        f"{r['ann_vol']:.1f}%" if r.get("ann_vol") else "—",
+            "Max DD":     f"{d['max_dd']:.1f}%"  if d.get("max_dd") else "—",
+            "Calmar":     fmt_val(d.get("calmar")),
+            "R²":         fmt_val(g.get("r2"), 3),
+            "Trend/yr":   fmt_pct(g.get("ann_trend")),
+            "RSI":        f"{e['rsi14']:.0f}"    if e.get("rsi14") else "—",
+            "%B":         f"{e['pct_b']:.2f}"    if e.get("pct_b") is not None else "—",
+        })
+    return pd.DataFrame(rows)
+
+
 # ─────────────────────────────────────────────
 #  SIDEBAR
 # ─────────────────────────────────────────────
@@ -544,95 +640,144 @@ with tab_score:
 # ═════════════════════════════════════════════
 
 with tab_analysis:
-    col_left, col_right = st.columns([1, 3])
+    # ── tool selector + parameters (top bar) ──────────────────────────────────
+    MULTI_TOOLS  = {"Summary", "Price (compare)", "Drawdown (compare)", "Correlation"}
+    SINGLE_TOOLS = {"RSI", "Bollinger Bands", "Monte Carlo"}
+    ALL_TOOLS    = ["Summary", "Price (compare)", "Drawdown (compare)",
+                    "Correlation", "RSI", "Bollinger Bands", "Monte Carlo"]
 
-    with col_left:
-        analysis_sym = st.selectbox("Symbol", selected_symbols, key="an_sym")
+    tp1, tp2, tp3 = st.columns([3, 3, 3])
+    with tp1:
         analysis_tool = st.radio(
-            "Tool",
-            ["Price", "RSI", "Bollinger Bands", "Drawdown", "Monte Carlo", "Summary"],
-            key="an_tool"
+            "Tool", ALL_TOOLS, horizontal=False,
+            key="an_tool",
+            help="Multi-symbol: Summary, Price, Drawdown, Correlation use all sidebar symbols. "
+                 "Single-symbol: RSI, BBands, Monte Carlo show one symbol at a time."
         )
+
+    with tp2:
+        # Parameters vary by tool
+        rsi_w = bb_w = mc_horizon = mc_n = None
         if analysis_tool == "RSI":
             rsi_w = st.slider("RSI window", 7, 30, 14, key="an_rsi_w")
-        if analysis_tool == "Bollinger Bands":
+        elif analysis_tool == "Bollinger Bands":
             bb_w = st.slider("BB window", 10, 50, 20, key="an_bb_w")
-        if analysis_tool == "Monte Carlo":
-            mc_horizon = st.select_slider("Horizon (bars)",
-                                           [5, 21, 63, 126, 252], value=63,
-                                           key="an_mc_h")
-            mc_n = st.select_slider("Paths",
-                                     [200, 500, 1000, 2000], value=500,
-                                     key="an_mc_n")
+        elif analysis_tool == "Monte Carlo":
+            mc_horizon = st.select_slider(
+                "Horizon (bars)", [5, 21, 63, 126, 252], value=63, key="an_mc_h")
+            mc_n = st.select_slider(
+                "Paths", [200, 500, 1000, 2000], value=500, key="an_mc_n")
 
-    with col_right:
-        df = get_prices(analysis_sym, date_from_str, date_to_str)
-        if df.empty:
-            st.warning(f"No data for {analysis_sym} in this date range.")
+    with tp3:
+        # Single-symbol tools need a symbol selector here, clearly labelled
+        if analysis_tool in SINGLE_TOOLS:
+            analysis_sym = st.selectbox(
+                "Viewing symbol",
+                selected_symbols, key="an_sym",
+                help="Chart is shown for this symbol. "
+                     "Use the sidebar to manage your overall watchlist."
+            )
         else:
-            if analysis_tool == "Price":
-                st.plotly_chart(price_chart(df, analysis_sym),
-                                width='stretch')
-                # quick stats
-                rets = df["close"].pct_change().dropna()
-                af   = 52
-                m1, m2, m3, m4 = st.columns(4)
-                m1.metric("Last price",   f"{df['close'].iloc[-1]:.2f}")
-                m2.metric("Total return", f"{(df['close'].iloc[-1]/df['close'].iloc[0]-1)*100:+.1f}%")
-                m3.metric("Ann. vol",     f"{rets.std()*np.sqrt(252)*100:.1f}%")
-                m4.metric("Sharpe",       f"{rets.mean()/rets.std()*np.sqrt(252):.2f}")
+            st.markdown(
+                "<span style='color:#4a6075;font-size:0.82rem'>"
+                f"Using all {len(selected_symbols)} sidebar symbol(s)"
+                "</span>",
+                unsafe_allow_html=True
+            )
+            analysis_sym = selected_symbols[0] if selected_symbols else None
 
-            elif analysis_tool == "RSI":
-                st.plotly_chart(rsi_chart(df, rsi_w),
-                                width='stretch')
-                rsi_val = ss._rsi(df["close"].dropna(), rsi_w)
-                if not np.isnan(rsi_val):
-                    signal = ("🔴 Overbought" if rsi_val > 70 else
-                              "🟢 Oversold"   if rsi_val < 30 else
-                              "⚪ Neutral")
-                    st.markdown(f"**Current RSI({rsi_w}) = {rsi_val:.1f}  →  {signal}**")
+    st.markdown("---")
 
-            elif analysis_tool == "Bollinger Bands":
-                st.plotly_chart(bbands_chart(df, bb_w),
-                                width='stretch')
-                pb = ss._pct_b(df["close"].dropna(), bb_w)
-                sq = ss._bbands_squeeze(df["close"].dropna(), bb_w)
-                if not np.isnan(pb):
-                    st.markdown(
-                        f"**%B = {pb:.2f}**  "
-                        + ("  ⚡ Squeeze active — potential breakout" if sq else "")
-                    )
+    # ── load data ─────────────────────────────────────────────────────────────
+    if analysis_tool in MULTI_TOOLS:
+        dfs = {sym: get_prices(sym, date_from_str, date_to_str)
+               for sym in selected_symbols}
+        dfs = {sym: df for sym, df in dfs.items() if not df.empty}
+    else:
+        single_df = get_prices(analysis_sym, date_from_str, date_to_str)                     if analysis_sym else pd.DataFrame()
 
-            elif analysis_tool == "Drawdown":
-                st.plotly_chart(drawdown_chart(df), width='stretch')
-                res = ss.step_drawdown(df)
-                if res:
-                    m1, m2, m3, m4 = st.columns(4)
-                    m1.metric("Max DD",  f"{res['max_dd']:.1f}%")
-                    m2.metric("Calmar",  f"{res['calmar']:.2f}")
-                    m3.metric("Recovered", "Yes ✅" if res["recovered"] else "No ❌")
-                    m4.metric("Ann. return", f"{res['ann_ret']:.1f}%")
+    # ── render ────────────────────────────────────────────────────────────────
+    if analysis_tool == "Summary":
+        if not dfs:
+            st.warning("No data found for selected symbols.")
+        else:
+            tbl = summary_table(dfs)
+            st.dataframe(tbl, width='stretch', hide_index=True)
+            st.plotly_chart(price_compare_chart(dfs), width='stretch')
 
-            elif analysis_tool == "Monte Carlo":
-                st.plotly_chart(mc_chart(df, mc_n, mc_horizon),
-                                width='stretch')
+    elif analysis_tool == "Price (compare)":
+        if not dfs:
+            st.warning("No data found for selected symbols.")
+        else:
+            st.plotly_chart(price_compare_chart(dfs), width='stretch')
+            # per-symbol return metrics below the chart
+            cols = st.columns(min(len(dfs), 4))
+            for i, (sym, df) in enumerate(dfs.items()):
+                ret = (df["close"].iloc[-1] / df["close"].iloc[0] - 1) * 100
+                cols[i % 4].metric(sym, f"{df['close'].iloc[-1]:.2f}",
+                                   delta=f"{ret:+.1f}%")
 
-            elif analysis_tool == "Summary":
-                res = ss.step_summary(df, ann_factor=52)
-                reg = ss.step_regression(df)
-                if res and reg:
-                    m1, m2, m3, m4 = st.columns(4)
-                    m1.metric("Total return", fmt_pct(res.get("total_ret")))
-                    m2.metric("Sharpe",       fmt_val(res.get("sharpe")))
-                    m3.metric("Ann. vol",     f"{res.get('ann_vol','—'):.1f}%")
-                    m4.metric("R²",           fmt_val(reg.get("r2"), 3))
-                    m1, m2, m3, m4 = st.columns(4)
-                    m1.metric("Ann. trend",   fmt_pct(reg.get("ann_trend")))
-                    m2.metric("First price",  fmt_val(res.get("first")))
-                    m3.metric("Last price",   fmt_val(res.get("last")))
-                    m4.metric("Bars",         str(res.get("n_bars", "—")))
-                    st.plotly_chart(price_chart(df, analysis_sym),
-                                    width='stretch')
+    elif analysis_tool == "Drawdown (compare)":
+        if not dfs:
+            st.warning("No data found for selected symbols.")
+        else:
+            st.plotly_chart(drawdown_compare_chart(dfs), width='stretch')
+            # drawdown stats table
+            rows = []
+            for sym, df in dfs.items():
+                d = ss.step_drawdown(df)
+                if d:
+                    rows.append({
+                        "Symbol":    sym,
+                        "Max DD":    f"{d['max_dd']:.1f}%",
+                        "Calmar":    fmt_val(d.get("calmar")),
+                        "Recovered": "✅" if d["recovered"] else "❌",
+                        "Ann. ret":  f"{d['ann_ret']:.1f}%",
+                    })
+            if rows:
+                st.dataframe(pd.DataFrame(rows), width='stretch', hide_index=True)
+
+    elif analysis_tool == "Correlation":
+        if len(dfs) < 2:
+            st.info("Select at least 2 symbols in the sidebar to show correlation.")
+        else:
+            st.plotly_chart(correlation_heatmap(dfs), width='stretch')
+            st.caption(
+                "Pearson correlation of weekly returns.  "
+                "Values near 0 = genuine diversification.  "
+                "Values near 1 = same bet."
+            )
+
+    elif analysis_tool == "RSI":
+        if single_df.empty:
+            st.warning(f"No data for {analysis_sym}.")
+        else:
+            st.plotly_chart(rsi_chart(single_df, rsi_w), width='stretch')
+            rsi_val = ss._rsi(single_df["close"].dropna(), rsi_w)
+            if not np.isnan(rsi_val):
+                signal = ("🔴 Overbought" if rsi_val > 70 else
+                          "🟢 Oversold"   if rsi_val < 30 else
+                          "⚪ Neutral")
+                st.markdown(f"**RSI({rsi_w}) = {rsi_val:.1f}  →  {signal}**")
+
+    elif analysis_tool == "Bollinger Bands":
+        if single_df.empty:
+            st.warning(f"No data for {analysis_sym}.")
+        else:
+            st.plotly_chart(bbands_chart(single_df, bb_w), width='stretch')
+            pb = ss._pct_b(single_df["close"].dropna(), bb_w)
+            sq = ss._bbands_squeeze(single_df["close"].dropna(), bb_w)
+            if not np.isnan(pb):
+                st.markdown(
+                    f"**%B = {pb:.2f}**  "
+                    + ("  ⚡ Squeeze active — potential breakout" if sq else "")
+                )
+
+    elif analysis_tool == "Monte Carlo":
+        if single_df.empty:
+            st.warning(f"No data for {analysis_sym}.")
+        else:
+            st.plotly_chart(mc_chart(single_df, mc_n, mc_horizon), width='stretch')
 
 
 # ═════════════════════════════════════════════
@@ -885,4 +1030,5 @@ with tab_alerts:
 
             if dry_run:
                 st.caption("ℹ️  Dry run — no state saved, no notifications sent.")
+
 

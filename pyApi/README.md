@@ -1,6 +1,6 @@
 # Stock Data Toolkit
 
-A collection of six Python scripts for collecting, analysing, backtesting, and monitoring stock market data from multiple free (and optionally paid) APIs.
+A collection of seven Python scripts for collecting, analysing, backtesting, and monitoring stock market data from multiple free (and optionally paid) APIs — with a browser-based Streamlit dashboard that brings it all together.
 
 ```
 stock_collector.py    — fetch and store data (live + historical)
@@ -9,6 +9,7 @@ stock_inventory.py    — inspect what data is on disk
 stock_score.py        — rank symbols by investment score across five horizons
 stock_backtest.py     — backtest strategies against historical data
 stock_alerts.py       — watch for conditions and send notifications
+stock_ui.py           — Streamlit dashboard (Score · Analysis · Backtest · Alerts)
 ```
 
 ---
@@ -34,6 +35,7 @@ stock_alerts.py       — watch for conditions and send notifications
 - [stock\_score.py](#stock_scorepy)
 - [stock\_backtest.py](#stock_backtestpy)
 - [stock\_alerts.py](#stock_alertspy)
+- [stock\_ui.py](#stock_uipy)
   - [Analysis tools](#analysis-tools)
   - [Exporting data](#exporting-data)
 - [stock\_inventory.py](#stock_inventorypy)
@@ -86,6 +88,7 @@ stock_inventory.py
 stock_score.py
 stock_backtest.py
 stock_alerts.py
+stock_ui.py                 ← Streamlit dashboard
 config.env                  ← API keys and symbols (keep out of git)
 README.md
 ANALYSIS.md
@@ -787,6 +790,34 @@ and state management.
 
 ---
 
+## stock\_ui.py
+
+A Streamlit browser dashboard that wraps all six scripts into a single UI.
+No duplication — it imports directly from the other scripts, so any update
+to the analysis or scoring logic is immediately reflected in the UI.
+
+**Install and run:**
+
+```bash
+pip install streamlit plotly
+streamlit run stock_ui.py
+# opens at http://localhost:8501
+```
+
+**Four tabs:**
+
+| Tab | What it does |
+|---|---|
+| 🏆 Score | Ranks symbols by investment score for any horizon (week/month/quarter/year/life). Bar chart, metrics table, per-symbol breakdown, suggested pair. |
+| 📊 Analysis | Interactive charts: price, RSI, Bollinger Bands, drawdown, Monte Carlo, summary stats. Symbol and tool selectable from the sidebar. |
+| 🔁 Backtest | All four strategies with parameter sliders. Equity curve vs buy-and-hold, performance metrics, trade log. |
+| 🔔 Alerts | Evaluate conditions against live data. Results table with TRUE/false badges, full indicator snapshot per symbol. |
+
+The sidebar controls which symbols and date range are active across all tabs.
+Data is cached for 5 minutes — run `stock_collector.py` to refresh.
+
+---
+
 ### Rank symbols before investing
 
 ```bash
@@ -989,6 +1020,7 @@ stock_inventory.py   ✓
 stock_score.py       ✓
 stock_backtest.py    ✓
 stock_alerts.py      ✓
+stock_ui.py          ✓
 README.md            ✓
 ANALYSIS.md          ✓
 README_SCORE.md      ✓
@@ -1048,5 +1080,4 @@ hourly data exists before using `--interval 1h`.
 yfinance is an unofficial web scraper and can be rate-limited or blocked. It
 is suitable for personal use and prototyping but not for production. For
 reliable data, use FMP, Alpha Vantage, or Twelve Data with proper API keys.
-
 
