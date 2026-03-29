@@ -12,7 +12,11 @@ Usage:
     python3 stock_score.py
     python3 stock_score.py -s AAPL MSFT GOOGL
     python3 stock_score.py --from 2023-01-01
-    python3 stock_score.py --mc-paths 1000 --mc-horizon 63
+    python3 stock_score.py --horizon week
+    python3 stock_score.py --horizon month
+    python3 stock_score.py --horizon quarter   (default)
+    python3 stock_score.py --horizon year
+    python3 stock_score.py --horizon life
     python3 stock_score.py --top 3
     python3 stock_score.py --json
 
@@ -47,19 +51,59 @@ SOURCE_PRIORITY = [
 ]
 
 # ─────────────────────────────────────────────
-#  SCORING WEIGHTS
+#  HORIZON PROFILES
 # ─────────────────────────────────────────────
 
-WEIGHTS = {
-    "sharpe":       20,   # risk-adjusted return
-    "calmar":       20,   # return per unit drawdown
-    "r2":           10,   # trend consistency
-    "ann_trend":    10,   # annualised trend rate
-    "rsi_entry":    15,   # RSI entry timing
-    "pct_b_entry":  15,   # Bollinger Band entry timing
-    "prob_gain":    10,   # Monte Carlo prob > S0
+HORIZON_PROFILES = {
+    "week": {
+        "label":      "Next week (~5 trading days)",
+        "gran":       "D",
+        "mc_bars":    5,
+        "min_bars":   30,
+        "ann_factor": 252,
+        "weights": {"sharpe":5,"calmar":5,"r2":5,"ann_trend":5,
+                    "rsi_entry":35,"pct_b_entry":35,"prob_gain":10},
+    },
+    "month": {
+        "label":      "Next month (~21 trading days)",
+        "gran":       "D",
+        "mc_bars":    21,
+        "min_bars":   60,
+        "ann_factor": 252,
+        "weights": {"sharpe":10,"calmar":10,"r2":5,"ann_trend":10,
+                    "rsi_entry":25,"pct_b_entry":25,"prob_gain":15},
+    },
+    "quarter": {
+        "label":      "Next quarter (~63 trading days)",
+        "gran":       "W-FRI",
+        "mc_bars":    63,
+        "min_bars":   60,
+        "ann_factor": 52,
+        "weights": {"sharpe":20,"calmar":20,"r2":10,"ann_trend":10,
+                    "rsi_entry":15,"pct_b_entry":15,"prob_gain":10},
+    },
+    "year": {
+        "label":      "Next year (~252 trading days)",
+        "gran":       "W-FRI",
+        "mc_bars":    252,
+        "min_bars":   100,
+        "ann_factor": 52,
+        "weights": {"sharpe":25,"calmar":25,"r2":20,"ann_trend":15,
+                    "rsi_entry":5,"pct_b_entry":5,"prob_gain":5},
+    },
+    "life": {
+        "label":      "Long-term / buy and hold (5+ years)",
+        "gran":       "ME",
+        "mc_bars":    60,
+        "min_bars":   120,
+        "ann_factor": 12,
+        "weights": {"sharpe":30,"calmar":25,"r2":25,"ann_trend":15,
+                    "rsi_entry":3,"pct_b_entry":2,"prob_gain":0},
+    },
 }
-MAX_SCORE = sum(WEIGHTS.values())   # 100
+
+WEIGHTS   = HORIZON_PROFILES["quarter"]["weights"]   # default
+MAX_SCORE = sum(WEIGHTS.values())   # always 100
 
 PENALTY = {
     "unrecovered_dd":  -20,   # drawdown not yet recovered
@@ -180,11 +224,11 @@ def _bbands_squeeze(s: pd.Series, w: int = 20) -> bool:
 #  SEVEN STEPS — all computed per symbol
 # ─────────────────────────────────────────────
 
-def step_summary(df: pd.DataFrame) -> dict:
+def step_summary(df: pd.DataFrame, ann_factor: int = 52) -> dict:
     """Step 2 — descriptive statistics."""
     s      = df["close"].dropna()
     rets   = s.pct_change().dropna()
-    af     = 52   # weekly granularity used for scoring period
+    af     = ann_factor
     n_bars = len(s)
     if n_bars < 2 or rets.std() == 0:
         return {}
@@ -323,11 +367,14 @@ def step_montecarlo(df: pd.DataFrame, n_paths: int,
 #  SCORING ENGINE
 # ─────────────────────────────────────────────
 
-def score_symbol(sym: dict) -> tuple[float, list[str]]:
+def score_symbol(sym: dict, weights: dict | None = None,
+                 min_bars: int = 60) -> tuple[float, list[str]]:
     """
     Convert raw metrics into a 0–100 score.
+    weights overrides global WEIGHTS (set by --horizon).
     Returns (score, [explanation strings]).
     """
+    w       = weights or WEIGHTS
     s       = sym.get("summary",      {})
     reg     = sym.get("regression",   {})
     dd      = sym.get("drawdown",     {})
@@ -340,7 +387,7 @@ def score_symbol(sym: dict) -> tuple[float, list[str]]:
     # ── 1. Sharpe (0–20) ──────────────────────────────────────────────────────
     sharpe = s.get("sharpe")
     if sharpe is not None:
-        pts = min(float(sharpe) / 2.0, 1.0) * WEIGHTS["sharpe"]
+        pts = min(float(sharpe) / 2.0, 1.0) * w["sharpe"]
         pts = max(pts, 0)
         total += pts
         notes.append(f"sharpe={sharpe:.2f} → {pts:.1f}/{WEIGHTS['sharpe']}")
@@ -348,7 +395,7 @@ def score_symbol(sym: dict) -> tuple[float, list[str]]:
     # ── 2. Calmar (0–20) ─────────────────────────────────────────────────────
     calmar = dd.get("calmar")
     if calmar is not None:
-        pts = min(float(calmar) / 20.0, 1.0) * WEIGHTS["calmar"]
+        pts = min(float(calmar) / 20.0, 1.0) * w["calmar"]
         pts = max(pts, 0)
         total += pts
         notes.append(f"calmar={calmar:.2f} → {pts:.1f}/{WEIGHTS['calmar']}")
@@ -356,14 +403,14 @@ def score_symbol(sym: dict) -> tuple[float, list[str]]:
     # ── 3. R² (0–10) ─────────────────────────────────────────────────────────
     r2 = reg.get("r2")
     if r2 is not None:
-        pts = float(r2) * WEIGHTS["r2"]
+        pts = float(r2) * w["r2"]
         total += pts
         notes.append(f"R²={r2:.3f} → {pts:.1f}/{WEIGHTS['r2']}")
 
     # ── 4. Annualised trend (0–10) ────────────────────────────────────────────
     ann_trend = reg.get("ann_trend")
     if ann_trend is not None:
-        pts = min(max(float(ann_trend), 0) / 50.0, 1.0) * WEIGHTS["ann_trend"]
+        pts = min(max(float(ann_trend), 0) / 50.0, 1.0) * w["ann_trend"]
         total += pts
         notes.append(f"trend={ann_trend:.1f}%/yr → {pts:.1f}/{WEIGHTS['ann_trend']}")
 
@@ -388,7 +435,7 @@ def score_symbol(sym: dict) -> tuple[float, list[str]]:
         else:
             # Overbought — poor entry
             rsi_score = 0.0
-        pts = rsi_score * WEIGHTS["rsi_entry"]
+        pts = rsi_score * w["rsi_entry"]
         total += pts
         notes.append(f"RSI={rsi:.1f} → {pts:.1f}/{WEIGHTS['rsi_entry']}")
 
@@ -410,23 +457,23 @@ def score_symbol(sym: dict) -> tuple[float, list[str]]:
             pb_score = 0.2
         else:
             pb_score = 0.0
-        pts = pb_score * WEIGHTS["pct_b_entry"]
+        pts = pb_score * w["pct_b_entry"]
         total += pts
         notes.append(f"%B={pb:.2f} → {pts:.1f}/{WEIGHTS['pct_b_entry']}")
 
     # ── 7. Monte Carlo prob > S0 (0–10) ──────────────────────────────────────
     prob = mc.get("prob_gain")
     if prob is not None:
-        pts = (float(prob) / 100.0) * WEIGHTS["prob_gain"]
+        pts = (float(prob) / 100.0) * w["prob_gain"]
         total += pts
         notes.append(f"prob_gain={prob:.1f}% → {pts:.1f}/{WEIGHTS['prob_gain']}")
 
     # ── PENALTIES ─────────────────────────────────────────────────────────────
 
     n_bars = s.get("n_bars", 999)
-    if n_bars < 60:
+    if n_bars < min_bars:
         total += PENALTY["thin_data"]
-        notes.append(f"PENALTY: thin data ({n_bars} bars) → {PENALTY['thin_data']}")
+        notes.append(f"PENALTY: thin data ({n_bars} bars, need {min_bars}) → {PENALTY['thin_data']}")
 
     ann_vol = s.get("ann_vol")
     if ann_vol is not None and ann_vol > 50:
@@ -478,13 +525,26 @@ def main():
         epilog="""
 examples:
   python3 stock_score.py
-  python3 stock_score.py -s AAPL MSFT GOOGL CSMIB.MI TSLA
-  python3 stock_score.py --from 2023-01-01
-  python3 stock_score.py --top 3
-  python3 stock_score.py --detail
-  python3 stock_score.py --json
+  python3 stock_score.py --horizon week
+  python3 stock_score.py --horizon month
+  python3 stock_score.py --horizon year
+  python3 stock_score.py --horizon life
+  python3 stock_score.py -s AAPL MSFT GOOGL CSMIB.MI TSLA --horizon quarter
+  python3 stock_score.py --from 2023-01-01 --top 3 --detail
+  python3 stock_score.py --horizon life --json
         """
     )
+    parser.add_argument("--horizon", default="quarter",
+                        choices=list(HORIZON_PROFILES),
+                        help=(
+                            "Investment horizon — reshapes weights, granularity, and MC horizon:\n"
+                            "  week     next 5 trading days   (entry timing 70%%)\n"
+                            "  month    next 21 trading days  (entry timing 50%%)\n"
+                            "  quarter  next 63 days          (balanced, default)\n"
+                            "  year     next 252 trading days (trend quality 60%%)\n"
+                            "  life     5+ years buy-and-hold (trend + risk 95%%)"
+                        ))
+
     parser.add_argument("-s", "--symbols", nargs="+", metavar="TICKER",
                         help="Symbols to score (default: all available)")
     parser.add_argument("--from", dest="date_from", metavar="YYYY-MM-DD",
@@ -493,24 +553,35 @@ examples:
                         help="End of date range for analysis")
     parser.add_argument("--top",  type=int, default=None, metavar="N",
                         help="Show only the top N symbols")
-    parser.add_argument("--mc-paths",   type=int, default=500,
-                        help="Monte Carlo paths (default: 500 for speed)")
-    parser.add_argument("--mc-horizon", type=int, default=63,
-                        help="Monte Carlo horizon in bars (default: 63 ≈ 1 quarter)")
+    parser.add_argument("--mc-paths", type=int, default=500,
+                        help="Monte Carlo paths (default: 500). "
+                             "MC horizon is set automatically by --horizon.")
     parser.add_argument("--detail", action="store_true",
                         help="Show per-metric breakdown for each symbol")
     parser.add_argument("--json", action="store_true",
                         help="Output full results as JSON")
     args = parser.parse_args()
 
+    profile  = HORIZON_PROFILES[args.horizon]
+    h_w      = profile["weights"]
+    h_gran   = profile["gran"]
+    h_mc     = profile["mc_bars"]
+    h_minb   = profile["min_bars"]
+    h_af     = profile["ann_factor"]
+
     symbols = args.symbols if args.symbols else list_all_symbols()
     if not symbols:
         print("[error] No symbols found. Run stock_collector.py first.")
         sys.exit(1)
 
-    print(f"Scoring {len(symbols)} symbol(s)  "
-          f"[range: {args.date_from or 'all'} → {args.date_to or 'now'}, "
-          f"MC: {args.mc_paths} paths × {args.mc_horizon} bars]")
+    print(f"Horizon:  {args.horizon.upper()}  —  {profile['label']}")
+    print(f"Weights:  entry {h_w['rsi_entry']+h_w['pct_b_entry']}pts  "
+          f"trend {h_w['r2']+h_w['ann_trend']}pts  "
+          f"risk-adj {h_w['sharpe']+h_w['calmar']}pts  "
+          f"MC {h_w['prob_gain']}pts")
+    print(f"Scoring:  {len(symbols)} symbol(s)  "
+          f"[{args.date_from or 'all'} → {args.date_to or 'now'}, "
+          f"MC {args.mc_paths}p × {h_mc}b, gran={h_gran}]")
     print()
 
     results = []
@@ -523,28 +594,33 @@ examples:
         if df.empty or len(df) < 10:
             continue
 
-        # resample to weekly (mirrors stock_analysis.py auto-gran for 3-year ranges)
-        df_w = df.set_index("data_date").resample("W-FRI").agg({
-            "open":   "first",
-            "high":   "max",
-            "low":    "min",
-            "close":  "last",
-            "volume": "sum",
-        }).dropna(subset=["close"]).reset_index()
+        # resample to horizon granularity
+        try:
+            df_r = df.set_index("data_date").resample(h_gran).agg({
+                "open":"first","high":"max","low":"min",
+                "close":"last","volume":"sum",
+            }).dropna(subset=["close"]).reset_index()
+        except Exception:
+            fb = {"ME":"M","QE":"Q","YE":"Y"}.get(h_gran, h_gran)
+            df_r = df.set_index("data_date").resample(fb).agg({
+                "open":"first","high":"max","low":"min",
+                "close":"last","volume":"sum",
+            }).dropna(subset=["close"]).reset_index()
 
-        if len(df_w) < 10:
+        if len(df_r) < 10:
             continue
 
         raw = {
             "symbol":     sym,
-            "summary":    step_summary(df_w),
-            "regression": step_regression(df_w),
-            "drawdown":   step_drawdown(df_w),
-            "entry":      step_entry_timing(df_w),
-            "montecarlo": step_montecarlo(df_w, args.mc_paths, args.mc_horizon),
+            "horizon":    args.horizon,
+            "summary":    step_summary(df_r, ann_factor=h_af),
+            "regression": step_regression(df_r),
+            "drawdown":   step_drawdown(df_r),
+            "entry":      step_entry_timing(df_r),
+            "montecarlo": step_montecarlo(df_r, args.mc_paths, h_mc),
         }
 
-        score, notes = score_symbol(raw)
+        score, notes = score_symbol(raw, weights=h_w, min_bars=h_minb)
         raw["score"]   = score
         raw["notes"]   = notes
         results.append(raw)
