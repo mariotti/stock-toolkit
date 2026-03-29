@@ -1,11 +1,14 @@
 # Stock Data Toolkit
 
-A collection of three Python scripts for collecting, inspecting, and analysing stock market data from multiple free (and optionally paid) APIs.
+A collection of six Python scripts for collecting, analysing, backtesting, and monitoring stock market data from multiple free (and optionally paid) APIs.
 
 ```
 stock_collector.py    — fetch and store data (live + historical)
-stock_analysis.py     — load, resample, and run analytical tools
+stock_analysis.py     — load, resample, and run 11 analytical tools
 stock_inventory.py    — inspect what data is on disk
+stock_score.py        — rank symbols by investment score across five horizons
+stock_backtest.py     — backtest strategies against historical data
+stock_alerts.py       — watch for conditions and send notifications
 ```
 
 ---
@@ -28,6 +31,9 @@ stock_inventory.py    — inspect what data is on disk
   - [Loading data](#loading-data)
   - [Date ranges](#date-ranges)
   - [Interval and granularity](#interval-and-granularity)
+- [stock\_score.py](#stock_scorepy)
+- [stock\_backtest.py](#stock_backtestpy)
+- [stock\_alerts.py](#stock_alertspy)
   - [Analysis tools](#analysis-tools)
   - [Exporting data](#exporting-data)
 - [stock\_inventory.py](#stock_inventorypy)
@@ -77,13 +83,22 @@ After a typical run the directory looks like this:
 stock_collector.py
 stock_analysis.py
 stock_inventory.py
+stock_score.py
+stock_backtest.py
+stock_alerts.py
+config.env                  ← API keys and symbols (keep out of git)
 README.md
+ANALYSIS.md
+README_SCORE.md
+README_BACKTEST.md
+README_ALERTS.md
 requirements.txt
 
 stock_data.db               ← live collection (SQLite)
 stock_data.csv              ← legacy output (--csv flag only)
 collector.log               ← timestamped run log
 .collector_state.json       ← internal: daily API call counters
+.alerts_state.json          ← internal: alert edge-detection state
 
 data/                       ← historical DBs (--historical flag)
     stock_data_2024.db
@@ -691,7 +706,117 @@ MSFT    1d        2024-01-02  2024-04-30  3mo        240  fmp, yfinance       st
 
 ---
 
-## Common workflows
+## stock\_score.py
+
+Runs all seven analysis steps and ranks symbols by a 0–100 investment score.
+The `--horizon` flag reshapes the scoring weights to match your intended
+holding period — entry timing dominates for short horizons, trend quality
+and risk dominate for long ones.
+
+```bash
+# Rank all symbols for a quarterly hold (default)
+python3 stock_score.py --from 2023-01-01
+
+# What looks good to buy this week?
+python3 stock_score.py -s AAPL MSFT GOOGL CSMIB.MI TSLA ENEL.MI \
+    --from 2023-01-01 --horizon week
+
+# Best long-term compounder?
+python3 stock_score.py --from 2023-01-01 --horizon life --top 3
+
+# Per-metric breakdown
+python3 stock_score.py --from 2023-01-01 --horizon quarter --detail
+```
+
+Available horizons: `week` `month` `quarter` `year` `life`
+
+See **README\_SCORE.md** for the full scoring model, weight profiles, and
+output guide.
+
+---
+
+## stock\_backtest.py
+
+Replays a trading strategy against historical price data and compares it
+to a buy-and-hold benchmark. Signals are generated at bar close with no
+lookahead. Commission and slippage are configurable.
+
+```bash
+# RSI reversal strategy
+python3 stock_backtest.py -s AAPL --strategy rsi --window 14 --plot
+
+# Moving average crossover
+python3 stock_backtest.py -s AAPL --strategy sma_cross --fast 20 --slow 50 --plot
+
+# Walk-forward validation (train 2018–2022, test 2023+)
+python3 stock_backtest.py -s AAPL --strategy sma_cross \
+    --from 2018-01-01 --test-from 2023-01-01 --plot
+```
+
+Available strategies: `rsi` `sma_cross` `bbands` `breakout`
+
+See **README\_BACKTEST.md** for all strategies, flags, output metrics,
+and limitations.
+
+---
+
+## stock\_alerts.py
+
+Evaluates conditions against the latest collected data and fires
+notifications when a condition transitions from false to true (edge
+detection — no repeated alerts for the same ongoing condition).
+
+```bash
+# Watch for RSI oversold
+python3 stock_alerts.py -s AAPL MSFT --when "rsi14 < 30"
+
+# Multiple conditions, push notification
+python3 stock_alerts.py -s AAPL GOOGL CSMIB.MI \
+    --when "rsi14 < 30" --when "bbands_squeeze" --notify pushover
+
+# See all available indicator names
+python3 stock_alerts.py --list-conditions
+
+# Check current alert state
+python3 stock_alerts.py --status
+```
+
+Configure notification channels (email, Pushover, Slack) in `config.env`.
+See **README\_ALERTS.md** for all conditions, channels, cron setup,
+and state management.
+
+---
+
+### Rank symbols before investing
+
+```bash
+python3 stock_score.py \
+    -s AAPL MSFT GOOGL CSMIB.MI TSLA ENEL.MI \
+    --from 2023-01-01 \
+    --horizon quarter \
+    --top 3 \
+    --detail
+```
+
+### Backtest a strategy before using it
+
+```bash
+python3 stock_backtest.py -s AAPL \
+    --strategy rsi --window 14 \
+    --from 2018-01-01 --test-from 2023-01-01 \
+    --plot
+```
+
+### Set up daily alerts
+
+```bash
+# add to crontab — every 30 min during market hours
+*/30 9-17 * * 1-5  python3 /path/to/stock_alerts.py \
+    -s AAPL MSFT GOOGL CSMIB.MI \
+    --when "rsi14 < 30" \
+    --when "change_pct < -3" \
+    --notify email
+```
 
 ### Starting from scratch
 
@@ -839,6 +964,10 @@ con2.close()
 stock_data.csv
 collector.log
 .collector_state.json
+.alerts_state.json
+
+# config — contains API keys
+config.env
 
 # generated plot output
 gnuplot-data/
@@ -857,7 +986,14 @@ __pycache__/
 stock_collector.py   ✓
 stock_analysis.py    ✓
 stock_inventory.py   ✓
+stock_score.py       ✓
+stock_backtest.py    ✓
+stock_alerts.py      ✓
 README.md            ✓
+ANALYSIS.md          ✓
+README_SCORE.md      ✓
+README_BACKTEST.md   ✓
+README_ALERTS.md     ✓
 requirements.txt     ✓
 .gitignore           ✓
 ```
