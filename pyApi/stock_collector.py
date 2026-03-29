@@ -426,6 +426,9 @@ def fetch_alphavantage(symbols: list[str], state: dict) -> list[dict]:
 
     rows = []
     for sym in symbols:
+        if _live_has_today(sym, "alphavantage"):
+            log.info(f"[alphavantage] {sym}: already collected today, skipping")
+            continue
         if not budget_ok(state, "alphavantage"):
             break
         data = safe_get(
@@ -434,6 +437,7 @@ def fetch_alphavantage(symbols: list[str], state: dict) -> list[dict]:
                     "outputsize": "compact", "apikey": key}
         )
         record_call(state, "alphavantage")
+        time.sleep(13)   # free tier: max 5 calls/min — always sleep, even on error
         if not data or "Time Series (Daily)" not in data:
             reason = _av_error(data) if data else "no response"
             log.warning(f"[alphavantage] {sym}: {reason}")
@@ -449,7 +453,6 @@ def fetch_alphavantage(symbols: list[str], state: dict) -> list[dict]:
             ))
         tier = "adjusted" if ALPHAVANTAGE_PAID else "unadjusted"
         log.info(f"[alphavantage] {sym}: {len(data['Time Series (Daily)'])} days ({tier})")
-        time.sleep(12)   # free tier: max 5 calls/min
     return rows
 
 
