@@ -917,6 +917,7 @@ def _hist_alphavantage(symbols, db_path, date_from, date_to, state) -> list:
                     "outputsize": outputsize, "apikey": key}
         )
         record_call(state, "alphavantage")
+        time.sleep(13)   # free tier: max 5 calls/min — sleep even on error
         if not data or "Time Series (Daily)" not in data:
             reason = _av_error(data) if data else "no response"
             log.warning(f"[hist/alphavantage] {sym}: {reason}")
@@ -936,7 +937,6 @@ def _hist_alphavantage(symbols, db_path, date_from, date_to, state) -> list:
             kept += 1
         tier = "adjusted" if ALPHAVANTAGE_PAID else "unadjusted"
         log.info(f"[hist/alphavantage] {sym}: {kept} bars in range ({tier})")
-        time.sleep(12)
     return rows
 
 

@@ -70,6 +70,20 @@ AAPL    1h        2026-03-24  2026-03-28  4d    35    yfinance
 python3 stock_analysis.py -s AAPL MSFT TSLA --analysis summary
 ```
 
+## 6. Score your symbols (which looks best right now?)
+
+```bash
+python3 stock_score.py --from 2023-01-01 --horizon quarter --top 3
+```
+
+## 7. Launch the browser dashboard (optional)
+
+```bash
+pip install streamlit plotly
+streamlit run stock_ui.py
+# opens at http://localhost:8501
+```
+
 ---
 
 ## Use case 1 — track a handful of stocks daily
@@ -156,5 +170,3 @@ This runs 2000 simulated price paths over the next 63 trading days
 - Add more symbols to `config.env` and re-run the collector
 - See `README.md` for all available flags
 - See `ANALYSIS.md` for a detailed explanation of every analysis tool
-
-

@@ -1,22 +1,37 @@
-# databases
+# ─── databases ────────────────────────────────
 *.db
 *.db-shm
 *.db-wal
 
-# CSV exports
+# ─── CSV exports and runtime files ────────────
 stock_data.csv
-
-# logs and state
 collector.log
+cron.log
+cron_err.log
+alerts.log
+alerts_err.log
 .collector_state.json
+.alerts_state.json
 
-# Python
-__pycache__/
-*.pyc
-.env
+# ─── config — contains API keys ───────────────
+config.env
 
-# plot outputs (optional — commit if you want to share them)
+# ─── generated plot output ────────────────────
 gnuplot-data/
 matplot/
 data/
 
+# ─── distribution output ─────────────────────
+dist/
+
+# ─── Python ───────────────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+env/
+.env
+
+# ─── macOS ────────────────────────────────────
+.DS_Store

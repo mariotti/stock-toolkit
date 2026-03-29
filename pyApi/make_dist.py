@@ -42,6 +42,13 @@ SOURCE_FILES = [
     "test_toolkit.py",
     "test_live_apis.py",
     "crontab.demo",
+    "make_dist.py",
+    "collect",
+    "analyse",
+    "inventory",
+    "score",
+    "backtest",
+    "alerts",
 ]
 
 DOC_FILES = [
@@ -458,4 +465,3 @@ examples:
 
 if __name__ == "__main__":
     main()
-
