@@ -335,8 +335,10 @@ def make_row(symbol, source, data_date, interval, o, h, l, c, v,
 def safe_get(url: str, params: dict = None, timeout: int = 10) -> dict | None:
     try:
         r = requests.get(url, params=params, timeout=timeout)
+        if r.status_code == 402:
+            # Payment Required — caller can detect and handle gracefully
+            return {"_error": 402, "_message": "Payment Required — endpoint requires a paid plan"}
         if r.status_code == 403:
-            # return a typed sentinel so callers can give a clearer message
             return {"_error": 403}
         r.raise_for_status()
         return r.json()
@@ -615,6 +617,8 @@ def fetch_fmp(symbols: list[str], state: dict) -> list[dict]:
             ))
         if q_data:
             log.info(f"[fmp] bulk quote: {len(q_data)} symbols")
+    elif isinstance(q_data, dict) and q_data.get("_error") == 402:
+        log.info("[fmp] batch quote requires paid plan — skipping quotes (historical bars unaffected)")
 
     # --- historical EOD per symbol ---
     for sym in symbols:
@@ -631,6 +635,10 @@ def fetch_fmp(symbols: list[str], state: dict) -> list[dict]:
         record_call(state, "fmp")
         if h_data is None:
             log.warning(f"[fmp] {sym}: no response")
+            time.sleep(0.5)
+            continue
+        if isinstance(h_data, dict) and h_data.get("_error") == 402:
+            log.info(f"[fmp] {sym}: requires paid plan — skipping (free tier covers major US large-caps only)")
             time.sleep(0.5)
             continue
         # stable endpoint returns a list directly (not wrapped in {"historical": [...]})
@@ -1131,6 +1139,9 @@ def _hist_fmp(symbols, db_path, date_from, date_to, state) -> list:
         record_call(state, "fmp")
         if data is None:
             log.warning(f"[hist/fmp] {sym}: no response")
+            continue
+        if isinstance(data, dict) and data.get("_error") == 402:
+            log.info(f"[hist/fmp] {sym}: requires paid plan — skipping")
             continue
         if isinstance(data, dict):
             if "message" in data:
