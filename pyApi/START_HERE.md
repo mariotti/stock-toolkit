@@ -52,6 +52,12 @@ INFO  Fetched 300 rows | 300 new rows inserted into stock_data.db
 
 ```bash
 python3 stock_inventory.py --summary
+
+# check for missing trading days or thin coverage
+python3 stock_inventory.py --check
+
+# remove a symbol you no longer want
+python3 stock_inventory.py --remove TSLA
 ```
 
 ```

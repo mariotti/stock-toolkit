@@ -930,8 +930,163 @@ class TestPipeline(FixtureTestCase):
 
 
 # ─────────────────────────────────────────────────────────────
-#  RUNNER
+#  6b. INVENTORY — --remove and --check
 # ─────────────────────────────────────────────────────────────
+
+class TestInventory(FixtureTestCase):
+    """Tests for stock_inventory cmd_remove, cmd_check, and _group_gaps."""
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        cls.inv = _load_module("stock_inventory", cls.db, cls.tmp_dir)
+        # patch LIVE_DB so discover_dbs finds our fixture
+        cls.inv.LIVE_DB  = cls.db
+        cls.inv.HIST_DIR = cls.tmp_dir / "data_nonexistent"
+
+    # ── _group_gaps ───────────────────────────────────────────────────────────
+
+    def test_group_gaps_single(self):
+        result = self.inv._group_gaps(["2024-01-03"])
+        self.assertEqual(result, ["2024-01-03"])
+
+    def test_group_gaps_consecutive_range(self):
+        result = self.inv._group_gaps(["2024-01-03","2024-01-04","2024-01-05"])
+        self.assertEqual(result, ["2024-01-03..2024-01-05"])
+
+    def test_group_gaps_non_consecutive(self):
+        result = self.inv._group_gaps(["2024-01-03","2024-01-09"])
+        self.assertEqual(result, ["2024-01-03", "2024-01-09"])
+
+    def test_group_gaps_mixed(self):
+        result = self.inv._group_gaps(
+            ["2024-01-03","2024-01-04","2024-01-05","2024-01-09","2024-01-10"]
+        )
+        self.assertEqual(result, ["2024-01-03..2024-01-05", "2024-01-09..2024-01-10"])
+
+    def test_group_gaps_empty(self):
+        self.assertEqual(self.inv._group_gaps([]), [])
+
+    # ── cmd_check — clean data ────────────────────────────────────────────────
+
+    def test_check_fixture_runs_without_error(self):
+        """cmd_check must complete without raising on the fixture DB."""
+        import io, contextlib
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            self.inv.cmd_check([self.db], None)
+        output = buf.getvalue()
+        # should produce some output (either clean or issues found)
+        self.assertGreater(len(output), 0)
+
+    def test_check_symbol_filter(self):
+        """Filtering to a single symbol should not raise."""
+        import io, contextlib
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            self.inv.cmd_check([self.db], ["AAPL"])
+        # output should mention AAPL or the clean message
+        output = buf.getvalue()
+        self.assertTrue("AAPL" in output or "No consistency" in output)
+
+    def test_check_detects_gap(self):
+        """Inject a gap into a temp DB and verify --check reports it."""
+        import io, contextlib, sqlite3 as _sq, tempfile, shutil
+        from datetime import date, timedelta
+
+        # build a small DB with a deliberate weekday gap
+        tmp2 = pathlib.Path(tempfile.mkdtemp())
+        gap_db = tmp2 / "gap_test.db"
+        con = _sq.connect(gap_db)
+        con.execute("""CREATE TABLE prices (
+            fetched_at TEXT, symbol TEXT, source TEXT,
+            data_date TEXT, interval TEXT,
+            open REAL, high REAL, low REAL, close REAL, volume INTEGER,
+            vwap REAL, change_pct REAL, extra TEXT)""")
+        days = []
+        d = date(2024, 1, 2)
+        while len(days) < 10:
+            if d.weekday() < 5:
+                days.append(str(d))
+            d += timedelta(days=1)
+        # Insert all days for MSFT (no gap — sets the calendar)
+        for day in days:
+            con.execute("INSERT INTO prices VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                ("x","MSFT","yfinance",day,"1d",300,301,299,300,100000,300,0,""))
+        # Insert AAPL with day index 4 missing
+        for i, day in enumerate(days):
+            if i == 4:
+                continue
+            con.execute("INSERT INTO prices VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                ("x","AAPL","yfinance",day,"1d",150,151,149,150,100000,150,0,""))
+        con.commit(); con.close()
+
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            self.inv.cmd_check([gap_db], None)
+        output = buf.getvalue()
+
+        self.assertIn("AAPL", output)
+        self.assertIn("missing", output.lower())
+        shutil.rmtree(tmp2)
+
+    # ── cmd_remove ────────────────────────────────────────────────────────────
+
+    def test_remove_nonexistent_symbol(self):
+        """Removing a symbol not in the DB prints a not-found message."""
+        import io, contextlib
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            self.inv.cmd_remove("NONEXISTENT_XYZ", [self.db])
+        self.assertIn("not found", buf.getvalue().lower())
+
+    def test_remove_with_env_allow(self, monkeypatch=None):
+        """
+        With STOCK_INV_REMOVE=allow, cmd_remove deletes without prompting.
+        Uses a copy of the fixture DB so the main fixture is unaffected.
+        """
+        import io, contextlib, shutil, sqlite3 as _sq
+
+        # count rows for a symbol before removal
+        con = _sq.connect(self.db)
+        n_before = con.execute(
+            "SELECT COUNT(*) FROM prices WHERE symbol='AAPL'"
+        ).fetchone()[0]
+        con.close()
+        self.assertGreater(n_before, 0)
+
+        # work on a copy — don't corrupt the shared fixture
+        tmp2 = pathlib.Path(tempfile.mkdtemp())
+        db_copy = tmp2 / "stock_data.db"
+        shutil.copy(self.db, db_copy)
+
+        import os
+        old_env = os.environ.get("STOCK_INV_REMOVE")
+        os.environ["STOCK_INV_REMOVE"] = "allow"
+        try:
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                self.inv.cmd_remove("AAPL", [db_copy])
+        finally:
+            if old_env is None:
+                os.environ.pop("STOCK_INV_REMOVE", None)
+            else:
+                os.environ["STOCK_INV_REMOVE"] = old_env
+
+        # verify rows are gone
+        con = _sq.connect(db_copy)
+        n_after = con.execute(
+            "SELECT COUNT(*) FROM prices WHERE symbol='AAPL'"
+        ).fetchone()[0]
+        con.close()
+        self.assertEqual(n_after, 0)
+
+        output = buf.getvalue()
+        self.assertIn("deleted", output.lower())
+        shutil.rmtree(tmp2)
+
+
+
 
 if __name__ == "__main__":
     # Friendly summary output
@@ -945,6 +1100,7 @@ if __name__ == "__main__":
         TestScoreSteps,
         TestBacktest,
         TestAlerts,
+        TestInventory,
         TestPipeline,
     ]:
         suite.addTests(loader.loadTestsFromTestCase(cls))

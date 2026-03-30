@@ -701,7 +701,34 @@ python3 stock_inventory.py --db data/stock_data_2020-2023.db
 # machine-readable JSON output (pipe to jq etc.)
 python3 stock_inventory.py --json
 python3 stock_inventory.py --json | jq '.[] | select(.symbol=="AAPL")'
+
+# remove a symbol from every database (prompts for confirmation)
+python3 stock_inventory.py --remove TSLA
+
+# remove without prompt — set env var to allow (safe for scripts/cron)
+STOCK_INV_REMOVE=allow python3 stock_inventory.py --remove TSLA
+
+# check data consistency: missing trading days, thin coverage
+python3 stock_inventory.py --check
+python3 stock_inventory.py --check -s AAPL MSFT   # specific symbols only
 ```
+
+**`--remove`** deletes all rows for the symbol across every database and runs
+`VACUUM` to reclaim disk space. By default it requires you to type the symbol
+name to confirm. Setting `STOCK_INV_REMOVE=allow` in the environment skips
+the prompt — useful in cron jobs or scripts.
+
+**`--check`** reports two types of issue:
+
+| Issue | What it means |
+|---|---|
+| Missing days | Trading days within the symbol's date range that have no bar. Consecutive gaps are shown as ranges: `2024-08-05..07`. |
+| Thin coverage | Fewer than 60% of expected bars present — likely a partial or failed collection. |
+
+The trading-day calendar is derived automatically from your own data — days
+where ≥50% of your symbols have a bar are treated as real trading days,
+so holidays and non-trading days are excluded from gap counts without needing
+an external market calendar.
 
 Example output:
 
