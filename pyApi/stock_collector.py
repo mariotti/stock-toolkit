@@ -573,37 +573,48 @@ def fetch_polygon(symbols: list[str], state: dict) -> list[dict]:
 # ── 5. Financial Modeling Prep (FMP) ──────────
 def fetch_fmp(symbols: list[str], state: dict) -> list[dict]:
     """
-    /historical-price-full — EOD OHLCV, 3 months.
-    /quote                 — real-time snapshot (1 call for ALL symbols).
+    /stable/quote                    — real-time snapshot (1 call for ALL symbols).
+    /stable/historical-price-eod/full — EOD OHLCV per symbol.
+    Stable API (replaces legacy /api/v3/ which is now subscription-only).
     Free: 250 calls/day.
     """
     key = API_KEYS["fmp"]
     if not key:
         return []
 
+    BASE = "https://financialmodelingprep.com/stable"
     rows = []
+
     # --- bulk quote (1 call for all symbols) ---
-    # Only fetch quote for symbols not already collected today
     quote_pending = [s for s in symbols if not _quote_is_fresh(s, "fmp")]
     if not quote_pending:
         log.info("[fmp] all symbols have fresh quotes, skipping bulk quote")
         q_data = []
     else:
         sym_str = ",".join(quote_pending)
-        q_data = safe_get(f"https://financialmodelingprep.com/api/v3/quote/{sym_str}",
-                          params={"apikey": key})
+        q_data = safe_get(f"{BASE}/quote",
+                          params={"symbol": sym_str, "apikey": key})
         record_call(state, "fmp")
+        if q_data is None:
+            log.warning("[fmp] quote: no response — check key or network")
+            q_data = []
+        elif isinstance(q_data, dict) and "message" in q_data:
+            log.warning(f"[fmp] quote error: {q_data.get('message','?')}")
+            q_data = []
+
     if isinstance(q_data, list):
         for q in q_data:
             rows.append(make_row(
                 q["symbol"], "fmp", datetime.now(timezone.utc).date(), "quote",
-                q.get("open"), q.get("dayHigh"), q.get("dayLow"), q.get("price"), q.get("volume"),
+                q.get("open"), q.get("dayHigh"), q.get("dayLow"),
+                q.get("price"), q.get("volume"),
                 change_pct=q.get("changesPercentage"),
                 extra={"market_cap": q.get("marketCap"), "pe": q.get("pe"),
                        "eps": q.get("eps"), "52w_high": q.get("yearHigh"),
                        "52w_low": q.get("yearLow")}
             ))
-        log.info(f"[fmp] bulk quote: {len(q_data)} symbols")
+        if q_data:
+            log.info(f"[fmp] bulk quote: {len(q_data)} symbols")
 
     # --- historical EOD per symbol ---
     for sym in symbols:
@@ -612,22 +623,46 @@ def fetch_fmp(symbols: list[str], state: dict) -> list[dict]:
             continue
         if not budget_ok(state, "fmp"):
             break
+        from_date = (date.today() - timedelta(days=90)).isoformat()
         h_data = safe_get(
-            f"https://financialmodelingprep.com/api/v3/historical-price-full/{sym}",
-            params={"timeseries": 90, "apikey": key}
+            f"{BASE}/historical-price-eod/full",
+            params={"symbol": sym, "from": from_date, "apikey": key}
         )
         record_call(state, "fmp")
-        if h_data and "historical" in h_data:
-            for bar in h_data["historical"]:
-                rows.append(make_row(
-                    sym, "fmp", bar["date"], "1d",
-                    bar.get("open"), bar.get("high"), bar.get("low"), bar.get("close"),
-                    bar.get("volume"), vwap=bar.get("vwap"),
-                    change_pct=bar.get("changePercent"),
-                    extra={"adj_close": bar.get("adjClose"),
-                           "unadjusted_volume": bar.get("unadjustedVolume")}
-                ))
-            log.info(f"[fmp] {sym}: {len(h_data['historical'])} daily bars")
+        if h_data is None:
+            log.warning(f"[fmp] {sym}: no response")
+            time.sleep(0.5)
+            continue
+        # stable endpoint returns a list directly (not wrapped in {"historical": [...]})
+        if isinstance(h_data, list):
+            bars = h_data
+        elif isinstance(h_data, dict):
+            if "message" in h_data:
+                log.warning(f"[fmp] {sym}: {h_data.get('message','API error')}")
+                time.sleep(0.5)
+                continue
+            # fallback: old format still returned for some accounts
+            bars = h_data.get("historical", [])
+        else:
+            log.warning(f"[fmp] {sym}: unexpected response type {type(h_data).__name__}")
+            time.sleep(0.5)
+            continue
+
+        if not bars:
+            log.warning(f"[fmp] {sym}: empty response")
+            time.sleep(0.5)
+            continue
+
+        for bar in bars:
+            rows.append(make_row(
+                sym, "fmp", bar["date"], "1d",
+                bar.get("open"), bar.get("high"), bar.get("low"), bar.get("close"),
+                bar.get("volume"), vwap=bar.get("vwap"),
+                change_pct=bar.get("changePercent"),
+                extra={"adj_close": bar.get("adjClose"),
+                       "unadjusted_volume": bar.get("unadjustedVolume")}
+            ))
+        log.info(f"[fmp] {sym}: {len(bars)} daily bars")
         time.sleep(0.5)
     return rows
 
@@ -1076,10 +1111,11 @@ def _hist_polygon(symbols, db_path, date_from, date_to, state) -> list:
 
 
 def _hist_fmp(symbols, db_path, date_from, date_to, state) -> list:
-    """FMP historical-price-full with from/to. 250 calls/day, 1 call/symbol."""
+    """FMP stable/historical-price-eod/full with from/to. 250 calls/day, 1 call/symbol."""
     key = API_KEYS["fmp"]
     if not key:
         return []
+    BASE = "https://financialmodelingprep.com/stable"
     rows = []
     for sym in symbols:
         if not budget_ok(state, "fmp"):
@@ -1088,14 +1124,29 @@ def _hist_fmp(symbols, db_path, date_from, date_to, state) -> list:
             log.info(f"[hist/fmp] {sym}: already in DB, skipping")
             continue
         data = safe_get(
-            f"https://financialmodelingprep.com/api/v3/historical-price-full/{sym}",
-            params={"from": str(date_from), "to": str(date_to), "apikey": key}
+            f"{BASE}/historical-price-eod/full",
+            params={"symbol": sym, "from": str(date_from),
+                    "to": str(date_to), "apikey": key}
         )
         record_call(state, "fmp")
-        if not data or "historical" not in data:
-            log.warning(f"[hist/fmp] {sym}: no data")
+        if data is None:
+            log.warning(f"[hist/fmp] {sym}: no response")
             continue
-        for bar in data["historical"]:
+        if isinstance(data, dict):
+            if "message" in data:
+                log.warning(f"[hist/fmp] {sym}: {data.get('message','API error')}")
+                continue
+            # old format fallback
+            bars = data.get("historical", [])
+        elif isinstance(data, list):
+            bars = data
+        else:
+            log.warning(f"[hist/fmp] {sym}: unexpected type {type(data).__name__}")
+            continue
+        if not bars:
+            log.warning(f"[hist/fmp] {sym}: empty response")
+            continue
+        for bar in bars:
             rows.append(make_row(
                 sym, "fmp", bar["date"], "1d",
                 bar.get("open"), bar.get("high"), bar.get("low"), bar.get("close"),
@@ -1103,7 +1154,7 @@ def _hist_fmp(symbols, db_path, date_from, date_to, state) -> list:
                 change_pct=bar.get("changePercent"),
                 extra={"adj_close": bar.get("adjClose")}
             ))
-        log.info(f"[hist/fmp] {sym}: {len(data['historical'])} bars")
+        log.info(f"[hist/fmp] {sym}: {len(bars)} bars")
         time.sleep(0.5)
     return rows
 
