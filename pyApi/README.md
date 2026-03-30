@@ -138,7 +138,7 @@ section at the top of `stock_collector.py`:
 API_KEYS = {
     "alphavantage": "",   # https://www.alphavantage.co/support/#api-key
     "finnhub":      "",   # https://finnhub.io/register
-    "polygon":      "",   # https://polygon.io/dashboard/signup
+    "polygon":      "",   # https://massive.com/dashboard (formerly Polygon.io)
     "fmp":          "",   # https://financialmodelingprep.com/developer/docs
     "twelvedata":   "",   # https://twelvedata.com/register
     "marketstack":  "",   # https://marketstack.com/signup/free
@@ -154,7 +154,7 @@ Any key left as `""` is silently skipped. `yfinance` requires no key.
 | yfinance | No limit (unofficial) | Full (to IPO) | Web scraper — can break |
 | Alpha Vantage | 25 calls/day | ~100 days (free) / 20+ yr (paid) | `outputsize=full` is premium |
 | Finnhub | 60 calls/min | Quote only (free) / full (paid) | `/stock/candle` needs paid plan |
-| Polygon.io | 5 calls/min | ~2 years | US equities only |
+| Massive (Polygon.io) | 5 calls/min | ~2 years | US equities only |
 | FMP | 250 calls/day | 30+ years | Best free historical source |
 | Twelve Data | 800 calls/day | ~19 years per chunk | 50+ global exchanges |
 | Marketstack | ~3/day (100/month) | 30+ years EOD | Wide exchange coverage |

@@ -171,7 +171,7 @@ class TestConnectivity(LiveAPITest):
         self._reachable("https://finnhub.io", "Finnhub")
 
     def test_reach_polygon(self):
-        self._reachable("https://api.polygon.io", "Polygon")
+        self._reachable("https://api.massive.com", "Massive (Polygon.io)")
 
     def test_reach_fmp(self):
         self._reachable("https://financialmodelingprep.com", "FMP")
@@ -383,16 +383,19 @@ class TestFinnhub(LiveAPITest):
 
 class TestPolygon(LiveAPITest):
     """
-    Polygon tests — requires POLYGON_KEY in config.env.
+    Massive (formerly Polygon.io) tests — requires MASSIVE_KEY or POLYGON_KEY in config.env.
     Uses a single-day aggregate bar (cheapest historical call).
     Costs 1 call from the 5/min free allowance.
     """
 
-    BASE = "https://api.polygon.io"
+    BASE = "https://api.massive.com"
 
     def setUp(self):
-        self.skipIfNoKey("POLYGON_KEY", "Polygon")
-        self.key = _key("POLYGON_KEY")
+        # accept MASSIVE_KEY (new name) or POLYGON_KEY (old name)
+        key = _key("MASSIVE_KEY") or _key("POLYGON_KEY")
+        if not key:
+            self.skipTest("[Massive] MASSIVE_KEY or POLYGON_KEY not set in config.env")
+        self.key = key
 
     def test_single_day_agg(self):
         """Fetch one day of AAPL bars — 1 call, minimal data."""
@@ -518,7 +521,7 @@ if __name__ == "__main__":
         "Alpha Vantage demo": "built-in (demo key)",
         "FMP demo":    "built-in (demo key)",
         "Finnhub":     "FINNHUB_KEY",
-        "Polygon":     "POLYGON_KEY",
+        "Massive":     "MASSIVE_KEY (or POLYGON_KEY)",
         "FMP (real)":  "FMP_KEY",
         "Twelve Data": "TWELVEDATA_KEY",
         "Marketstack": "MARKETSTACK_KEY",

@@ -110,7 +110,7 @@ def _symbols_from_db() -> list[str]:
 API_KEYS = {
     "alphavantage": _cfg.get("ALPHAVANTAGE_KEY", ""),
     "finnhub":      _cfg.get("FINNHUB_KEY",      ""),
-    "polygon":      _cfg.get("POLYGON_KEY",       ""),
+    "polygon":      _cfg.get("MASSIVE_KEY", "") or _cfg.get("POLYGON_KEY", ""),   # MASSIVE_KEY preferred; POLYGON_KEY accepted for backward compatibility
     "fmp":          _cfg.get("FMP_KEY",           ""),
     "twelvedata":   _cfg.get("TWELVEDATA_KEY",    ""),
     "marketstack":  _cfg.get("MARKETSTACK_KEY",   ""),
@@ -534,7 +534,7 @@ def fetch_finnhub(symbols: list[str], state: dict) -> list[dict]:
     return rows
 
 
-# ── 4. Polygon.io ─────────────────────────────
+# ── 4. Massive (formerly Polygon.io) ───────────
 def fetch_polygon(symbols: list[str], state: dict) -> list[dict]:
     """
     /v2/aggs/ticker/{sym}/range — OHLCV bars (daily, last 30 days).
@@ -554,7 +554,7 @@ def fetch_polygon(symbols: list[str], state: dict) -> list[dict]:
             continue
         if not budget_ok(state, "polygon"):
             break
-        url = f"https://api.polygon.io/v2/aggs/ticker/{sym}/range/1/day/{from_date}/{to_date}"
+        url = f"https://api.massive.com/v2/aggs/ticker/{sym}/range/1/day/{from_date}/{to_date}"
         data = safe_get(url, params={"adjusted": "true", "sort": "asc", "apiKey": key})
         sleep_for_rate("polygon")
         if not data or data.get("status") not in ("OK", "DELAYED"):
@@ -1052,7 +1052,7 @@ def _hist_polygon(symbols, db_path, date_from, date_to, state) -> list:
         if _hist_has_data(db_path, sym, "polygon", date_from, date_to):
             log.info(f"[hist/polygon] {sym}: already in DB, skipping")
             continue
-        url  = (f"https://api.polygon.io/v2/aggs/ticker/{sym}/range/1/day"
+        url  = (f"https://api.massive.com/v2/aggs/ticker/{sym}/range/1/day"
                 f"/{date_from}/{date_to}")
         sym_rows, page = [], 1
         while url:
@@ -1510,7 +1510,7 @@ def main():
         all_rows += fetch_finnhub(symbols, state)
 
     if _should_run("polygon"):
-        log.info("── Polygon.io ────────────────────────────────────────────")
+        log.info("── Massive (formerly Polygon.io) ────────────────────────")
         all_rows += fetch_polygon(symbols, state)
 
     if _should_run("fmp"):
