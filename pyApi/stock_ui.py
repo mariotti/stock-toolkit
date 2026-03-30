@@ -1523,6 +1523,7 @@ with tab_collect:
             # ── results ───────────────────────────────────────────────────────
             if result is not None and result.returncode == 0:
                 st.success("✅  Collection finished successfully.")
+                get_all_symbols.clear()   # invalidate cache → sidebar refreshes on next rerun
             elif result is not None:
                 st.error(f"❌  Collector exited with code {result.returncode}.")
             # else: timeout/exception already shown
