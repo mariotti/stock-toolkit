@@ -1281,6 +1281,8 @@ Keep responses concise and conversational."""
             "4. One honest limitation of this analysis I should keep in mind"
         )
 
+        st.session_state.brief_prompt = user_msg   # store before call so expanders work even on failure
+
         with st.spinner("Claude is reading the numbers…"):
             reply = _call_claude(
                 [{"role": "user", "content": user_msg}],
@@ -1293,96 +1295,95 @@ Keep responses concise and conversational."""
         ]
 
     # ── chat interface ─────────────────────────────────────────────────────────
-    if st.session_state.brief_messages:
+    # ── always show analysis + prompt once data is computed ───────────────────
+    # These render even if the Claude API call failed — the 7-step data
+    # and the prompt are available as soon as the analysis button is clicked.
+    ctx = st.session_state.get("brief_context")
+    if ctx and ctx.get("scores"):
         st.markdown("---")
 
-        # show conversation (skip the raw data dump in the first user message)
-        for i, msg in enumerate(st.session_state.brief_messages):
-            if msg["role"] == "assistant":
-                with st.chat_message("assistant", avatar="🤖"):
-                    st.markdown(msg["content"])
-            elif i > 0:   # skip the first user message (raw data table)
-                with st.chat_message("user", avatar="👤"):
-                    st.markdown(msg["content"])
+        # ── Claude response (if available) ────────────────────────────────────
+        if st.session_state.brief_messages:
+            for i, msg in enumerate(st.session_state.brief_messages):
+                if msg["role"] == "assistant":
+                    with st.chat_message("assistant", avatar="🤖"):
+                        st.markdown(msg["content"])
+                elif i > 0:
+                    with st.chat_message("user", avatar="👤"):
+                        st.markdown(msg["content"])
 
         # ── 7-step analysis results ───────────────────────────────────────────
-        ctx = st.session_state.brief_context
-        if ctx and ctx.get("scores"):
-            with st.expander("📊  7-step analysis — full metrics", expanded=False):
-                scores = ctx["scores"]
+        with st.expander("📊  7-step analysis — full metrics", expanded=False):
+            scores = ctx["scores"]
+            rows = []
+            for r in scores:
+                s  = r.get("summary",    {})
+                dd = r.get("drawdown",   {})
+                en = r.get("entry",      {})
+                mc = r.get("montecarlo", {})
+                rg = r.get("regression", {})
+                rows.append({
+                    "Symbol":     r["symbol"],
+                    "Score":      f"{r['score']:.1f}",
+                    "Sharpe":     fmt_val(s.get("sharpe")),
+                    "Calmar":     fmt_val(dd.get("calmar")),
+                    "Vol %":      f"{s['ann_vol']:.1f}" if s.get("ann_vol") else "—",
+                    "Max DD %":   f"{dd['max_dd']:.1f}" if dd.get("max_dd") else "—",
+                    "Recovered":  "✅" if dd.get("recovered") else "❌",
+                    "R²":         fmt_val(rg.get("r2"), 3),
+                    "Trend/yr %": fmt_pct(rg.get("ann_trend")),
+                    "RSI":        f"{en['rsi14']:.0f}" if en.get("rsi14") else "—",
+                    "%B":         f"{en['pct_b']:.2f}" if en.get("pct_b") is not None else "—",
+                    "⚡":         "yes" if en.get("bbands_squeeze") else "",
+                    "P(gain) %":  f"{mc['prob_gain']:.0f}" if mc.get("prob_gain") else "—",
+                    "P50":        fmt_val(mc.get("p50")),
+                    "P5":         fmt_val(mc.get("p5")),
+                    "Total ret %":fmt_pct(s.get("total_ret")),
+                    "Bars":       str(s.get("n_bars", "—")),
+                })
+            st.dataframe(pd.DataFrame(rows),
+                         width="stretch", hide_index=True)
 
-                # build detailed table
-                rows = []
-                for r in scores:
-                    s  = r.get("summary",    {})
-                    dd = r.get("drawdown",   {})
-                    en = r.get("entry",      {})
-                    mc = r.get("montecarlo", {})
-                    rg = r.get("regression", {})
-                    rows.append({
-                        "Symbol":     r["symbol"],
-                        "Score":      f"{r['score']:.1f}",
-                        "Sharpe":     fmt_val(s.get("sharpe")),
-                        "Calmar":     fmt_val(dd.get("calmar")),
-                        "Vol %":      f"{s['ann_vol']:.1f}" if s.get("ann_vol") else "—",
-                        "Max DD %":   f"{dd['max_dd']:.1f}" if dd.get("max_dd") else "—",
-                        "Recovered":  "✅" if dd.get("recovered") else "❌",
-                        "R²":         fmt_val(rg.get("r2"), 3),
-                        "Trend/yr %": fmt_pct(rg.get("ann_trend")),
-                        "RSI":        f"{en['rsi14']:.0f}" if en.get("rsi14") else "—",
-                        "%B":         f"{en['pct_b']:.2f}" if en.get("pct_b") is not None else "—",
-                        "⚡":         "yes" if en.get("bbands_squeeze") else "",
-                        "P(gain) %":  f"{mc['prob_gain']:.0f}" if mc.get("prob_gain") else "—",
-                        "P50":        fmt_val(mc.get("p50")),
-                        "P5":         fmt_val(mc.get("p5")),
-                        "Total ret %":fmt_pct(s.get("total_ret")),
-                        "Bars":       str(s.get("n_bars", "—")),
+            if ctx.get("alerts_ctx"):
+                st.markdown("**Current indicators (live)**")
+                ind_rows = []
+                for sym, ictx in ctx["alerts_ctx"].items():
+                    ind_rows.append({
+                        "Symbol":   sym,
+                        "Price":    fmt_val(ictx.get("price")),
+                        "RSI14":    f"{ictx['rsi14']:.1f}" if ictx.get("rsi14") else "—",
+                        "%B":       f"{ictx['bbands_pct_b']:.2f}" if ictx.get("bbands_pct_b") is not None else "—",
+                        "Squeeze":  "⚡" if ictx.get("bbands_squeeze") else "",
+                        "MACD hist":fmt_val(ictx.get("macd_hist")),
+                        "Chg %":    fmt_pct(ictx.get("change_pct")),
+                        "SMA50":    fmt_val(ictx.get("sma50")),
+                        "SMA200":   fmt_val(ictx.get("sma200")),
+                        ">52w low": "✅" if ictx.get("near_52w_low") else "",
+                        ">52w hi":  "🔴" if ictx.get("near_52w_high") else "",
                     })
-                st.dataframe(pd.DataFrame(rows),
+                st.dataframe(pd.DataFrame(ind_rows),
                              width="stretch", hide_index=True)
 
-                # current indicators snapshot
-                if ctx.get("alerts_ctx"):
-                    st.markdown("**Current indicators (live)**")
-                    ind_rows = []
-                    for sym, ictx in ctx["alerts_ctx"].items():
-                        ind_rows.append({
-                            "Symbol":   sym,
-                            "Price":    fmt_val(ictx.get("price")),
-                            "RSI14":    f"{ictx['rsi14']:.1f}" if ictx.get("rsi14") else "—",
-                            "%B":       f"{ictx['bbands_pct_b']:.2f}" if ictx.get("bbands_pct_b") is not None else "—",
-                            "Squeeze":  "⚡" if ictx.get("bbands_squeeze") else "",
-                            "MACD hist":fmt_val(ictx.get("macd_hist")),
-                            "Chg %":    fmt_pct(ictx.get("change_pct")),
-                            "SMA50":    fmt_val(ictx.get("sma50")),
-                            "SMA200":   fmt_val(ictx.get("sma200")),
-                            ">52w low": "✅" if ictx.get("near_52w_low") else "",
-                            ">52w hi":  "🔴" if ictx.get("near_52w_high") else "",
-                        })
-                    st.dataframe(pd.DataFrame(ind_rows),
-                                 width="stretch", hide_index=True)
-
         # ── prompt inspector ──────────────────────────────────────────────────
-        if st.session_state.brief_messages:
+        prompt = st.session_state.get("brief_prompt")
+        if prompt:
             with st.expander("🔍  Prompt sent to Claude", expanded=False):
                 st.markdown(
                     "<span style='color:#4a6075;font-size:0.78rem'>"
-                    "This is the exact text sent as the first message to the Claude API. "
-                    "Follow-up messages are appended to this conversation history."
+                    "This is the exact text sent to the Claude API."
                     "</span>",
                     unsafe_allow_html=True,
                 )
                 st.markdown("**System prompt:**")
                 st.code(SYSTEM_PROMPT, language=None)
                 st.markdown("**User message (analysis data):**")
-                st.code(st.session_state.brief_messages[0]["content"], language=None)
+                st.code(prompt, language=None)
 
-        # follow-up question input
+        # ── follow-up chat ────────────────────────────────────────────────────
         follow_up = st.chat_input(
             "Ask a follow-up question about any symbol or signal…"
         )
         if follow_up:
-            # append user question
             st.session_state.brief_messages.append(
                 {"role": "user", "content": follow_up}
             )
@@ -1396,13 +1397,14 @@ Keep responses concise and conversational."""
             )
             st.rerun()
 
-        # reset button
-        if st.button("🗑  Clear conversation", key="brief_clear"):
-            st.session_state.brief_messages = []
-            st.session_state.brief_context  = None
-            st.rerun()
-
-        st.caption(
-            "⚠️  This is educational analysis, not financial advice. "
-            "Always do your own research before investing."
-        )
+        col_reset, col_cap = st.columns([1, 4])
+        with col_reset:
+            if st.button("🗑  Clear", key="brief_clear"):
+                st.session_state.brief_messages = []
+                st.session_state.brief_context  = None
+                st.session_state.brief_prompt   = None
+                st.rerun()
+        with col_cap:
+            st.caption(
+                "⚠️  Educational analysis only — not financial advice."
+            )
