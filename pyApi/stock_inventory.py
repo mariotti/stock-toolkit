@@ -244,20 +244,36 @@ def cmd_check(dbs: list[Path], symbol_filter: list[str] | None) -> None:
 
         # ── build per-symbol date sets ─────────────────────────────────────────
         from collections import defaultdict
+
+        def _exchange_group(symbol: str) -> str:
+            """Group symbols by exchange so holidays don't cross-contaminate."""
+            suffix = symbol.rsplit(".", 1)[-1].upper() if "." in symbol else "US"
+            # consolidate Italian exchanges
+            if suffix in ("MI", "MIL"):
+                return "MI"
+            return suffix if "." in symbol else "US"
+
         sym_dates: dict[str, set] = defaultdict(set)
         for sym, d in rows:
             sym_dates[sym].add(d[:10])
 
-        # Build a trading-day calendar: all dates present for ≥50% of symbols
-        # (days where most symbols have data = likely a real trading day)
-        all_dates: dict[str, int] = defaultdict(int)
-        for dates in sym_dates.values():
+        # Build one trading-day calendar PER EXCHANGE GROUP.
+        # Days where ≥50% of symbols in the SAME group have data = trading day.
+        # This prevents US holidays contaminating EU calendars and vice versa.
+        group_dates: dict[str, dict] = defaultdict(lambda: defaultdict(int))
+        group_counts: dict[str, int] = defaultdict(int)
+        for sym, dates in sym_dates.items():
+            grp = _exchange_group(sym)
+            group_counts[grp] += 1
             for d in dates:
-                all_dates[d] += 1
-        n_syms = len(sym_dates)
-        trading_days = {
-            d for d, count in all_dates.items()
-            if count >= max(1, n_syms * 0.5)
+                group_dates[grp][d] += 1
+
+        group_trading_days: dict[str, set] = {
+            grp: {
+                d for d, count in date_counts.items()
+                if count >= max(1, group_counts[grp] * 0.5)
+            }
+            for grp, date_counts in group_dates.items()
         }
 
         # ── check each symbol ──────────────────────────────────────────────────
@@ -265,6 +281,8 @@ def cmd_check(dbs: list[Path], symbol_filter: list[str] | None) -> None:
         for sym, dates in sorted(sym_dates.items()):
             d_min = min(dates)
             d_max = max(dates)
+            grp   = _exchange_group(sym)
+            trading_days = group_trading_days.get(grp, set())
 
             # Expected trading days within this symbol's own range
             expected = {
