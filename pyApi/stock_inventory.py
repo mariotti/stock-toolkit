@@ -271,7 +271,10 @@ def cmd_check(dbs: list[Path], symbol_filter: list[str] | None) -> None:
         group_trading_days: dict[str, set] = {
             grp: {
                 d for d, count in date_counts.items()
-                if count >= max(1, group_counts[grp] * 0.5)
+                # Require ≥75% of same-exchange symbols to have data.
+                # For 2 symbols this means both must agree — prevents one
+                # source's spurious holiday data from contaminating the calendar.
+                if count >= max(1, round(group_counts[grp] * 0.75))
             }
             for grp, date_counts in group_dates.items()
         }

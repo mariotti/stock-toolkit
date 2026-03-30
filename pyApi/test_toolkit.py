@@ -994,7 +994,9 @@ class TestInventory(FixtureTestCase):
         import io, contextlib, sqlite3 as _sq, tempfile, shutil
         from datetime import date, timedelta
 
-        # build a small DB with a deliberate weekday gap
+        # Build a small DB with a deliberate weekday gap.
+        # Need 3 symbols so 2-of-3 (75% threshold met) establishes the calendar,
+        # while the third symbol is missing one day.
         tmp2 = pathlib.Path(tempfile.mkdtemp())
         gap_db = tmp2 / "gap_test.db"
         con = _sq.connect(gap_db)
@@ -1009,16 +1011,21 @@ class TestInventory(FixtureTestCase):
             if d.weekday() < 5:
                 days.append(str(d))
             d += timedelta(days=1)
-        # Insert all days for MSFT (no gap — sets the calendar)
-        for day in days:
-            con.execute("INSERT INTO prices VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                ("x","MSFT","yfinance",day,"1d",300,301,299,300,100000,300,0,""))
-        # Insert AAPL with day index 4 missing
+        # MSFT and GOOGL: all days present (establishes calendar)
+        for sym in ("MSFT", "GOOGL"):
+            for day in days:
+                con.execute(
+                    "INSERT INTO prices VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    ("x", sym, "yfinance", day, "1d", 300, 301, 299, 300,
+                     100000, 300, 0, ""))
+        # AAPL: day index 4 missing (calendar day present in 2/3 = 67% > threshold)
         for i, day in enumerate(days):
             if i == 4:
                 continue
-            con.execute("INSERT INTO prices VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                ("x","AAPL","yfinance",day,"1d",150,151,149,150,100000,150,0,""))
+            con.execute(
+                "INSERT INTO prices VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                ("x", "AAPL", "yfinance", day, "1d", 150, 151, 149, 150,
+                 100000, 150, 0, ""))
         con.commit(); con.close()
 
         buf = io.StringIO()
