@@ -84,6 +84,27 @@ else:
 _sym_raw = _cfg.get("SYMBOLS", "AAPL,MSFT,GOOGL,AMZN,TSLA")
 SYMBOLS = [s.strip().upper() for s in _sym_raw.split(",") if s.strip()]
 
+
+def _symbols_from_db() -> list[str]:
+    """
+    Return the distinct symbols already present in the live DB (interval='1d').
+    Used to keep collecting symbols that were once added with -s even if they
+    are no longer in the SYMBOLS config variable.
+    Returns an empty list if the DB does not exist yet.
+    """
+    if not DB_PATH.exists():
+        return []
+    try:
+        import sqlite3 as _sq
+        con = _sq.connect(DB_PATH)
+        rows = con.execute(
+            "SELECT DISTINCT symbol FROM prices WHERE interval='1d' ORDER BY symbol"
+        ).fetchall()
+        con.close()
+        return [r[0] for r in rows]
+    except Exception:
+        return []
+
 # ── API keys ──────────────────────────────────────────────────────────────────
 
 API_KEYS = {
@@ -1375,7 +1396,24 @@ def main():
     )
     args = parser.parse_args()
 
-    symbols    = [args.symbol.upper()] if args.symbol else SYMBOLS
+    # ── symbol resolution ─────────────────────────────────────────────────────
+    # Priority:
+    #   1. -s / --symbol flag  → explicit override, use exactly that symbol
+    #   2. No flag             → config SYMBOLS ∪ symbols already in the DB
+    #      This means a symbol collected once with -s will keep being collected
+    #      on subsequent runs, even if it is not in config.env.
+    if args.symbol:
+        symbols = [args.symbol.upper()]
+    else:
+        db_syms  = _symbols_from_db()
+        cfg_syms = SYMBOLS
+        # merge, preserve config order first, then any DB-only extras
+        seen     = set(cfg_syms)
+        symbols  = list(cfg_syms) + [s for s in db_syms if s not in seen]
+        if db_syms:
+            extras = [s for s in db_syms if s not in set(cfg_syms)]
+            if extras:
+                log.info(f"Symbols from DB not in config (kept): {extras}")
     use_csv    = args.csv
     plot_field = args.plot_data
     # sources filter — None means run all

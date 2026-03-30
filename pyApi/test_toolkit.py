@@ -254,6 +254,39 @@ class TestCollectorDedup(FixtureTestCase):
         )
         self.assertFalse(result)
 
+    def test_symbols_from_db_returns_fixture_symbols(self):
+        """All four fixture symbols should appear in _symbols_from_db."""
+        syms = self.sc._symbols_from_db()
+        for s in ["AAPL", "MSFT", "ENEL.MI", "CSMIB.MI"]:
+            self.assertIn(s, syms, f"{s} missing from _symbols_from_db()")
+
+    def test_symbols_from_db_only_daily(self):
+        """Only interval='1d' rows should be returned, not quote or 1h."""
+        syms = self.sc._symbols_from_db()
+        # fixture has yfinance + fmp sources with 1d — all four symbols present
+        self.assertGreater(len(syms), 0)
+        # confirm no duplicates
+        self.assertEqual(len(syms), len(set(syms)), "duplicates in _symbols_from_db()")
+
+    def test_symbols_from_db_missing_db(self):
+        """Non-existent DB returns empty list without raising."""
+        self.sc.DB_PATH = self.tmp_dir / "nonexistent.db"
+        result = self.sc._symbols_from_db()
+        self.assertEqual(result, [])
+        self.sc.DB_PATH = self.db   # restore
+
+    def test_symbols_merge_config_plus_db(self):
+        """DB symbols not in config are appended after config symbols."""
+        cfg  = ["AAPL", "TSLA"]
+        db   = self.sc._symbols_from_db()   # has AAPL, MSFT, ENEL.MI, CSMIB.MI
+        seen = set(cfg)
+        merged = list(cfg) + [s for s in db if s not in seen]
+        # config symbols come first
+        self.assertEqual(merged[:2], ["AAPL", "TSLA"])
+        # DB-only symbols appended
+        for s in ["MSFT", "ENEL.MI", "CSMIB.MI"]:
+            self.assertIn(s, merged)
+
 
 
 # ─────────────────────────────────────────────────────────────
