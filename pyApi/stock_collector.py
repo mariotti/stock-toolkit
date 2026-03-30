@@ -696,6 +696,7 @@ def fetch_twelvedata(symbols: list[str], state: dict) -> list[dict]:
 def fetch_marketstack(symbols: list[str], state: dict) -> list[dict]:
     """
     /eod — end-of-day OHLCV for multiple symbols in one call.
+    V2 API (v1 deprecated June 2025). HTTPS available on all plans.
     Free: 100 calls/month. Budget conservatively — only fetch when budget allows.
     """
     key = API_KEYS["marketstack"]
@@ -712,13 +713,21 @@ def fetch_marketstack(symbols: list[str], state: dict) -> list[dict]:
     rows = []
     sym_str = ",".join(pending)
     data = safe_get(
-        "https://api.marketstack.com/v1/eod",
+        "https://api.marketstack.com/v2/eod",
         params={"access_key": key, "symbols": sym_str, "limit": 100}
     )
-    record_call(state, "marketstack")
-    if not data or "data" not in data:
-        log.warning(f"[marketstack] unexpected response: {data}")
+    if not data:
+        log.warning("[marketstack] no response — check network or API key")
         return []
+    if "error" in data:
+        err = data["error"]
+        log.warning(f"[marketstack] API error {err.get('code','?')}: "
+                    f"{err.get('message','unknown')}")
+        return []
+    if "data" not in data:
+        log.warning(f"[marketstack] unexpected response keys: {list(data.keys())}")
+        return []
+    record_call(state, "marketstack")   # only count successful calls
     for bar in data["data"]:
         rows.append(make_row(
             bar["symbol"].split(".")[0], "marketstack",
@@ -727,7 +736,7 @@ def fetch_marketstack(symbols: list[str], state: dict) -> list[dict]:
             bar.get("volume"), vwap=bar.get("adj_close"),
             extra={"exchange": bar.get("exchange")}
         ))
-    log.info(f"[marketstack] {len(data['data'])} EOD bars across {len(symbols)} symbols")
+    log.info(f"[marketstack] {len(data['data'])} EOD bars across {len(pending)} symbols")
     return rows
 
 
