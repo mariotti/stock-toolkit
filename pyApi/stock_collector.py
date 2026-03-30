@@ -712,7 +712,7 @@ def fetch_marketstack(symbols: list[str], state: dict) -> list[dict]:
     rows = []
     sym_str = ",".join(pending)
     data = safe_get(
-        "http://api.marketstack.com/v1/eod",
+        "https://api.marketstack.com/v1/eod",
         params={"access_key": key, "symbols": sym_str, "limit": 100}
     )
     record_call(state, "marketstack")

@@ -471,7 +471,7 @@ class TestMarketstack(LiveAPITest):
     Costs 1 call from the 100/month free allowance.
     """
 
-    BASE = "http://api.marketstack.com/v1"
+    BASE = "https://api.marketstack.com/v1"
 
     def setUp(self):
         self.skipIfNoKey("MARKETSTACK_KEY", "Marketstack")
@@ -563,5 +563,3 @@ if __name__ == "__main__":
     print(f"{'─'*60}")
 
     sys.exit(0 if result.wasSuccessful() else 1)
-
-
