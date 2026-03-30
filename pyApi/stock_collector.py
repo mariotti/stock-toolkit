@@ -635,60 +635,95 @@ def fetch_fmp(symbols: list[str], state: dict) -> list[dict]:
 # ── 6. Twelve Data ────────────────────────────
 def fetch_twelvedata(symbols: list[str], state: dict) -> list[dict]:
     """
-    /time_series — OHLCV bars (daily + 1h) for multiple symbols in one call.
-    /price       — real-time last price.
-    Free: 800 calls/day.
+    /time_series — OHLCV bars (daily + 1h) per symbol.
+    Free: 800 credits/day, 8 credits/minute (1 credit per symbol per request).
+    Symbols are batched in groups of 8 with a 62-second sleep between batches
+    to stay within the per-minute limit.
     """
     key = API_KEYS["twelvedata"]
     if not key:
         return []
 
     rows = []
-    sym_str = ",".join(symbols)
-    # filter to symbols not yet collected today for each interval
-    symbols_1d = [s for s in symbols if not _live_has_today(s, "twelvedata", "1d")]
-    symbols_1h = [s for s in symbols if not _hourly_bar_is_current(s, "twelvedata")]
+    # Twelve Data free plan only covers US exchanges.
+    # Non-US symbols use Yahoo Finance notation (e.g. ENEL.MI, CSMIB.MI) and
+    # require Pro+ on Twelve Data — filter them out to avoid "symbol not found" errors.
+    us_symbols    = [s for s in symbols if "." not in s]
+    skipped_eu    = [s for s in symbols if "." in s]
+    if skipped_eu:
+        log.info(f"[twelvedata] skipping non-US symbols (free plan, US only): {skipped_eu}")
+    if not us_symbols:
+        log.info("[twelvedata] no US symbols to collect")
+        return []
+
+    # filter to symbols not yet collected for each interval
+    symbols_1d = [s for s in us_symbols if not _live_has_today(s, "twelvedata", "1d")]
+    symbols_1h = [s for s in us_symbols if not _hourly_bar_is_current(s, "twelvedata")]
     if not symbols_1d:
         log.info("[twelvedata] all symbols already collected today (1d), skipping")
     if not symbols_1h:
         log.info("[twelvedata] all hourly bars current, skipping 1h fetch")
 
-    def fetch_series(interval: str, outputsize: int = 30) -> None:
-        syms = symbols_1d if interval == "1day" else symbols_1h
+    TD_CREDITS_PER_MIN = 8   # free plan limit
+
+    def _chunks(lst, n):
+        for i in range(0, len(lst), n):
+            yield lst[i:i + n]
+
+    def fetch_series(interval: str, syms: list[str], outputsize: int = 30) -> None:
         if not syms:
             return
-        if not budget_ok(state, "twelvedata"):
-            return
-        data = safe_get(
-            "https://api.twelvedata.com/time_series",
-            params={"symbol": ",".join(syms), "interval": interval,
-                    "outputsize": outputsize, "apikey": key}
-        )
-        record_call(state, "twelvedata")
-        if not data:
-            return
-        # response is {SYM: {values: [...]}} when multiple symbols
-        if "values" in data:
-            data = {syms[0]: data}  # single symbol
-        for sym, payload in data.items():
-            if not isinstance(payload, dict):
-                log.warning(f"[twelvedata] {sym} {interval}: unexpected response type {type(payload).__name__}: {payload}")
+        for i, batch in enumerate(_chunks(syms, TD_CREDITS_PER_MIN)):
+            if not budget_ok(state, "twelvedata"):
+                log.warning("[twelvedata] daily budget exhausted, stopping")
+                return
+            if i > 0:
+                log.info(f"[twelvedata] rate-limit pause 62s before next batch…")
+                time.sleep(62)
+            data = safe_get(
+                "https://api.twelvedata.com/time_series",
+                params={"symbol": ",".join(batch), "interval": interval,
+                        "outputsize": outputsize, "apikey": key}
+            )
+            record_call(state, "twelvedata", len(batch))  # 1 credit per symbol
+            if not data:
+                log.warning(f"[twelvedata] no response for batch {batch}")
                 continue
-            if "values" not in payload:
-                log.warning(f"[twelvedata] {sym} {interval}: {payload.get('message','?')}")
+            # check for a top-level error response (entire batch rejected)
+            # e.g. {"code": 429, "message": "...", "status": "error"}
+            if data.get("status") == "error" or "code" in data and "message" in data:
+                log.warning(f"[twelvedata] {interval} batch error "
+                            f"{data.get('code','?')}: {data.get('message','?')}")
                 continue
-            stored_interval = "1d" if interval == "1day" else interval
-            for bar in payload["values"]:
-                rows.append(make_row(
-                    sym, "twelvedata", bar["datetime"], stored_interval,
-                    bar.get("open"), bar.get("high"), bar.get("low"), bar.get("close"),
-                    bar.get("volume"),
-                ))
-            log.info(f"[twelvedata] {sym} {interval}: {len(payload['values'])} bars")
+            # single-symbol response has "values" at top level; wrap it
+            if "values" in data:
+                data = {batch[0]: data}
+            for sym, payload in data.items():
+                if not isinstance(payload, dict):
+                    log.warning(f"[twelvedata] {sym} {interval}: "
+                                f"unexpected type {type(payload).__name__}: {payload}")
+                    continue
+                if payload.get("status") == "error":
+                    log.warning(f"[twelvedata] {sym} {interval}: "
+                                f"{payload.get('message','API error')}")
+                    continue
+                if "values" not in payload:
+                    log.warning(f"[twelvedata] {sym} {interval}: "
+                                f"no values — {payload.get('message','?')}")
+                    continue
+                stored_interval = "1d" if interval == "1day" else interval
+                for bar in payload["values"]:
+                    rows.append(make_row(
+                        sym, "twelvedata", bar["datetime"], stored_interval,
+                        bar.get("open"), bar.get("high"), bar.get("low"),
+                        bar.get("close"), bar.get("volume"),
+                    ))
+                log.info(f"[twelvedata] {sym} {interval}: {len(payload['values'])} bars")
 
-    fetch_series("1day", outputsize=30)
-    time.sleep(1)
-    fetch_series("1h",   outputsize=24)
+    fetch_series("1day", symbols_1d, outputsize=30)
+    if symbols_1d and symbols_1h:
+        time.sleep(62)   # gap between daily and hourly batches
+    fetch_series("1h",   symbols_1h, outputsize=24)
     return rows
 
 
