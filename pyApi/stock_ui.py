@@ -1305,6 +1305,78 @@ Keep responses concise and conversational."""
                 with st.chat_message("user", avatar="👤"):
                     st.markdown(msg["content"])
 
+        # ── 7-step analysis results ───────────────────────────────────────────
+        ctx = st.session_state.brief_context
+        if ctx and ctx.get("scores"):
+            with st.expander("📊  7-step analysis — full metrics", expanded=False):
+                scores = ctx["scores"]
+
+                # build detailed table
+                rows = []
+                for r in scores:
+                    s  = r.get("summary",    {})
+                    dd = r.get("drawdown",   {})
+                    en = r.get("entry",      {})
+                    mc = r.get("montecarlo", {})
+                    rg = r.get("regression", {})
+                    rows.append({
+                        "Symbol":     r["symbol"],
+                        "Score":      f"{r['score']:.1f}",
+                        "Sharpe":     fmt_val(s.get("sharpe")),
+                        "Calmar":     fmt_val(dd.get("calmar")),
+                        "Vol %":      f"{s['ann_vol']:.1f}" if s.get("ann_vol") else "—",
+                        "Max DD %":   f"{dd['max_dd']:.1f}" if dd.get("max_dd") else "—",
+                        "Recovered":  "✅" if dd.get("recovered") else "❌",
+                        "R²":         fmt_val(rg.get("r2"), 3),
+                        "Trend/yr %": fmt_pct(rg.get("ann_trend")),
+                        "RSI":        f"{en['rsi14']:.0f}" if en.get("rsi14") else "—",
+                        "%B":         f"{en['pct_b']:.2f}" if en.get("pct_b") is not None else "—",
+                        "⚡":         "yes" if en.get("bbands_squeeze") else "",
+                        "P(gain) %":  f"{mc['prob_gain']:.0f}" if mc.get("prob_gain") else "—",
+                        "P50":        fmt_val(mc.get("p50")),
+                        "P5":         fmt_val(mc.get("p5")),
+                        "Total ret %":fmt_pct(s.get("total_ret")),
+                        "Bars":       str(s.get("n_bars", "—")),
+                    })
+                st.dataframe(pd.DataFrame(rows),
+                             width="stretch", hide_index=True)
+
+                # current indicators snapshot
+                if ctx.get("alerts_ctx"):
+                    st.markdown("**Current indicators (live)**")
+                    ind_rows = []
+                    for sym, ictx in ctx["alerts_ctx"].items():
+                        ind_rows.append({
+                            "Symbol":   sym,
+                            "Price":    fmt_val(ictx.get("price")),
+                            "RSI14":    f"{ictx['rsi14']:.1f}" if ictx.get("rsi14") else "—",
+                            "%B":       f"{ictx['bbands_pct_b']:.2f}" if ictx.get("bbands_pct_b") is not None else "—",
+                            "Squeeze":  "⚡" if ictx.get("bbands_squeeze") else "",
+                            "MACD hist":fmt_val(ictx.get("macd_hist")),
+                            "Chg %":    fmt_pct(ictx.get("change_pct")),
+                            "SMA50":    fmt_val(ictx.get("sma50")),
+                            "SMA200":   fmt_val(ictx.get("sma200")),
+                            ">52w low": "✅" if ictx.get("near_52w_low") else "",
+                            ">52w hi":  "🔴" if ictx.get("near_52w_high") else "",
+                        })
+                    st.dataframe(pd.DataFrame(ind_rows),
+                                 width="stretch", hide_index=True)
+
+        # ── prompt inspector ──────────────────────────────────────────────────
+        if st.session_state.brief_messages:
+            with st.expander("🔍  Prompt sent to Claude", expanded=False):
+                st.markdown(
+                    "<span style='color:#4a6075;font-size:0.78rem'>"
+                    "This is the exact text sent as the first message to the Claude API. "
+                    "Follow-up messages are appended to this conversation history."
+                    "</span>",
+                    unsafe_allow_html=True,
+                )
+                st.markdown("**System prompt:**")
+                st.code(SYSTEM_PROMPT, language=None)
+                st.markdown("**User message (analysis data):**")
+                st.code(st.session_state.brief_messages[0]["content"], language=None)
+
         # follow-up question input
         follow_up = st.chat_input(
             "Ask a follow-up question about any symbol or signal…"
