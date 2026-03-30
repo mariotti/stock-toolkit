@@ -25,6 +25,31 @@ import streamlit as st
 SCRIPT_DIR = Path(__file__).parent
 sys.path.insert(0, str(SCRIPT_DIR))
 
+# ── load config.env (same logic as stock_collector.py) ───────────────────────
+def _load_cfg(path: Path) -> dict:
+    cfg: dict = {}
+    if not path.exists():
+        return cfg
+    with open(path) as f:
+        for line in f:
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            if "=" not in line:
+                continue
+            key, _, val = line.partition("=")
+            val = val.strip()
+            if val.startswith("#") or not val:
+                val = ""
+            elif " #" in val:
+                val = val[:val.index(" #")].strip()
+            if len(val) >= 2 and val[0] in ('"', "'") and val[-1] == val[0]:
+                val = val[1:-1]
+            cfg[key.strip()] = val
+    return cfg
+
+_cfg = _load_cfg(SCRIPT_DIR / "config.env")
+
 # ── lazy imports with friendly error messages ─────────────────────────────────
 try:
     import plotly.graph_objects as go
@@ -1095,13 +1120,29 @@ with tab_brief:
 
     def _call_claude(messages: list, system: str) -> str:
         """Call the Claude API and return the text response."""
-        import json as _json
+        import os
+        # Key resolution: config.env ANTHROPIC_KEY → env var ANTHROPIC_API_KEY
+        api_key = (
+            _cfg.get("ANTHROPIC_KEY", "").strip()     # config.env
+            or os.environ.get("ANTHROPIC_API_KEY", "") # environment variable
+        )
+        if not api_key:
+            return (
+                "⚠️  No Claude API key found.\n\n"
+                "Add one of:\n"
+                "  • `ANTHROPIC_KEY=sk-ant-...` in config.env\n"
+                "  • `export ANTHROPIC_API_KEY=sk-ant-...` in your shell before starting Streamlit"
+            )
         try:
             resp = __import__("requests").post(
                 "https://api.anthropic.com/v1/messages",
-                headers={"Content-Type": "application/json"},
+                headers={
+                    "Content-Type":            "application/json",
+                    "x-api-key":               api_key,
+                    "anthropic-version":       "2023-06-01",
+                },
                 json={
-                    "model":      "claude-sonnet-4-20250514",
+                    "model":      "claude-sonnet-4-6",
                     "max_tokens": 1500,
                     "system":     system,
                     "messages":   messages,
@@ -1293,4 +1334,3 @@ Keep responses concise and conversational."""
             "⚠️  This is educational analysis, not financial advice. "
             "Always do your own research before investing."
         )
-

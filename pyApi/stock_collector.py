@@ -1206,9 +1206,21 @@ def _hist_twelvedata(symbols, db_path, date_from, date_to, state) -> list:
         record_call(state, "twelvedata")
         if not data:
             break
+        # check for a top-level error response (e.g. 429 rate limit)
+        if data.get("status") == "error" or ("code" in data and "message" in data):
+            log.warning(f"[hist/twelvedata] batch error "
+                        f"{data.get('code','?')}: {data.get('message','?')}")
+            break
         if "values" in data:
             data = {symbols_needed[0]: data}
         for sym, payload in data.items():
+            if not isinstance(payload, dict):
+                log.warning(f"[hist/twelvedata] {sym}: unexpected type "
+                            f"{type(payload).__name__}: {payload}")
+                continue
+            if payload.get("status") == "error":
+                log.warning(f"[hist/twelvedata] {sym}: {payload.get('message','?')}")
+                continue
             if "values" not in payload:
                 log.warning(f"[hist/twelvedata] {sym}: {payload.get('message','?')}")
                 continue
