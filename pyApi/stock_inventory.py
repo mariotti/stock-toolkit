@@ -530,10 +530,6 @@ examples:
           f"{len(dbs)} database(s)")
 
 
-if __name__ == "__main__":
-    main()
-
-
 # ── paths (mirror stock_collector.py) ────────────────────────────────────────
 
 BASE_DIR = Path(__file__).parent
