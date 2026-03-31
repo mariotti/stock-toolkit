@@ -147,8 +147,17 @@ if [[ "$answer" =~ ^[Yy]$ ]]; then
     fi
 fi
 
-# ── 5. Configuration ──────────────────────────────────────────────────────────
-header "Configuration"
+# ── 5. startUI.sh ────────────────────────────────────────────────────────────
+header "UI launcher"
+
+START_UI="$STOCK_DIR/startUI.sh"
+if [[ -f "$START_UI" ]]; then
+    chmod +x "$START_UI"
+    success "startUI.sh ready"
+else
+    warn "startUI.sh not found — UI must be launched manually."
+fi
+header "7. Configuration"
 
 CONFIG="$STOCK_DIR/config.env"
 TEMPLATE="$STOCK_DIR/config.env.template"
@@ -174,29 +183,38 @@ if [[ -f "$DB" ]]; then
     warn "Database already exists — skipping initial collection."
 else
     echo ""
-    echo "  No database found. You can seed it now with a quick yfinance"
-    echo "  collection (no API key needed, takes ~30 seconds)."
+    echo "  No database found. You can seed it now with a full historical"
+    echo "  download via yfinance (no API key needed, takes 1-2 minutes)."
+    echo "  This gives the UI a proper dataset to work with from day one."
     echo ""
-    read -rp "  Download initial data now? [Y/n] " answer
+    read -rp "  Download full historical data now? [Y/n] " answer
     answer="${answer:-Y}"
     if [[ "$answer" =~ ^[Yy]$ ]]; then
-        info "Running initial collection (yfinance only) ..."
-        "$VENV_PYTHON" "$STOCK_DIR/stock_collector.py" --sources yfinance
-        success "Initial data collected"
+        info "Running historical collection via yfinance (this may take a minute) ..."
+        "$VENV_PYTHON" "$STOCK_DIR/stock_collector.py" \
+            --sources yfinance --historical ALL
+        success "Historical data collected"
     else
-        info "Skipped. Run 'collect' whenever you are ready."
+        info "Skipped. Run 'bin/collect --sources yfinance --historical ALL' whenever you are ready."
     fi
 fi
 
 # ── done ──────────────────────────────────────────────────────────────────────
 echo ""
-echo -e "${GREEN}${BOLD}Installation complete!${RESET}"
+echo -e "${GREEN}${BOLD}╔══════════════════════════════════════════╗"
+echo -e "║   Stock Toolkit installed successfully!  ║"
+echo -e "╚══════════════════════════════════════════╝${RESET}"
 echo ""
-echo "  Start the UI:     cd $STOCK_DIR && .venv/bin/streamlit run stock_ui.py"
-echo "  Collect data:     $WRAPPERS_DIR/collect"
-echo "  View inventory:   $WRAPPERS_DIR/inventory --summary"
-echo "  Check gaps:       $WRAPPERS_DIR/inventory --check"
-echo "  Run scoring:      $WRAPPERS_DIR/score"
+echo -e "  ${BOLD}▶  Start the dashboard:${RESET}"
+echo -e "     ${CYAN}$STOCK_DIR/startUI.sh${RESET}"
+echo ""
+echo "  Then open your browser at: http://localhost:8501"
+echo ""
+echo "  Other commands (from $WRAPPERS_DIR):"
+echo "    collect              — fetch latest data"
+echo "    inventory --summary  — what's in the database"
+echo "    inventory --check    — gap detection"
+echo "    score                — rank your watchlist"
 echo ""
 echo "  See START_HERE.md for a quick-start guide."
 echo ""

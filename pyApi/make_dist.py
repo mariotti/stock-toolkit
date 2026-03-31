@@ -45,6 +45,7 @@ SOURCE_FILES = [
     "crontab.demo",
     "make_dist.py",
     "install.sh",
+    "startUI.sh",
 ]
 
 # Shell wrappers — copied to bin/ subdirectory in the dist
