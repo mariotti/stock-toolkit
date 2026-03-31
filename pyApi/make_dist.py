@@ -16,6 +16,7 @@ Run:
     python3 make_dist.py --out ./public      # custom output directory
     python3 make_dist.py --license apache    # MIT (default), apache, or gpl3
     python3 make_dist.py --dry-run           # show what would be created
+    python3 make_dist.py --package toolkit   # also create stock-toolkit.tar.gz + .zip
 """
 
 import argparse
@@ -350,6 +351,10 @@ examples:
     parser.add_argument("--author", default="",
                         metavar="NAME",
                         help='Author name for license header (default: blank)')
+    parser.add_argument("--package", metavar="NAME",
+                        help="After building, create stock-NAME.tar.gz and stock-NAME.zip "
+                             "with the dist dir renamed to NAME inside the archive. "
+                             "Example: --package toolkit  → stock-toolkit.tar.gz")
     parser.add_argument("--dry-run", action="store_true",
                         help="Show what would be created without writing files")
     args = parser.parse_args()
@@ -481,14 +486,48 @@ examples:
     else:
         print(f"  ✓  {n_ok} files written to {out_dir}/")
         print()
-        print("  Next steps:")
-        print(f"    cd {out_dir}")
-        print(f"    git init")
-        print(f"    git add .")
-        print(f"    git commit -m 'Initial release'")
-        print(f"    git remote add origin <your-repo-url>")
-        print(f"    git push -u origin main")
+        if args.package and not dry_run:
+            _create_packages(out_dir, args.package)
+        else:
+            print("  Next steps:")
+            print(f"    cd {out_dir}")
+            print(f"    git init")
+            print(f"    git add .")
+            print(f"    git commit -m 'Initial release'")
+            print(f"    git remote add origin <your-repo-url>")
+            print(f"    git push -u origin main")
     print(f"{'─'*60}\n")
+
+
+def _create_packages(out_dir: Path, name: str) -> None:
+    """
+    Create stock-NAME.tar.gz and stock-NAME.zip from out_dir,
+    with the directory renamed to NAME inside the archive.
+    Works on both macOS (BSD tar) and Linux (GNU tar).
+    """
+    import tarfile
+    import zipfile
+
+    parent   = out_dir.parent
+    tar_path = parent / f"stock-{name}.tar.gz"
+    zip_path = parent / f"stock-{name}.zip"
+
+    print(f"  Creating {tar_path.name} ...")
+    with tarfile.open(tar_path, "w:gz") as tf:
+        tf.add(out_dir, arcname=name)
+    print(f"  ✓  {tar_path}")
+
+    print(f"  Creating {zip_path.name} ...")
+    with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
+        for f in sorted(out_dir.rglob("*")):
+            arcname = name / f.relative_to(out_dir)
+            zf.write(f, arcname)
+    print(f"  ✓  {zip_path}")
+
+    print()
+    print("  Distribute either file — the user unpacks with:")
+    print(f"    tar xzf stock-{name}.tar.gz   # creates {name}/ directory")
+    print(f"    unzip  stock-{name}.zip        # creates {name}/ directory")
 
 
 if __name__ == "__main__":
