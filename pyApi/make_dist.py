@@ -39,10 +39,12 @@ SOURCE_FILES = [
     "stock_backtest.py",
     "stock_alerts.py",
     "stock_ui.py",
+    "stock_setup.py",
     "test_toolkit.py",
     "test_live_apis.py",
     "crontab.demo",
     "make_dist.py",
+    "install.sh",
     "collect",
     "analyse",
     "inventory",
@@ -308,6 +310,11 @@ def copy_scrubbed(src: Path, dst: Path, dry_run: bool = False):
     cleaned = scrub(content)
     if not dry_run:
         dst.write_text(cleaned, encoding="utf-8")
+        # preserve executable bit for shell scripts and wrappers
+        if src.suffix == ".sh" or src.name in (
+            "collect", "analyse", "inventory", "score", "backtest", "alerts"
+        ):
+            dst.chmod(dst.stat().st_mode | 0o111)
 
 
 def print_file(label: str, path: Path, dry_run: bool):
