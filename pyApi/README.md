@@ -12,6 +12,19 @@ stock_alerts.py       — watch for conditions and send notifications
 stock_ui.py           — Streamlit dashboard (Score · Analysis · Backtest · Alerts)
 ```
 
+## Getting started
+
+**From a distribution package** (recommended for new users):
+```bash
+tar xzf stock-toolkit.tar.gz && cd stock-toolkit/
+bash install.sh       # sets up everything, downloads initial data
+./startUI.sh          # opens the dashboard in your browser
+```
+→ See **`QUICKSTART.md`** for full instructions including the macOS Python note.
+
+**From source / command line:**
+→ See **`QUICKSTART_DEV.md`** for CLI usage without the installer.
+
 ---
 
 ## Table of contents

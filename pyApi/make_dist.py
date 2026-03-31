@@ -60,11 +60,12 @@ WRAPPER_FILES = [
 
 DOC_FILES = [
     "README.md",
+    "QUICKSTART.md",
+    "QUICKSTART_DEV.md",
     "ANALYSIS.md",
     "README_SCORE.md",
     "README_BACKTEST.md",
     "README_ALERTS.md",
-    "START_HERE.md",
 ]
 
 # Personal path patterns to replace.
