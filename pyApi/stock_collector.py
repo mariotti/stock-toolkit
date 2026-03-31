@@ -247,6 +247,43 @@ def db_connect(db_path: "Path | None" = None) -> sqlite3.Connection:
         CREATE INDEX IF NOT EXISTS idx_symbol_date
         ON prices (symbol, data_date)
     """)
+    # ── one-time migration: relabel legacy interval='quote' rows to '1d' ──────
+    # Quote rows (Finnhub/FMP real-time snapshots) used to be stored with
+    # interval='quote', making them invisible to analysis tools that filter on
+    # interval='1d'. They are now written as '1d' directly. This UPDATE runs
+    # on every connection but is a no-op once all rows are migrated (no rows
+    # with interval='quote' remain). The OR IGNORE handles the edge case where
+    # a '1d' row already exists for the same (symbol, source, data_date) — in
+    # that case the quote row is simply deleted as redundant.
+    try:
+        n = con.execute(
+            "SELECT COUNT(*) FROM prices WHERE interval='quote'"
+        ).fetchone()[0]
+        if n > 0:
+            # Delete any quote row that would conflict with an existing 1d row
+            con.execute("""
+                DELETE FROM prices
+                WHERE interval='quote'
+                AND EXISTS (
+                    SELECT 1 FROM prices p2
+                    WHERE p2.symbol    = prices.symbol
+                    AND   p2.source    = prices.source
+                    AND   p2.data_date = prices.data_date
+                    AND   p2.interval  = '1d'
+                )
+            """)
+            # Relabel the rest
+            con.execute("UPDATE prices SET interval='1d' WHERE interval='quote'")
+            con.commit()
+            migrated = con.execute(
+                "SELECT COUNT(*) FROM prices WHERE interval='1d'"
+            ).fetchone()[0]
+            import logging as _log
+            _log.getLogger(__name__).info(
+                f"[db_connect] migrated {n} legacy 'quote' rows → '1d' in {(db_path or DB_PATH).name}"
+            )
+    except Exception:
+        pass   # table may not exist yet on first run
     con.commit()
     return con
 
@@ -269,10 +306,6 @@ def db_insert_rows(rows: list[dict], db_path: "Path | None" = None) -> int:
     added = cur.rowcount
     con.close()
     return added
-
-# ─────────────────────────────────────────────
-#  CSV — legacy / analysis format
-# ─────────────────────────────────────────────
 
 def dedup_key(row: dict) -> str:
     """Fingerprint for a row — used by the CSV path to detect duplicates."""
@@ -508,7 +541,7 @@ def fetch_finnhub(symbols: list[str], state: dict) -> list[dict]:
             continue
         if q and q.get("c"):
             rows.append(make_row(
-                sym, "finnhub", datetime.now(timezone.utc).date(), "quote",
+                sym, "finnhub", datetime.now(timezone.utc).date(), "1d",
                 q.get("o"), q.get("h"), q.get("l"), q.get("c"), q.get("v"),
                 change_pct=q.get("dp"),
                 extra={"prev_close": q.get("pc"), "timestamp": q.get("t")}
@@ -607,7 +640,7 @@ def fetch_fmp(symbols: list[str], state: dict) -> list[dict]:
     if isinstance(q_data, list):
         for q in q_data:
             rows.append(make_row(
-                q["symbol"], "fmp", datetime.now(timezone.utc).date(), "quote",
+                q["symbol"], "fmp", datetime.now(timezone.utc).date(), "1d",
                 q.get("open"), q.get("dayHigh"), q.get("dayLow"),
                 q.get("price"), q.get("volume"),
                 change_pct=q.get("changesPercentage"),
@@ -906,10 +939,12 @@ def _live_has_today(symbol: str, source: str, interval: str = "1d") -> bool:
 
 def _quote_is_fresh(symbol: str, source: str, minutes: int = 25) -> bool:
     """
-    Return True if (symbol, source, interval='quote') has a row inserted
+    Return True if (symbol, source, interval='1d') has a row inserted
     within the last `minutes` minutes.  Used by real-time quote fetchers
     (Finnhub, FMP) so a 30-min cron gets a fresh snapshot every run instead
     of being blocked by the first collection of the day.
+    Quote data is now stored as interval='1d' so it merges cleanly with
+    EOD bars and is visible to all analysis tools.
     """
     if not DB_PATH.exists():
         return False
@@ -919,7 +954,7 @@ def _quote_is_fresh(symbol: str, source: str, minutes: int = 25) -> bool:
         con = sqlite3.connect(DB_PATH)
         n = con.execute(
             "SELECT COUNT(*) FROM prices "
-            "WHERE symbol=? AND source=? AND interval='quote' "
+            "WHERE symbol=? AND source=? AND interval='1d' "
             "AND fetched_at >= ?",
             (symbol, source, cutoff)
         ).fetchone()[0]

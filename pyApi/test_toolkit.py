@@ -310,26 +310,26 @@ class TestCollectorSkipLogic(FixtureTestCase):
         self.assertFalse(self.sc._quote_is_fresh("AAPL", "finnhub", minutes=25))
 
     def test_quote_is_fresh_hit_recent(self):
-        """A quote inserted seconds ago is fresh."""
+        """A quote (now stored as 1d) inserted seconds ago is fresh."""
         from datetime import datetime, timezone
         now = datetime.now(timezone.utc).isoformat()
         con = sqlite3.connect(self.db)
         con.execute(
             "INSERT OR IGNORE INTO prices VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
-            (now, "TEST_FRESH_SYM", "finnhub", str(date.today()), "quote",
+            (now, "TEST_FRESH_SYM", "finnhub", str(date.today()), "1d",
              150, 151, 149, 150, 1000000, 150, 0.1, "")
         )
         con.commit(); con.close()
         self.assertTrue(self.sc._quote_is_fresh("TEST_FRESH_SYM", "finnhub", minutes=25))
 
     def test_quote_is_fresh_miss_old(self):
-        """A quote inserted 2 hours ago is not fresh for a 25-min window."""
+        """A quote (now stored as 1d) inserted 2 hours ago is not fresh for a 25-min window."""
         from datetime import datetime, timezone, timedelta
         old_ts = (datetime.now(timezone.utc) - timedelta(hours=2)).isoformat()
         con = sqlite3.connect(self.db)
         con.execute(
             "INSERT OR IGNORE INTO prices VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
-            (old_ts, "TEST_OLD_QUOTE", "finnhub", str(date.today()), "quote",
+            (old_ts, "TEST_OLD_QUOTE", "finnhub", str(date.today()), "1d",
              150, 151, 149, 150, 1000000, 150, 0.1, "")
         )
         con.commit(); con.close()
