@@ -31,8 +31,6 @@ fi
 
 # ── launch ────────────────────────────────────────────────────────────────────
 cd "$STOCK_DIR"
-echo "Starting Stock Toolkit UI → http://localhost:8501"
 exec "$STREAMLIT" run stock_ui.py \
-    --server.headless true \
-    --server.address 0.0.0.0 \
+    --server.address localhost \
     "$@"
