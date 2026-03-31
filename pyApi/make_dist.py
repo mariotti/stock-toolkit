@@ -45,6 +45,10 @@ SOURCE_FILES = [
     "crontab.demo",
     "make_dist.py",
     "install.sh",
+]
+
+# Shell wrappers — copied to bin/ subdirectory in the dist
+WRAPPER_FILES = [
     "collect",
     "analyse",
     "inventory",
@@ -310,10 +314,8 @@ def copy_scrubbed(src: Path, dst: Path, dry_run: bool = False):
     cleaned = scrub(content)
     if not dry_run:
         dst.write_text(cleaned, encoding="utf-8")
-        # preserve executable bit for shell scripts and wrappers
-        if src.suffix == ".sh" or src.name in (
-            "collect", "analyse", "inventory", "score", "backtest", "alerts"
-        ):
+        # preserve executable bit for shell scripts
+        if src.suffix == ".sh":
             dst.chmod(dst.stat().st_mode | 0o111)
 
 
@@ -385,6 +387,23 @@ examples:
             continue
         copy_scrubbed(src, dst, dry_run)
         print_file(name, dst, dry_run)
+
+    # ── shell wrappers → bin/ subdir ──────────────────────────────────────────
+    print("\n  Shell wrappers (bin/):")
+    bin_dir = out_dir / "bin"
+    if not dry_run:
+        bin_dir.mkdir(exist_ok=True)
+    for name in WRAPPER_FILES:
+        src = SCRIPT_DIR / "bin" / name   # source is bin/ in dev tree
+        dst = bin_dir / name
+        if not src.exists():
+            print(f"  ⚠  MISSING: bin/{name}")
+            missing.append(name)
+            continue
+        copy_scrubbed(src, dst, dry_run)
+        if not dry_run:
+            dst.chmod(dst.stat().st_mode | 0o111)
+        print_file(f"bin/{name}", dst, dry_run)
 
     # ── documentation ─────────────────────────────────────────────────────────
     print("\n  Documentation:")

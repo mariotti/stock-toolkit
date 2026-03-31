@@ -87,32 +87,64 @@ success "Dependencies installed"
 # ── 4. Shell wrappers ─────────────────────────────────────────────────────────
 header "Installing shell wrappers"
 
-BIN_DIR="$HOME/bin"
-mkdir -p "$BIN_DIR"
-
 WRAPPERS=(collect analyse inventory score backtest alerts)
-for wrapper in "${WRAPPERS[@]}"; do
-    src="$STOCK_DIR/$wrapper"
-    dst="$BIN_DIR/$wrapper"
-    if [[ ! -f "$src" ]]; then
-        warn "Wrapper '$wrapper' not found in $STOCK_DIR — skipping."
-        continue
-    fi
-    # Copy and patch STOCK_DIR default inside the wrapper
-    sed "s|STOCK_DIR=\"\${STOCK_DIR:-\$HOME/stock}\"|STOCK_DIR=\"\${STOCK_DIR:-$STOCK_DIR}\"|g" \
-        "$src" > "$dst"
-    chmod +x "$dst"
-    success "~/bin/$wrapper"
-done
+WRAPPERS_SRC="$STOCK_DIR/bin"   # wrappers shipped in bin/ subdir of the dist
+WRAPPERS_DIR="$STOCK_DIR/bin"   # they stay there — no copy needed
 
-# Check ~/bin is on PATH
-if ! echo "$PATH" | tr ':' '\n' | grep -q "^$BIN_DIR$"; then
-    warn "~/bin is not on your PATH."
-    echo "  Add this to your shell profile (~/.zshrc or ~/.bashrc):"
-    echo ""
-    echo "    export PATH=\"\$HOME/bin:\$PATH\""
-    echo ""
-    echo "  Then reload: source ~/.zshrc"
+if [[ ! -d "$WRAPPERS_SRC" ]]; then
+    warn "bin/ directory not found in $STOCK_DIR — wrapper installation skipped."
+else
+    for wrapper in "${WRAPPERS[@]}"; do
+        src="$WRAPPERS_SRC/$wrapper"
+        if [[ ! -f "$src" ]]; then
+            warn "Wrapper '$wrapper' not found — skipping."
+            continue
+        fi
+        # Patch STOCK_DIR default inside the wrapper in-place
+        sed -i.bak "s|STOCK_DIR=\"\${STOCK_DIR:-\$HOME/stock}\"|STOCK_DIR=\"\${STOCK_DIR:-$STOCK_DIR}\"|g" \
+            "$src" && rm -f "${src}.bak"
+        chmod +x "$src"
+        success "bin/$wrapper"
+    done
+fi
+
+# PATH guidance
+echo ""
+echo -e "  Wrappers installed to: ${CYAN}$WRAPPERS_DIR${RESET}"
+echo ""
+echo "  To use them from anywhere, choose one option:"
+echo ""
+echo "  Option A — add to PATH (add this to ~/.zshrc or ~/.bashrc):"
+echo -e "    ${BOLD}export PATH=\"$WRAPPERS_DIR:\$PATH\"${RESET}"
+echo ""
+echo "  Option B — symlink each command to ~/bin:"
+echo -e "    ${BOLD}mkdir -p ~/bin"
+for wrapper in "${WRAPPERS[@]}"; do
+    echo -e "    ln -sf $WRAPPERS_DIR/$wrapper ~/bin/$wrapper"
+done
+echo -e "    ${RESET}"
+echo "  Option C — use with full path:"
+echo -e "    ${BOLD}$WRAPPERS_DIR/collect${RESET}"
+echo ""
+read -rp "  Add $WRAPPERS_DIR to PATH automatically in your shell profile? [y/N] " answer
+answer="${answer:-N}"
+if [[ "$answer" =~ ^[Yy]$ ]]; then
+    SHELL_PROFILE=""
+    if [[ -f "$HOME/.zshrc" ]]; then
+        SHELL_PROFILE="$HOME/.zshrc"
+    elif [[ -f "$HOME/.bashrc" ]]; then
+        SHELL_PROFILE="$HOME/.bashrc"
+    elif [[ -f "$HOME/.bash_profile" ]]; then
+        SHELL_PROFILE="$HOME/.bash_profile"
+    fi
+    if [[ -n "$SHELL_PROFILE" ]]; then
+        echo "" >> "$SHELL_PROFILE"
+        echo "# Stock Toolkit" >> "$SHELL_PROFILE"
+        echo "export PATH=\"$WRAPPERS_DIR:\$PATH\"" >> "$SHELL_PROFILE"
+        success "Added to $SHELL_PROFILE — restart your terminal or run: source $SHELL_PROFILE"
+    else
+        warn "Could not detect shell profile. Add the export line manually."
+    fi
 fi
 
 # ── 5. Configuration ──────────────────────────────────────────────────────────
@@ -161,10 +193,10 @@ echo ""
 echo -e "${GREEN}${BOLD}Installation complete!${RESET}"
 echo ""
 echo "  Start the UI:     cd $STOCK_DIR && .venv/bin/streamlit run stock_ui.py"
-echo "  Collect data:     collect"
-echo "  View inventory:   inventory --summary"
-echo "  Check gaps:       inventory --check"
-echo "  Run scoring:      score"
+echo "  Collect data:     $WRAPPERS_DIR/collect"
+echo "  View inventory:   $WRAPPERS_DIR/inventory --summary"
+echo "  Check gaps:       $WRAPPERS_DIR/inventory --check"
+echo "  Run scoring:      $WRAPPERS_DIR/score"
 echo ""
 echo "  See START_HERE.md for a quick-start guide."
 echo ""
