@@ -47,6 +47,7 @@ SOURCE_FILES = [
     "make_dist.py",
     "install.sh",
     "startUI.sh",
+    "VERSION",
 ]
 
 # Shell wrappers — copied to bin/ subdirectory in the dist
@@ -501,17 +502,24 @@ examples:
 
 def _create_packages(out_dir: Path, name: str) -> None:
     """
-    Create stock-NAME.tar.gz and stock-NAME.zip from out_dir,
+    Create stock-NAME-VERSION.tar.gz and stock-NAME-VERSION.zip from out_dir,
     with the directory renamed to NAME inside the archive.
+    Version is read from VERSION file in the source directory.
     Works on both macOS (BSD tar) and Linux (GNU tar).
     """
     import tarfile
     import zipfile
 
-    parent   = out_dir.parent
-    tar_path = parent / f"stock-{name}.tar.gz"
-    zip_path = parent / f"stock-{name}.zip"
+    # read version — fall back to 'dev' if VERSION file is missing
+    version_file = SCRIPT_DIR / "VERSION"
+    version = version_file.read_text().strip() if version_file.exists() else "dev"
 
+    parent   = out_dir.parent
+    base     = f"stock-{name}-{version}"
+    tar_path = parent / f"{base}.tar.gz"
+    zip_path = parent / f"{base}.zip"
+
+    print(f"  Version: {version}")
     print(f"  Creating {tar_path.name} ...")
     with tarfile.open(tar_path, "w:gz") as tf:
         tf.add(out_dir, arcname=name)
@@ -526,8 +534,8 @@ def _create_packages(out_dir: Path, name: str) -> None:
 
     print()
     print("  Distribute either file — the user unpacks with:")
-    print(f"    tar xzf stock-{name}.tar.gz   # creates {name}/ directory")
-    print(f"    unzip  stock-{name}.zip        # creates {name}/ directory")
+    print(f"    tar xzf {base}.tar.gz   # creates {name}/ directory")
+    print(f"    unzip   {base}.zip       # creates {name}/ directory")
 
 
 if __name__ == "__main__":
