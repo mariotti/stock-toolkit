@@ -109,9 +109,9 @@ def load_series(symbol: str, n_bars: int = 250) -> pd.DataFrame:
         try:
             con = sqlite3.connect(db)
             df  = pd.read_sql(
-                "SELECT data_date, source, open, high, low, close, volume "
+                "SELECT timestamp, source, open, high, low, close, volume "
                 "FROM prices WHERE symbol=? AND interval='1d' "
-                "ORDER BY data_date DESC LIMIT ?",
+                "ORDER BY timestamp DESC LIMIT ?",
                 con, params=[symbol.upper(), n_bars * 2]
             )
             con.close()
@@ -124,19 +124,19 @@ def load_series(symbol: str, n_bars: int = 250) -> pd.DataFrame:
         return pd.DataFrame()
 
     df = pd.concat(frames, ignore_index=True)
-    df["data_date"] = pd.to_datetime(df["data_date"], format="mixed",
+    df["timestamp"] = pd.to_datetime(df["timestamp"], format="mixed",
                                       utc=True, errors="coerce")
-    df = df.dropna(subset=["data_date", "close"])
+    df = df.dropna(subset=["timestamp", "close"])
     for col in ["open", "high", "low", "close", "volume"]:
         df[col] = pd.to_numeric(df[col], errors="coerce")
 
     # source dedup
     prio = {s: i for i, s in enumerate(SOURCE_PRIORITY)}
     df["_p"] = df["source"].map(lambda s: prio.get(s, 99))
-    df = df.sort_values("_p").drop_duplicates(subset=["data_date"], keep="first")
+    df = df.sort_values("_p").drop_duplicates(subset=["timestamp"], keep="first")
     df = df.drop(columns=["_p"])
 
-    df = df.sort_values("data_date").tail(n_bars).reset_index(drop=True)
+    df = df.sort_values("timestamp").tail(n_bars).reset_index(drop=True)
     return df
 
 
@@ -578,7 +578,7 @@ examples:
             print(f"  {sym}: not enough data to compute indicators.")
             continue
 
-        latest_date = df["data_date"].iloc[-1].strftime("%Y-%m-%d")
+        latest_date = df["timestamp"].iloc[-1].strftime("%Y-%m-%d")
         print(f"  {sym}  (latest bar: {latest_date},  price: {ctx['price']:.2f})")
 
         for cond in args.conditions:
@@ -610,4 +610,3 @@ examples:
 
 if __name__ == "__main__":
     main()
-

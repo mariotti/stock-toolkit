@@ -45,6 +45,7 @@ SOURCE_FILES = [
     "test_live_apis.py",
     "crontab.demo",
     "make_dist.py",
+    "make_docs.py",
     "install.sh",
     "startUI.sh",
     "VERSION",
@@ -356,6 +357,9 @@ examples:
                         help="After building, create stock-NAME.tar.gz and stock-NAME.zip "
                              "with the dist dir renamed to NAME inside the archive. "
                              "Example: --package toolkit  → stock-toolkit.tar.gz")
+    parser.add_argument("--docs", action="store_true",
+                        help="Generate API docs and diagrams into docs/ before packaging "
+                             "(requires: pip install pdoc pylint && brew install graphviz)")
     parser.add_argument("--dry-run", action="store_true",
                         help="Show what would be created without writing files")
     args = parser.parse_args()
@@ -487,6 +491,18 @@ examples:
     else:
         print(f"  ✓  {n_ok} files written to {out_dir}/")
         print()
+        if args.docs and not dry_run:
+            print("  Generating documentation...")
+            import subprocess as _sp
+            docs_out = out_dir / "docs"
+            result = _sp.run(
+                [sys.executable, str(SCRIPT_DIR / "make_docs.py"),
+                 "--out", str(docs_out)],
+                cwd=SCRIPT_DIR
+            )
+            if result.returncode != 0:
+                print("  ⚠  Documentation generation had errors (see above)")
+            print()
         if args.package and not dry_run:
             _create_packages(out_dir, args.package)
         else:

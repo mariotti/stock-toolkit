@@ -153,8 +153,8 @@ def load_prices(symbol: str, date_from: str | None,
         try:
             con = sqlite3.connect(db)
             df  = pd.read_sql(
-                "SELECT data_date, source, open, high, low, close, volume "
-                "FROM prices WHERE symbol=? AND interval='1d' ORDER BY data_date",
+                "SELECT timestamp, source, open, high, low, close, volume "
+                "FROM prices WHERE symbol=? AND interval='1d' ORDER BY timestamp",
                 con, params=[symbol.upper()]
             )
             con.close()
@@ -167,21 +167,21 @@ def load_prices(symbol: str, date_from: str | None,
         return pd.DataFrame()
 
     df = pd.concat(frames, ignore_index=True)
-    df["data_date"] = pd.to_datetime(df["data_date"], format="mixed",
+    df["timestamp"] = pd.to_datetime(df["timestamp"], format="mixed",
                                       utc=True, errors="coerce")
-    df = df.dropna(subset=["data_date", "close"])
+    df = df.dropna(subset=["timestamp", "close"])
     for col in ["open", "high", "low", "close", "volume"]:
         df[col] = pd.to_numeric(df[col], errors="coerce")
 
     prio = {s: i for i, s in enumerate(SOURCE_PRIORITY)}
     df["_p"] = df["source"].map(lambda s: prio.get(s, 99))
-    df = df.sort_values("_p").drop_duplicates(subset=["data_date"], keep="first")
-    df = df.drop(columns=["_p"]).sort_values("data_date").reset_index(drop=True)
+    df = df.sort_values("_p").drop_duplicates(subset=["timestamp"], keep="first")
+    df = df.drop(columns=["_p"]).sort_values("timestamp").reset_index(drop=True)
 
     if date_from:
-        df = df[df["data_date"] >= pd.Timestamp(date_from, tz="UTC")]
+        df = df[df["timestamp"] >= pd.Timestamp(date_from, tz="UTC")]
     if date_to:
-        df = df[df["data_date"] <= pd.Timestamp(date_to, tz="UTC")]
+        df = df[df["timestamp"] <= pd.Timestamp(date_to, tz="UTC")]
 
     return df.reset_index(drop=True)
 
@@ -596,13 +596,13 @@ examples:
 
         # resample to horizon granularity
         try:
-            df_r = df.set_index("data_date").resample(h_gran).agg({
+            df_r = df.set_index("timestamp").resample(h_gran).agg({
                 "open":"first","high":"max","low":"min",
                 "close":"last","volume":"sum",
             }).dropna(subset=["close"]).reset_index()
         except Exception:
             fb = {"ME":"M","QE":"Q","YE":"Y"}.get(h_gran, h_gran)
-            df_r = df.set_index("data_date").resample(fb).agg({
+            df_r = df.set_index("timestamp").resample(fb).agg({
                 "open":"first","high":"max","low":"min",
                 "close":"last","volume":"sum",
             }).dropna(subset=["close"]).reset_index()
@@ -717,4 +717,3 @@ examples:
 
 if __name__ == "__main__":
     main()
-

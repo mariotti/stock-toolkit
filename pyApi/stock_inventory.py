@@ -62,8 +62,8 @@ def query_db(db: Path, symbol_filter: list[str] | None) -> list[dict]:
                 source,
                 interval,
                 COUNT(*)                      AS n_rows,
-                MIN(data_date)                AS date_from,
-                MAX(data_date)                AS date_to
+                MIN(timestamp)                AS date_from,
+                MAX(timestamp)                AS date_to
             FROM prices{where}
             GROUP BY symbol, source, interval
             ORDER BY symbol, interval, source
@@ -230,8 +230,8 @@ def cmd_check(dbs: list[Path], symbol_filter: list[str] | None) -> None:
 
         try:
             rows = con.execute(
-                f"SELECT symbol, data_date FROM prices "
-                f"WHERE interval='1d'{where} ORDER BY symbol, data_date",
+                f"SELECT symbol, timestamp FROM prices "
+                f"WHERE interval='1d'{where} ORDER BY symbol, timestamp",
                 params,
             ).fetchall()
         except sqlite3.OperationalError:
@@ -553,8 +553,8 @@ def query_db(db: Path, symbol_filter: list[str] | None) -> list[dict]:
                 source,
                 interval,
                 COUNT(*)                      AS n_rows,
-                MIN(data_date)                AS date_from,
-                MAX(data_date)                AS date_to
+                MIN(timestamp)                AS date_from,
+                MAX(timestamp)                AS date_to
             FROM prices{where}
             GROUP BY symbol, source, interval
             ORDER BY symbol, interval, source

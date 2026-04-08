@@ -14,6 +14,7 @@ Run:
 
 import importlib.util
 import json
+import os
 import pathlib
 import sqlite3
 import sys
@@ -23,6 +24,20 @@ from datetime import date, timedelta
 
 import numpy as np
 import pandas as pd
+
+
+def _count_open_fds() -> int:
+    """
+    Count open file descriptors for the current process.
+    Works on both Linux (/proc/self/fd) and macOS (/dev/fd).
+    Falls back to -1 if neither is available.
+    """
+    for fd_dir in ('/proc/self/fd', '/dev/fd'):
+        try:
+            return len(os.listdir(fd_dir))
+        except OSError:
+            continue
+    return -1
 
 # ─────────────────────────────────────────────
 #  FIXTURE HELPERS
@@ -66,10 +81,10 @@ def make_fixture_db(tmp_dir: pathlib.Path) -> pathlib.Path:
     con.execute("""
         CREATE TABLE prices (
             fetched_at TEXT, symbol TEXT, source TEXT,
-            data_date TEXT, interval TEXT,
+            timestamp TEXT, interval TEXT,
             open REAL, high REAL, low REAL, close REAL, volume INTEGER,
             vwap REAL, change_pct REAL, extra TEXT,
-            UNIQUE(symbol, source, data_date, interval)
+            UNIQUE(symbol, source, timestamp)
         )
     """)
 
@@ -90,7 +105,7 @@ def make_fixture_db(tmp_dir: pathlib.Path) -> pathlib.Path:
             for source in ("yfinance", "fmp"):
                 con.execute(
                     "INSERT OR IGNORE INTO prices VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                    ("2024-01-01", sym, source, ds, "1d",
+                    ("2024-01-01", sym, source, ds + "T00:00:00+00:00", "1d",
                      o, h, lo, round(price, 4), vol,
                      round(price, 4), round(ret * 100, 4), "")
                 )
@@ -221,7 +236,7 @@ class TestCollectorDedup(FixtureTestCase):
         today = str(date.today())
         con.execute(
             "INSERT OR IGNORE INTO prices VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
-            ("x", "TEST_TODAY_SYM", "yfinance", today, "1d",
+            ("x", "TEST_TODAY_SYM", "yfinance", today + "T00:00:00+00:00", "1d",
              150, 151, 149, 150, 1000000, 150, 0.1, "")
         )
         con.commit(); con.close()
@@ -316,7 +331,7 @@ class TestCollectorSkipLogic(FixtureTestCase):
         con = sqlite3.connect(self.db)
         con.execute(
             "INSERT OR IGNORE INTO prices VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
-            (now, "TEST_FRESH_SYM", "finnhub", str(date.today()), "1d",
+            (now, "TEST_FRESH_SYM", "finnhub", now, "1d",
              150, 151, 149, 150, 1000000, 150, 0.1, "")
         )
         con.commit(); con.close()
@@ -329,7 +344,7 @@ class TestCollectorSkipLogic(FixtureTestCase):
         con = sqlite3.connect(self.db)
         con.execute(
             "INSERT OR IGNORE INTO prices VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
-            (old_ts, "TEST_OLD_QUOTE", "finnhub", str(date.today()), "1d",
+            (old_ts, "TEST_OLD_QUOTE", "finnhub", old_ts, "1d",
              150, 151, 149, 150, 1000000, 150, 0.1, "")
         )
         con.commit(); con.close()
@@ -342,7 +357,7 @@ class TestCollectorSkipLogic(FixtureTestCase):
         con = sqlite3.connect(self.db)
         con.execute(
             "INSERT OR IGNORE INTO prices VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
-            (now, "TEST_SRC_SYM", "finnhub", str(date.today()), "quote",
+            (now, "TEST_SRC_SYM", "finnhub", now, "1d",
              150, 151, 149, 150, 1000000, 150, 0.1, "")
         )
         con.commit(); con.close()
@@ -430,7 +445,7 @@ class TestScoreSteps(FixtureTestCase):
         cls.df   = cls.ss.load_prices("AAPL", "2022-01-01", None)
         # weekly resample used by scorer
         cls.df_w = (
-            cls.df.set_index("data_date")
+            cls.df.set_index("timestamp")
             .resample("W-FRI")
             .agg({"open":"first","high":"max","low":"min",
                   "close":"last","volume":"sum"})
@@ -443,7 +458,7 @@ class TestScoreSteps(FixtureTestCase):
         self.assertGreater(len(self.df), 100)
 
     def test_load_prices_columns(self):
-        for col in ["data_date", "close", "open", "high", "low", "volume"]:
+        for col in ["timestamp", "close", "open", "high", "low", "volume"]:
             self.assertIn(col, self.df.columns)
 
     def test_list_all_symbols(self):
@@ -512,13 +527,13 @@ class TestScoreSteps(FixtureTestCase):
         for horizon, profile in self.ss.HORIZON_PROFILES.items():
             gran = profile["gran"]
             try:
-                df_r = self.df.set_index("data_date").resample(gran).agg(
+                df_r = self.df.set_index("timestamp").resample(gran).agg(
                     {"open":"first","high":"max","low":"min",
                      "close":"last","volume":"sum"}
                 ).dropna(subset=["close"]).reset_index()
             except Exception:
                 fb   = {"ME":"M","QE":"Q"}.get(gran, gran)
-                df_r = self.df.set_index("data_date").resample(fb).agg(
+                df_r = self.df.set_index("timestamp").resample(fb).agg(
                     {"open":"first","high":"max","low":"min",
                      "close":"last","volume":"sum"}
                 ).dropna(subset=["close"]).reset_index()
@@ -778,7 +793,7 @@ class TestPipeline(FixtureTestCase):
             df = self.ss.load_prices(sym, "2022-01-01", None)
             if df.empty:
                 continue
-            df_w = (df.set_index("data_date")
+            df_w = (df.set_index("timestamp")
                     .resample("W-FRI")
                     .agg({"open":"first","high":"max","low":"min",
                           "close":"last","volume":"sum"})
@@ -807,7 +822,7 @@ class TestPipeline(FixtureTestCase):
         scores2 = []
         for sym in SYMBOLS:
             df   = self.ss.load_prices(sym, "2022-01-01", None)
-            df_w = (df.set_index("data_date")
+            df_w = (df.set_index("timestamp")
                     .resample("W-FRI")
                     .agg({"open":"first","high":"max","low":"min",
                           "close":"last","volume":"sum"})
@@ -838,7 +853,7 @@ class TestPipeline(FixtureTestCase):
 
         # Score
         df2  = self.ss.load_prices(sym, "2022-01-01", None)
-        df_w = (df2.set_index("data_date")
+        df_w = (df2.set_index("timestamp")
                 .resample("W-FRI")
                 .agg({"open":"first","high":"max","low":"min",
                       "close":"last","volume":"sum"})
@@ -877,7 +892,7 @@ class TestPipeline(FixtureTestCase):
         series = {}
         for sym in SYMBOLS:
             df = self.ss.load_prices(sym, "2022-01-01", None)
-            df_w = (df.set_index("data_date")
+            df_w = (df.set_index("timestamp")
                     .resample("W-FRI").last()
                     .dropna())
             series[sym] = df_w["close"].pct_change().dropna()
@@ -900,12 +915,12 @@ class TestPipeline(FixtureTestCase):
         df   = self.ss.load_prices(sym, "2022-01-01", None)
         prof = self.ss.HORIZON_PROFILES["life"]
         try:
-            df_m = (df.set_index("data_date")
+            df_m = (df.set_index("timestamp")
                     .resample("ME").agg({"open":"first","high":"max",
                                          "low":"min","close":"last","volume":"sum"})
                     .dropna(subset=["close"]).reset_index())
         except Exception:
-            df_m = (df.set_index("data_date")
+            df_m = (df.set_index("timestamp")
                     .resample("M").agg({"open":"first","high":"max",
                                         "low":"min","close":"last","volume":"sum"})
                     .dropna(subset=["close"]).reset_index())
@@ -1002,7 +1017,7 @@ class TestInventory(FixtureTestCase):
         con = _sq.connect(gap_db)
         con.execute("""CREATE TABLE prices (
             fetched_at TEXT, symbol TEXT, source TEXT,
-            data_date TEXT, interval TEXT,
+            timestamp TEXT, interval TEXT,
             open REAL, high REAL, low REAL, close REAL, volume INTEGER,
             vwap REAL, change_pct REAL, extra TEXT)""")
         days = []
@@ -1095,6 +1110,321 @@ class TestInventory(FixtureTestCase):
 
 
 
+class TestFailureTracker(FixtureTestCase):
+    """Tests for record_failure / is_suppressed / flush_failures."""
+
+    def setUp(self):
+        self.sc = _load_module("stock_collector", self.db, self.tmp_dir)
+        # Point failures file to a temp location
+        self.failures_path = self.tmp_dir / "test_failures.csv"
+        self.sc.FAILURES_PATH = self.failures_path
+        self.sc._failures = None   # reset module-level cache
+
+    def test_record_failure_creates_file(self):
+        """First failure creates the CSV."""
+        self.sc.record_failure("AAPL", "yfinance", "0 bars")
+        self.sc.flush_failures()
+        self.assertTrue(self.failures_path.exists())
+
+    def test_record_failure_increments_hits(self):
+        """Hitting the same pair multiple times increments the counter."""
+        for _ in range(3):
+            self.sc.record_failure("MSFT", "fmp", "paid plan")
+        self.sc.flush_failures()
+        f = self.sc._load_failures()
+        self.assertEqual(f[("MSFT", "fmp")]["hits"], 3)
+
+    def test_is_suppressed_below_threshold(self):
+        """Below threshold: not suppressed."""
+        for _ in range(self.sc.FAILURE_THRESHOLD - 1):
+            self.sc.record_failure("TSLA", "finnhub", "empty")
+        self.assertFalse(self.sc.is_suppressed("TSLA", "finnhub"))
+
+    def test_is_suppressed_at_threshold(self):
+        """At threshold: suppressed."""
+        for _ in range(self.sc.FAILURE_THRESHOLD):
+            self.sc.record_failure("AMD", "twelvedata", "not found")
+        self.assertTrue(self.sc.is_suppressed("AMD", "twelvedata"))
+
+    def test_suppression_is_source_specific(self):
+        """Suppressed on one source does not affect another."""
+        for _ in range(self.sc.FAILURE_THRESHOLD):
+            self.sc.record_failure("GOOGL", "marketstack", "no data")
+        self.assertTrue(self.sc.is_suppressed("GOOGL", "marketstack"))
+        self.assertFalse(self.sc.is_suppressed("GOOGL", "yfinance"))
+
+    def test_flush_then_reload(self):
+        """Failures survive a flush-and-reload cycle."""
+        self.sc.record_failure("AMZN", "polygon", "bad status")
+        self.sc.flush_failures()
+        self.sc._failures = None   # clear cache to force reload
+        self.assertEqual(self.sc._get_failures()[("AMZN", "polygon")]["hits"], 1)
+
+    def test_reason_updated_on_new_failure(self):
+        """Most recent reason overwrites the old one."""
+        self.sc.record_failure("MU", "alphavantage", "first reason")
+        self.sc.record_failure("MU", "alphavantage", "second reason")
+        self.assertEqual(
+            self.sc._get_failures()[("MU", "alphavantage")]["reason"],
+            "second reason"
+        )
+
+
+class TestTimestamp(FixtureTestCase):
+    """Tests for _to_timestamp() normalisation."""
+
+    def setUp(self):
+        self.sc = _load_module("stock_collector", self.db, self.tmp_dir)
+
+    def test_date_only_string(self):
+        """Date-only string → midnight UTC."""
+        result = self.sc._to_timestamp("2024-03-15")
+        self.assertEqual(result, "2024-03-15T00:00:00+00:00")
+
+    def test_full_iso_string_with_tz(self):
+        """Full ISO string with timezone → kept normalised."""
+        result = self.sc._to_timestamp("2024-03-15T14:30:00+00:00")
+        self.assertIn("2024-03-15T14:30:00", result)
+
+    def test_date_object(self):
+        """date object → midnight UTC."""
+        from datetime import date
+        result = self.sc._to_timestamp(date(2024, 3, 15))
+        self.assertEqual(result, "2024-03-15T00:00:00+00:00")
+
+    def test_datetime_with_tz(self):
+        """datetime with timezone → kept as-is."""
+        from datetime import datetime, timezone
+        dt = datetime(2024, 3, 15, 14, 30, 0, tzinfo=timezone.utc)
+        result = self.sc._to_timestamp(dt)
+        self.assertIn("2024-03-15T14:30:00", result)
+
+    def test_datetime_without_tz(self):
+        """Naive datetime → assumed UTC."""
+        from datetime import datetime
+        dt = datetime(2024, 3, 15, 14, 30, 0)
+        result = self.sc._to_timestamp(dt)
+        self.assertIn("2024-03-15T14:30:00", result)
+        self.assertIn("+00:00", result)
+
+    def test_unix_timestamp(self):
+        """Unix integer → UTC datetime."""
+        result = self.sc._to_timestamp(1710508800)  # 2024-03-15T16:00:00Z
+        self.assertTrue(result.startswith("2024-03-15"))
+
+    def test_infer_interval_daily(self):
+        """Midnight UTC → 1d interval."""
+        self.assertEqual(self.sc._infer_interval("2024-03-15T00:00:00+00:00"), "1d")
+
+    def test_infer_interval_hourly(self):
+        """Non-midnight → 1h interval."""
+        self.assertEqual(self.sc._infer_interval("2024-03-15T14:30:00+00:00"), "1h")
+
+
+class TestSchemaMigration(FixtureTestCase):
+    """Tests for automatic data_date → timestamp DB migration."""
+
+    def setUp(self):
+        self.sc = _load_module("stock_collector", self.db, self.tmp_dir)
+
+    def test_migration_renames_column(self):
+        """Old DB with data_date column is migrated to timestamp."""
+        import sqlite3, pathlib
+        old_db = self.tmp_dir / "old_schema.db"
+        con = sqlite3.connect(old_db)
+        con.execute("""CREATE TABLE prices (
+            fetched_at TEXT, symbol TEXT, source TEXT,
+            data_date TEXT, interval TEXT,
+            open REAL, high REAL, low REAL, close REAL,
+            volume INTEGER, vwap REAL, change_pct REAL, extra TEXT,
+            UNIQUE(symbol, source, data_date, interval))""")
+        con.execute("INSERT INTO prices VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            ("2024-01-01","AAPL","yfinance","2024-03-15","1d",
+             150,151,149,150,1000000,None,None,None))
+        con.commit(); con.close()
+
+        self.sc.db_connect(old_db).close()
+
+        con = sqlite3.connect(old_db)
+        cols = {r[1] for r in con.execute("PRAGMA table_info(prices)").fetchall()}
+        rows = con.execute("SELECT timestamp FROM prices").fetchall()
+        con.close()
+
+        self.assertIn("timestamp", cols)
+        self.assertNotIn("data_date", cols)
+        self.assertEqual(rows[0][0], "2024-03-15T00:00:00+00:00")
+
+    def test_migration_preserves_full_timestamps(self):
+        """Full datetime values survive migration unchanged."""
+        import sqlite3
+        old_db = self.tmp_dir / "old_schema2.db"
+        con = sqlite3.connect(old_db)
+        con.execute("""CREATE TABLE prices (
+            fetched_at TEXT, symbol TEXT, source TEXT,
+            data_date TEXT, interval TEXT,
+            open REAL, high REAL, low REAL, close REAL,
+            volume INTEGER, vwap REAL, change_pct REAL, extra TEXT,
+            UNIQUE(symbol, source, data_date, interval))""")
+        con.execute("INSERT INTO prices VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            ("2024-01-01","MSFT","yfinance","2024-03-15T14:00:00+00:00","1h",
+             300,301,299,300,2000000,None,None,None))
+        con.commit(); con.close()
+
+        self.sc.db_connect(old_db).close()
+
+        con = sqlite3.connect(old_db)
+        ts = con.execute("SELECT timestamp FROM prices").fetchone()[0]
+        con.close()
+        self.assertEqual(ts, "2024-03-15T14:00:00+00:00")
+
+    def test_new_db_has_timestamp_column(self):
+        """Fresh DB created by db_connect() uses timestamp schema."""
+        import sqlite3
+        new_db = self.tmp_dir / "fresh.db"
+        self.sc.db_connect(new_db).close()
+        con = sqlite3.connect(new_db)
+        cols = {r[1] for r in con.execute("PRAGMA table_info(prices)").fetchall()}
+        con.close()
+        self.assertIn("timestamp", cols)
+        self.assertNotIn("data_date", cols)
+
+
+class TestFdLeak(FixtureTestCase):
+    """
+    Integration-style stress test: verifies that repeated skip-function calls
+    do not leak file descriptors.
+
+    This is the class of bug that unit tests miss — the leak only manifests
+    after many sequential calls, as happens in a real collection run with
+    20 symbols × 7 sources × multiple checks each.
+
+    Root cause history: sqlite3 connection context managers ('with
+    sqlite3.connect() as con:') manage transactions but do NOT close the
+    connection. Each exiting 'with' block left a dangling FD. After ~180
+    calls the macOS default limit of 256 was hit, causing OSError on
+    unrelated file opens (save_state, DNS sockets, etc.).
+    """
+
+    CALLS = 200   # simulate 20 symbols × 10 checks — well above real workload
+
+    def setUp(self):
+        self.sc = _load_module("stock_collector", self.db, self.tmp_dir)
+
+    @unittest.skipIf(_count_open_fds() < 0, "FD counting not available on this platform")
+    def test_live_has_today_no_fd_leak(self):
+        """_live_has_today() must not leak FDs across many calls."""
+        # warm-up: let Python/sqlite3 establish any one-time internal FDs
+        for _ in range(5):
+            self.sc._live_has_today("AAPL", "yfinance", "1d")
+
+        before = _count_open_fds()
+        for _ in range(self.CALLS):
+            self.sc._live_has_today("AAPL", "yfinance", "1d")
+        after = _count_open_fds()
+
+        leaked = after - before
+        self.assertEqual(leaked, 0,
+            f"_live_has_today leaked {leaked} FDs over {self.CALLS} calls")
+
+    @unittest.skipIf(_count_open_fds() < 0, "FD counting not available on this platform")
+    def test_quote_is_fresh_no_fd_leak(self):
+        """_quote_is_fresh() must not leak FDs across many calls."""
+        for _ in range(5):
+            self.sc._quote_is_fresh("AAPL", "finnhub")
+
+        before = _count_open_fds()
+        for _ in range(self.CALLS):
+            self.sc._quote_is_fresh("AAPL", "finnhub")
+        after = _count_open_fds()
+
+        leaked = after - before
+        self.assertEqual(leaked, 0,
+            f"_quote_is_fresh leaked {leaked} FDs over {self.CALLS} calls")
+
+    @unittest.skipIf(_count_open_fds() < 0, "FD counting not available on this platform")
+    def test_hourly_bar_is_current_no_fd_leak(self):
+        """_hourly_bar_is_current() must not leak FDs across many calls."""
+        for _ in range(5):
+            self.sc._hourly_bar_is_current("AAPL", "yfinance")
+
+        before = _count_open_fds()
+        for _ in range(self.CALLS):
+            self.sc._hourly_bar_is_current("AAPL", "yfinance")
+        after = _count_open_fds()
+
+        leaked = after - before
+        self.assertEqual(leaked, 0,
+            f"_hourly_bar_is_current leaked {leaked} FDs over {self.CALLS} calls")
+
+    @unittest.skipIf(_count_open_fds() < 0, "FD counting not available on this platform")
+    def test_hist_has_data_no_fd_leak(self):
+        """_hist_has_data() must not leak FDs across many calls."""
+        from datetime import date
+        d1, d2 = date(2024, 1, 1), date(2024, 12, 31)
+
+        for _ in range(5):
+            self.sc._hist_has_data(self.db, "AAPL", "yfinance", d1, d2)
+
+        before = _count_open_fds()
+        for _ in range(self.CALLS):
+            self.sc._hist_has_data(self.db, "AAPL", "yfinance", d1, d2)
+        after = _count_open_fds()
+
+        leaked = after - before
+        self.assertEqual(leaked, 0,
+            f"_hist_has_data leaked {leaked} FDs over {self.CALLS} calls")
+
+    @unittest.skipIf(_count_open_fds() < 0, "FD counting not available on this platform")
+    def test_db_insert_rows_no_fd_leak(self):
+        """db_insert_rows() must not leak FDs across many calls."""
+        rows = [self.sc.make_row(
+            "AAPL", "yfinance", f"2020-01-{i+1:02d}", "1d",
+            100+i, 101+i, 99+i, 100+i, 1000000
+        ) for i in range(5)]
+
+        for _ in range(5):
+            self.sc.db_insert_rows(rows)
+
+        before = _count_open_fds()
+        for _ in range(50):   # fewer calls — each inserts multiple rows
+            self.sc.db_insert_rows(rows)
+        after = _count_open_fds()
+
+        leaked = after - before
+        self.assertEqual(leaked, 0,
+            f"db_insert_rows leaked {leaked} FDs over 50 calls")
+
+    @unittest.skipIf(_count_open_fds() < 0, "FD counting not available on this platform")
+    def test_full_skip_pattern_no_fd_leak(self):
+        """
+        Simulate the full per-symbol skip-check pattern of a real collection run:
+        20 symbols × (live_has_today + quote_is_fresh + hourly_bar_is_current).
+        This is the exact pattern that triggered OSError in production.
+        """
+        symbols = [f"SYM{i:02d}" for i in range(20)]
+        sources = ["yfinance", "alphavantage", "finnhub",
+                   "polygon", "fmp", "twelvedata", "marketstack"]
+
+        # warm-up
+        for sym in symbols[:3]:
+            self.sc._live_has_today(sym, "yfinance", "1d")
+
+        before = _count_open_fds()
+
+        for sym in symbols:
+            for src in sources:
+                self.sc._live_has_today(sym, src, "1d")
+                self.sc._quote_is_fresh(sym, src)
+                self.sc._hourly_bar_is_current(sym, src)
+
+        after = _count_open_fds()
+        leaked = after - before
+        total_calls = len(symbols) * len(sources) * 3
+        self.assertEqual(leaked, 0,
+            f"Full skip pattern leaked {leaked} FDs over {total_calls} calls "
+            f"({len(symbols)} symbols × {len(sources)} sources × 3 checks)")
+
+
 if __name__ == "__main__":
     # Friendly summary output
     loader = unittest.TestLoader()
@@ -1109,6 +1439,10 @@ if __name__ == "__main__":
         TestAlerts,
         TestInventory,
         TestPipeline,
+        TestFailureTracker,
+        TestTimestamp,
+        TestSchemaMigration,
+        TestFdLeak,
     ]:
         suite.addTests(loader.loadTestsFromTestCase(cls))
 
