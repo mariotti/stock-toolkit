@@ -66,8 +66,8 @@ def load_prices(symbol: str, date_from: str | None, date_to: str | None,
         try:
             con = sqlite3.connect(db)
             df  = pd.read_sql(
-                "SELECT data_date, source, open, high, low, close, volume "
-                "FROM prices WHERE symbol=? AND interval='1d' ORDER BY data_date",
+                "SELECT timestamp, source, open, high, low, close, volume "
+                "FROM prices WHERE symbol=? AND interval='1d' ORDER BY timestamp",
                 con, params=[symbol.upper()]
             )
             con.close()
@@ -81,9 +81,9 @@ def load_prices(symbol: str, date_from: str | None, date_to: str | None,
         sys.exit(1)
 
     df = pd.concat(frames, ignore_index=True)
-    df["data_date"] = pd.to_datetime(df["data_date"], format="mixed", utc=True,
+    df["timestamp"] = pd.to_datetime(df["timestamp"], format="mixed", utc=True,
                                      errors="coerce")
-    df = df.dropna(subset=["data_date", "close"])
+    df = df.dropna(subset=["timestamp", "close"])
     for col in ["open", "high", "low", "close", "volume"]:
         df[col] = pd.to_numeric(df[col], errors="coerce")
 
@@ -93,15 +93,15 @@ def load_prices(symbol: str, date_from: str | None, date_to: str | None,
     else:
         prio = {s: i for i, s in enumerate(SOURCE_PRIORITY)}
         df["_p"] = df["source"].map(lambda s: prio.get(s, 99))
-        df = df.sort_values("_p").drop_duplicates(subset=["data_date"], keep="first")
+        df = df.sort_values("_p").drop_duplicates(subset=["timestamp"], keep="first")
         df = df.drop(columns=["_p"])
 
-    df = df.sort_values("data_date").reset_index(drop=True)
+    df = df.sort_values("timestamp").reset_index(drop=True)
 
     if date_from:
-        df = df[df["data_date"] >= pd.Timestamp(date_from, tz="UTC")]
+        df = df[df["timestamp"] >= pd.Timestamp(date_from, tz="UTC")]
     if date_to:
-        df = df[df["data_date"] <= pd.Timestamp(date_to, tz="UTC")]
+        df = df[df["timestamp"] <= pd.Timestamp(date_to, tz="UTC")]
 
     if df.empty:
         print(f"[error] No data for {symbol} in the requested range.")
@@ -234,7 +234,7 @@ class Backtester:
         and performance metrics.
         """
         close   = df["close"].values
-        dates   = df["data_date"].values
+        dates   = df["timestamp"].values
         sigs    = signals.values
 
         cash     = self.capital
@@ -462,8 +462,8 @@ def plot_results(sym: str, df: pd.DataFrame, result: dict, bh_result: dict,
 
     # entry/exit markers on price
     for t in trades:
-        ep = df.loc[df["data_date"] == pd.Timestamp(t["entry_date"], tz="UTC"), "close"]
-        xp = df.loc[df["data_date"] == pd.Timestamp(t["exit_date"],  tz="UTC"), "close"]
+        ep = df.loc[df["timestamp"] == pd.Timestamp(t["entry_date"], tz="UTC"), "close"]
+        xp = df.loc[df["timestamp"] == pd.Timestamp(t["exit_date"],  tz="UTC"), "close"]
         if not ep.empty:
             ax1.scatter(t["entry_date"], ep.values[0], marker="^", color="green",
                         s=60, zorder=5)
@@ -574,15 +574,15 @@ examples:
         # ── walk-forward split ────────────────────────────────────────────────
         if args.test_from:
             split_ts = pd.Timestamp(args.test_from, tz="UTC")
-            train_df = df[df["data_date"] <  split_ts].reset_index(drop=True)
-            test_df  = df[df["data_date"] >= split_ts].reset_index(drop=True)
+            train_df = df[df["timestamp"] <  split_ts].reset_index(drop=True)
+            test_df  = df[df["timestamp"] >= split_ts].reset_index(drop=True)
             print(f"\n{sym}: walk-forward split at {args.test_from}")
             print(f"  Train: {len(train_df)} bars  "
-                  f"({train_df['data_date'].iloc[0].date()} → "
-                  f"{train_df['data_date'].iloc[-1].date()})")
+                  f"({train_df['timestamp'].iloc[0].date()} → "
+                  f"{train_df['timestamp'].iloc[-1].date()})")
             print(f"  Test:  {len(test_df)} bars  "
-                  f"({test_df['data_date'].iloc[0].date()} → "
-                  f"{test_df['data_date'].iloc[-1].date()})")
+                  f"({test_df['timestamp'].iloc[0].date()} → "
+                  f"{test_df['timestamp'].iloc[-1].date()})")
             eval_df = test_df
         else:
             eval_df = df
@@ -651,4 +651,3 @@ examples:
 
 if __name__ == "__main__":
     main()
-

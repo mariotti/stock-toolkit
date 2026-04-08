@@ -42,5 +42,10 @@ fi
 
 # ── run ───────────────────────────────────────────────────────────────────────
 
+# Raise the open-file-descriptor limit to avoid OSError on long collection runs.
+# macOS default is 256 which is too low when many API sources run in sequence.
+ulimit -n 1024 2>/dev/null || true
+
+
 cd "$STOCK_DIR"
 exec "$PYTHON" stock_collector.py "$@"

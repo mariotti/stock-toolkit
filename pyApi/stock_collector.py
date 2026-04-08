@@ -91,6 +91,10 @@ SYMBOLS = [s.strip().upper() for s in _sym_raw.split(",") if s.strip()]
 _ignore_raw = _cfg.get("SYMBOLS_IGNORE", "")
 SYMBOLS_IGNORE = {s.strip().upper() for s in _ignore_raw.split(",") if s.strip()}
 
+# FAILURE_THRESHOLD — stop requesting a (symbol, source) pair after this many
+# consecutive failures. Recorded in stock_failures.csv, editable by hand.
+FAILURE_THRESHOLD = int(_cfg.get("FAILURE_THRESHOLD", "5"))
+
 
 def _symbols_from_db() -> list[str]:
     """
@@ -105,12 +109,14 @@ def _symbols_from_db() -> list[str]:
     try:
         import sqlite3 as _sq
         con = _sq.connect(DB_PATH)
-        rows = con.execute(
-            """SELECT symbol FROM prices WHERE interval='1d'
-               GROUP BY symbol HAVING COUNT(*) >= 2
-               ORDER BY symbol"""
-        ).fetchall()
-        con.close()
+        try:
+            rows = con.execute(
+                """SELECT symbol FROM prices WHERE interval='1d'
+                   GROUP BY symbol HAVING COUNT(*) >= 2
+                   ORDER BY symbol"""
+            ).fetchall()
+        finally:
+            con.close()
         return [r[0] for r in rows]
     except Exception:
         return []
@@ -143,6 +149,7 @@ LOG_PATH       = OUTPUT_DIR / _cfg.get("LOG_FILE",     "collector.log")
 GNUPLOT_DIR    = OUTPUT_DIR / _cfg.get("GNUPLOT_DIR",  "gnuplot-data")
 MATPLOTLIB_DIR = OUTPUT_DIR / _cfg.get("MATPLOT_DIR",  "matplot")
 HIST_DIR       = OUTPUT_DIR / _cfg.get("HIST_DIR",     "data")
+FAILURES_PATH  = OUTPUT_DIR / _cfg.get("FAILURES_FILE","stock_failures.csv")
 
 # ── rate limits (not user-configurable via config.env) ───────────────────────
 
@@ -194,6 +201,108 @@ def save_state(state: dict):
     with open(STATE_PATH, "w") as f:
         json.dump(state, f, indent=2)
 
+
+# ─────────────────────────────────────────────
+#  FAILURE TRACKER — stock_failures.csv
+# ─────────────────────────────────────────────
+
+def _load_failures() -> dict:
+    """
+    Load stock_failures.csv into a dict keyed by (symbol, source).
+    Returns {} if the file doesn't exist yet.
+    Format: symbol,source,reason,hits,first_seen,last_seen
+    """
+    failures = {}
+    if not FAILURES_PATH.exists():
+        return failures
+    try:
+        with open(FAILURES_PATH, newline="") as f:
+            for row in csv.DictReader(f):
+                key = (row["symbol"].upper(), row["source"])
+                failures[key] = {
+                    "reason":     row.get("reason", "unknown"),
+                    "hits":       int(row.get("hits", 1)),
+                    "first_seen": row.get("first_seen", ""),
+                    "last_seen":  row.get("last_seen", ""),
+                }
+    except Exception as e:
+        log.warning(f"[failures] could not load {FAILURES_PATH.name}: {e}")
+    return failures
+
+
+def _save_failures(failures: dict) -> None:
+    """Write the failure dict back to stock_failures.csv."""
+    try:
+        with open(FAILURES_PATH, "w", newline="") as f:
+            writer = csv.DictWriter(
+                f, fieldnames=["symbol","source","reason","hits","first_seen","last_seen"]
+            )
+            writer.writeheader()
+            for (sym, src), info in sorted(failures.items()):
+                writer.writerow({
+                    "symbol":     sym,
+                    "source":     src,
+                    "reason":     info["reason"],
+                    "hits":       info["hits"],
+                    "first_seen": info["first_seen"],
+                    "last_seen":  info["last_seen"],
+                })
+    except Exception as e:
+        log.warning(f"[failures] could not save {FAILURES_PATH.name}: {e}")
+
+
+# Module-level cache so all fetchers share one load per run
+_failures: dict | None = None
+
+def _get_failures() -> dict:
+    global _failures
+    if _failures is None:
+        _failures = _load_failures()
+    return _failures
+
+
+def record_failure(symbol: str, source: str, reason: str) -> None:
+    """
+    Record a failed fetch for (symbol, source).
+    Increments the hit counter and updates last_seen.
+    Failures are saved to disk at end of run via flush_failures().
+    When hits reach FAILURE_THRESHOLD, logs a warning.
+    """
+    today = str(date.today())
+    key   = (symbol.upper(), source)
+    f     = _get_failures()
+
+    if key not in f:
+        f[key] = {"reason": reason, "hits": 0,
+                  "first_seen": today, "last_seen": today}
+    entry = f[key]
+    entry["hits"]     += 1
+    entry["last_seen"] = today
+    entry["reason"]    = reason   # update to most recent reason
+
+    if entry["hits"] == FAILURE_THRESHOLD:
+        log.warning(
+            f"[failures] {symbol}/{source}: {FAILURE_THRESHOLD} failures "
+            f"({reason}) — will be skipped automatically from now on. "
+            f"Edit {FAILURES_PATH.name} to retry."
+        )
+
+
+def flush_failures() -> None:
+    """Write accumulated failures to disk. Called once at end of run."""
+    if _failures:
+        _save_failures(_failures)
+
+
+def is_suppressed(symbol: str, source: str) -> bool:
+    """
+    Return True if (symbol, source) has hit the failure threshold
+    and should be silently skipped.
+    """
+    key   = (symbol.upper(), source)
+    entry = _get_failures().get(key)
+    return entry is not None and entry["hits"] >= FAILURE_THRESHOLD
+
 def budget_ok(state: dict, source: str) -> bool:
     limit = DAILY_LIMITS.get(source)
     if limit is None:
@@ -215,8 +324,8 @@ FIELDNAMES = [
     "fetched_at",   # ISO timestamp of when we collected it
     "symbol",
     "source",       # which API
-    "data_date",    # date the OHLCV belongs to
-    "interval",     # "1d", "1h", "quote", etc.
+    "timestamp",    # ISO datetime the OHLCV belongs to (always full datetime)
+    "interval",     # computed hint: "1d", "1h", "1m", etc.
     "open",
     "high",
     "low",
@@ -228,6 +337,80 @@ FIELDNAMES = [
 ]
 
 # ─────────────────────────────────────────────
+#  TIMESTAMP NORMALISATION
+# ─────────────────────────────────────────────
+
+def _to_timestamp(value) -> str:
+    """
+    Normalise any date/datetime value to a full ISO-8601 string with timezone.
+
+    - Full datetime with tz  → kept as-is (re-formatted for consistency)
+    - Full datetime without tz → assumed UTC
+    - date / date-string      → midnight UTC (T00:00:00+00:00)
+    - Unix integer timestamp  → converted to UTC datetime
+
+    This means daily bars from APIs that only give a date (yfinance EOD,
+    FMP, Marketstack, Alpha Vantage) are stored as midnight UTC.  The date
+    part is still correct and consistent across sources; the time component
+    is a neutral placeholder that makes the column uniformly a datetime.
+    """
+    from datetime import date as _date, datetime as _dt, timezone as _tz
+    import pandas as _pd
+
+    if isinstance(value, int):
+        # Unix timestamp
+        return _dt.fromtimestamp(value, tz=_tz.utc).isoformat(timespec="seconds")
+
+    if isinstance(value, _pd.Timestamp):
+        if value.tzinfo is None:
+            value = value.tz_localize("UTC")
+        return value.isoformat(timespec="seconds")
+
+    if isinstance(value, _dt):
+        if value.tzinfo is None:
+            value = value.replace(tzinfo=_tz.utc)
+        return value.isoformat(timespec="seconds")
+
+    if isinstance(value, _date):
+        return _dt(value.year, value.month, value.day,
+                   tzinfo=_tz.utc).isoformat(timespec="seconds")
+
+    # string
+    s = str(value).strip()
+    if "T" in s or " " in s:
+        # looks like a datetime string
+        try:
+            if "+" in s or s.endswith("Z") or s.count("-") > 2:
+                # has timezone info
+                dt = _dt.fromisoformat(s.replace("Z", "+00:00"))
+            else:
+                dt = _dt.fromisoformat(s).replace(tzinfo=_tz.utc)
+            return dt.isoformat(timespec="seconds")
+        except ValueError:
+            pass
+    # date-only string "YYYY-MM-DD"
+    try:
+        d = _date.fromisoformat(s[:10])
+        return _dt(d.year, d.month, d.day,
+                   tzinfo=_tz.utc).isoformat(timespec="seconds")
+    except ValueError:
+        pass
+
+    # fallback — store as-is and let the caller deal with it
+    return s
+
+
+def _infer_interval(timestamp: str) -> str:
+    """
+    Infer the bar interval from the time component of a timestamp.
+    Used as a fallback when the caller doesn't specify an interval.
+
+    Midnight UTC (T00:00:00) → daily bar from a date-only source → "1d"
+    Any other time           → assume hourly until proven otherwise → "1h"
+    """
+    return "1d" if "T00:00:00" in timestamp else "1h"
+
+# ─────────────────────────────────────────────
 #  SQLITE — default storage
 # ─────────────────────────────────────────────
 
@@ -235,12 +418,19 @@ def db_connect(db_path: "Path | None" = None) -> sqlite3.Connection:
     """Open (and if needed initialise) the SQLite database."""
     con = sqlite3.connect(db_path or DB_PATH)
     con.execute("PRAGMA journal_mode=WAL")   # safe for concurrent readers
+
+    # ── schema: new timestamp-based layout ───────────────────────────────────
+    # timestamp replaces data_date — always a full ISO-8601 datetime with tz.
+    # interval is kept as a computed hint for fast filtering but is derived
+    # from the timestamp gap, not trusted as the source of truth.
+    # UNIQUE key: (symbol, source, timestamp) — interval dropped because the
+    # timestamp is now precise enough to identify a bar uniquely per source.
     con.execute("""
         CREATE TABLE IF NOT EXISTS prices (
             fetched_at  TEXT,
             symbol      TEXT    NOT NULL,
             source      TEXT    NOT NULL,
-            data_date   TEXT    NOT NULL,
+            timestamp   TEXT    NOT NULL,
             interval    TEXT    NOT NULL,
             open        REAL,
             high        REAL,
@@ -250,27 +440,71 @@ def db_connect(db_path: "Path | None" = None) -> sqlite3.Connection:
             vwap        REAL,
             change_pct  REAL,
             extra       TEXT,
-            UNIQUE (symbol, source, data_date, interval)
+            UNIQUE (symbol, source, timestamp)
         )
     """)
+
+    # ── migration 1: rename data_date → timestamp, drop interval from key ─────
+    # Runs once: detects old schema by presence of data_date column.
+    # NOTE: CREATE INDEX on (symbol, timestamp) is deferred until after
+    # migration — on an old DB the timestamp column doesn't exist yet.
+    try:
+        cols = {r[1] for r in con.execute("PRAGMA table_info(prices)").fetchall()}
+        if "data_date" in cols:
+            log.info("[db_connect] migrating schema: data_date → timestamp")
+            con.execute("""
+                CREATE TABLE IF NOT EXISTS prices_new (
+                    fetched_at  TEXT,
+                    symbol      TEXT    NOT NULL,
+                    source      TEXT    NOT NULL,
+                    timestamp   TEXT    NOT NULL,
+                    interval    TEXT    NOT NULL,
+                    open        REAL,
+                    high        REAL,
+                    low         REAL,
+                    close       REAL,
+                    volume      INTEGER,
+                    vwap        REAL,
+                    change_pct  REAL,
+                    extra       TEXT,
+                    UNIQUE (symbol, source, timestamp)
+                )
+            """)
+            # Copy rows: normalise data_date to full ISO timestamp
+            # date-only → midnight UTC; already-full datetimes → kept as-is
+            con.execute("""
+                INSERT OR IGNORE INTO prices_new
+                SELECT
+                    fetched_at, symbol, source,
+                    CASE
+                        WHEN length(data_date) = 10
+                        THEN data_date || 'T00:00:00+00:00'
+                        ELSE data_date
+                    END AS timestamp,
+                    interval,
+                    open, high, low, close, volume, vwap, change_pct, extra
+                FROM prices
+            """)
+            con.execute("DROP TABLE prices")
+            con.execute("ALTER TABLE prices_new RENAME TO prices")
+            con.commit()
+            n = con.execute("SELECT COUNT(*) FROM prices").fetchone()[0]
+            log.info(f"[db_connect] schema migration complete — {n} rows")
+    except Exception as e:
+        log.warning(f"[db_connect] migration error: {e}")
+
+    # Create index after migration — timestamp column is guaranteed to exist now
     con.execute("""
-        CREATE INDEX IF NOT EXISTS idx_symbol_date
-        ON prices (symbol, data_date)
+        CREATE INDEX IF NOT EXISTS idx_symbol_ts
+        ON prices (symbol, timestamp)
     """)
-    # ── one-time migration: relabel legacy interval='quote' rows to '1d' ──────
-    # Quote rows (Finnhub/FMP real-time snapshots) used to be stored with
-    # interval='quote', making them invisible to analysis tools that filter on
-    # interval='1d'. They are now written as '1d' directly. This UPDATE runs
-    # on every connection but is a no-op once all rows are migrated (no rows
-    # with interval='quote' remain). The OR IGNORE handles the edge case where
-    # a '1d' row already exists for the same (symbol, source, data_date) — in
-    # that case the quote row is simply deleted as redundant.
+
+    # ── migration 2: interval='quote' → '1d' (legacy cleanup) ────────────────
     try:
         n = con.execute(
             "SELECT COUNT(*) FROM prices WHERE interval='quote'"
         ).fetchone()[0]
         if n > 0:
-            # Delete any quote row that would conflict with an existing 1d row
             con.execute("""
                 DELETE FROM prices
                 WHERE interval='quote'
@@ -278,22 +512,16 @@ def db_connect(db_path: "Path | None" = None) -> sqlite3.Connection:
                     SELECT 1 FROM prices p2
                     WHERE p2.symbol    = prices.symbol
                     AND   p2.source    = prices.source
-                    AND   p2.data_date = prices.data_date
+                    AND   p2.timestamp = prices.timestamp
                     AND   p2.interval  = '1d'
                 )
             """)
-            # Relabel the rest
             con.execute("UPDATE prices SET interval='1d' WHERE interval='quote'")
             con.commit()
-            migrated = con.execute(
-                "SELECT COUNT(*) FROM prices WHERE interval='1d'"
-            ).fetchone()[0]
-            import logging as _log
-            _log.getLogger(__name__).info(
-                f"[db_connect] migrated {n} legacy 'quote' rows → '1d' in {(db_path or DB_PATH).name}"
-            )
+            log.info(f"[db_connect] migrated {n} legacy 'quote' rows → '1d'")
     except Exception:
-        pass   # table may not exist yet on first run
+        pass
+
     con.commit()
     return con
 
@@ -302,24 +530,25 @@ def db_insert_rows(rows: list[dict], db_path: "Path | None" = None) -> int:
     if not rows:
         return 0
     con = db_connect(db_path)
-    cur = con.executemany(
-        """INSERT OR IGNORE INTO prices
-           (fetched_at, symbol, source, data_date, interval,
-            open, high, low, close, volume, vwap, change_pct, extra)
-           VALUES
-           (:fetched_at, :symbol, :source, :data_date, :interval,
-            :open, :high, :low, :close, :volume, :vwap, :change_pct, :extra)
-        """,
-        rows,
-    )
-    con.commit()
-    added = cur.rowcount
-    con.close()
-    return added
+    try:
+        cur = con.executemany(
+            """INSERT OR IGNORE INTO prices
+               (fetched_at, symbol, source, timestamp, interval,
+                open, high, low, close, volume, vwap, change_pct, extra)
+               VALUES
+               (:fetched_at, :symbol, :source, :timestamp, :interval,
+                :open, :high, :low, :close, :volume, :vwap, :change_pct, :extra)
+            """,
+            rows,
+        )
+        con.commit()
+        return cur.rowcount
+    finally:
+        con.close()
 
 def dedup_key(row: dict) -> str:
     """Fingerprint for a row — used by the CSV path to detect duplicates."""
-    raw = f"{row['symbol']}|{row['source']}|{row['data_date']}|{row['interval']}"
+    raw = f"{row['symbol']}|{row['source']}|{row['timestamp']}|{row['interval']}"
     return hashlib.md5(raw.encode()).hexdigest()
 
 def load_existing_keys() -> set:
@@ -353,14 +582,21 @@ def csv_append_rows(rows: list[dict], seen: set) -> int:
         writer.writerows(new_rows)
     return len(new_rows)
 
-def make_row(symbol, source, data_date, interval, o, h, l, c, v,
+def make_row(symbol, source, ts, interval, o, h, l, c, v,
              vwap=None, change_pct=None, extra=None) -> dict:
+    """
+    Build a price row dict ready for db_insert_rows.
+
+    ts       — any date/datetime/string/unix-int; normalised to full ISO via _to_timestamp()
+    interval — "1d", "1h", "1m", etc.  Pass None to auto-infer from the timestamp.
+    """
+    timestamp = _to_timestamp(ts)
     return {
         "fetched_at":  datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "symbol":      symbol.upper(),
         "source":      source,
-        "data_date":   str(data_date),
-        "interval":    interval,
+        "timestamp":   timestamp,
+        "interval":    interval if interval is not None else _infer_interval(timestamp),
         "open":        round(float(o), 4) if o not in (None, "") else "",
         "high":        round(float(h), 4) if h not in (None, "") else "",
         "low":         round(float(l), 4) if l not in (None, "") else "",
@@ -376,15 +612,23 @@ def make_row(symbol, source, data_date, interval, o, h, l, c, v,
 # ─────────────────────────────────────────────
 
 def safe_get(url: str, params: dict = None, timeout: int = 10) -> dict | None:
+    """
+    HTTP GET with error handling.  Forces Connection: close so each request
+    releases its socket immediately — prevents FD exhaustion on long runs
+    with many API sources and 60-second rate-limit sleeps between them.
+    """
     try:
-        r = requests.get(url, params=params, timeout=timeout)
-        if r.status_code == 402:
-            # Payment Required — caller can detect and handle gracefully
-            return {"_error": 402, "_message": "Payment Required — endpoint requires a paid plan"}
-        if r.status_code == 403:
-            return {"_error": 403}
-        r.raise_for_status()
-        return r.json()
+        r = requests.get(url, params=params, timeout=timeout,
+                         headers={"Connection": "close"})
+        try:
+            if r.status_code == 402:
+                return {"_error": 402, "_message": "Payment Required — endpoint requires a paid plan"}
+            if r.status_code == 403:
+                return {"_error": 403}
+            r.raise_for_status()
+            return r.json()
+        finally:
+            r.close()
     except requests.exceptions.HTTPError as e:
         log.warning(f"HTTP error: {e}  url={url}")
         return None
@@ -419,6 +663,9 @@ def fetch_yfinance(symbols: list[str]) -> list[dict]:
     start = (today - timedelta(days=7)).isoformat()  # last 7 days of daily bars
 
     for sym in symbols:
+        if is_suppressed(sym, "yfinance"):
+            log.debug(f"[yfinance] {sym}: suppressed (too many failures)")
+            continue
         daily_done  = _live_has_today(sym, "yfinance", "1d")
         hourly_done = _hourly_bar_is_current(sym, "yfinance")
         if daily_done and hourly_done:
@@ -451,10 +698,13 @@ def fetch_yfinance(symbols: list[str]) -> list[dict]:
             else:
                 intra = []
 
+            if len(hist) == 0 and len(intra) == 0 and not (daily_done and hourly_done):
+                record_failure(sym, "yfinance", "0 bars returned — possibly delisted")
             log.info(f"[yfinance] {sym}: {len(hist)} daily + {len(intra)} hourly bars")
             time.sleep(0.5)   # gentle pacing
         except Exception as e:
             log.error(f"[yfinance] {sym}: {e}")
+            record_failure(sym, "yfinance", str(e)[:80])
     return rows
 
 
@@ -492,6 +742,9 @@ def fetch_alphavantage(symbols: list[str], state: dict) -> list[dict]:
 
     rows = []
     for sym in symbols:
+        if is_suppressed(sym, "alphavantage"):
+            log.debug(f"[alphavantage] {sym}: suppressed (too many failures)")
+            continue
         if _live_has_today(sym, "alphavantage"):
             log.info(f"[alphavantage] {sym}: already collected today, skipping")
             continue
@@ -507,6 +760,7 @@ def fetch_alphavantage(symbols: list[str], state: dict) -> list[dict]:
         if not data or "Time Series (Daily)" not in data:
             reason = _av_error(data) if data else "no response"
             log.warning(f"[alphavantage] {sym}: {reason}")
+            record_failure(sym, "alphavantage", reason)
             continue
 
         for date_str, bar in data["Time Series (Daily)"].items():
@@ -538,6 +792,9 @@ def fetch_finnhub(symbols: list[str], state: dict) -> list[dict]:
     from_ts = int((datetime.now(timezone.utc) - timedelta(days=30)).timestamp())
 
     for sym in symbols:
+        if is_suppressed(sym, "finnhub"):
+            log.debug(f"[finnhub] {sym}: suppressed (too many failures)")
+            continue
         if _quote_is_fresh(sym, "finnhub"):
             log.info(f"[finnhub] {sym}: quote is fresh, skipping")
             continue
@@ -548,6 +805,7 @@ def fetch_finnhub(symbols: list[str], state: dict) -> list[dict]:
         if isinstance(q, dict) and q.get("_error") == 403:
             log.info(f"[finnhub] {sym}: not available on free tier "
                      f"(international symbols need a paid plan) — skipping")
+            record_failure(sym, "finnhub", "paid plan required (403)")
             continue
         if q and q.get("c"):
             rows.append(make_row(
@@ -559,6 +817,7 @@ def fetch_finnhub(symbols: list[str], state: dict) -> list[dict]:
             log.info(f"[finnhub] {sym}: quote c={q.get('c')}")
         else:
             log.warning(f"[finnhub] {sym}: empty or unexpected response")
+            record_failure(sym, "finnhub", "empty or unexpected response")
 
         # daily candles — paid tier only
         if FINNHUB_PAID:
@@ -594,6 +853,9 @@ def fetch_polygon(symbols: list[str], state: dict) -> list[dict]:
     from_date = (date.today() - timedelta(days=30)).isoformat()
 
     for sym in symbols:
+        if is_suppressed(sym, "polygon"):
+            log.debug(f"[polygon] {sym}: suppressed (too many failures)")
+            continue
         if _live_has_today(sym, "polygon"):
             log.info(f"[polygon] {sym}: already collected today, skipping")
             continue
@@ -603,7 +865,9 @@ def fetch_polygon(symbols: list[str], state: dict) -> list[dict]:
         data = safe_get(url, params={"adjusted": "true", "sort": "asc", "apiKey": key})
         sleep_for_rate("polygon")
         if not data or data.get("status") not in ("OK", "DELAYED"):
-            log.warning(f"[polygon] {sym}: {data.get('status') if data else 'no response'}")
+            reason = data.get("status") if data else "no response"
+            log.warning(f"[polygon] {sym}: {reason}")
+            record_failure(sym, "polygon", reason)
             continue
         for bar in data.get("results", []):
             rows.append(make_row(
@@ -665,6 +929,9 @@ def fetch_fmp(symbols: list[str], state: dict) -> list[dict]:
 
     # --- historical EOD per symbol ---
     for sym in symbols:
+        if is_suppressed(sym, "fmp"):
+            log.debug(f"[fmp] {sym}: suppressed (too many failures)")
+            continue
         if _live_has_today(sym, "fmp"):
             log.info(f"[fmp] {sym}: already collected today, skipping")
             continue
@@ -682,6 +949,7 @@ def fetch_fmp(symbols: list[str], state: dict) -> list[dict]:
             continue
         if isinstance(h_data, dict) and h_data.get("_error") == 402:
             log.info(f"[fmp] {sym}: requires paid plan — skipping (free tier covers major US large-caps only)")
+            record_failure(sym, "fmp", "paid plan required (402)")
             time.sleep(0.5)
             continue
         # stable endpoint returns a list directly (not wrapped in {"historical": [...]})
@@ -779,8 +1047,9 @@ def fetch_twelvedata(symbols: list[str], state: dict) -> list[dict]:
                                 f"unexpected type {type(payload).__name__}: {payload}")
                     continue
                 if payload.get("status") == "error":
-                    log.warning(f"[twelvedata] {sym} {interval}: "
-                                f"{payload.get('message','API error')}")
+                    msg = payload.get("message","API error")
+                    log.warning(f"[twelvedata] {sym} {interval}: {msg}")
+                    record_failure(sym, "twelvedata", msg[:80])
                     continue
                 if "values" not in payload:
                     log.warning(f"[twelvedata] {sym} {interval}: "
@@ -815,8 +1084,10 @@ def fetch_marketstack(symbols: list[str], state: dict) -> list[dict]:
     if not budget_ok(state, "marketstack"):
         return []
 
-    # skip if all symbols already have today's data
-    pending = [s for s in symbols if not _live_has_today(s, "marketstack")]
+    # skip suppressed symbols and those already collected today
+    pending = [s for s in symbols
+               if not is_suppressed(s, "marketstack")
+               and not _live_has_today(s, "marketstack")]
     if not pending:
         log.info("[marketstack] all symbols already collected today, skipping")
         return []
@@ -838,14 +1109,21 @@ def fetch_marketstack(symbols: list[str], state: dict) -> list[dict]:
         log.warning(f"[marketstack] unexpected response keys: {list(data.keys())}")
         return []
     record_call(state, "marketstack")   # only count successful calls
+    returned_syms = set()
     for bar in data["data"]:
+        sym = bar["symbol"].split(".")[0]
+        returned_syms.add(sym)
         rows.append(make_row(
-            bar["symbol"].split(".")[0], "marketstack",
+            sym, "marketstack",
             bar["date"][:10], "1d",
             bar.get("open"), bar.get("high"), bar.get("low"), bar.get("close"),
             bar.get("volume"), vwap=bar.get("adj_close"),
             extra={"exchange": bar.get("exchange")}
         ))
+    # record failures for symbols that returned no data
+    for sym in pending:
+        if sym not in returned_syms:
+            record_failure(sym, "marketstack", "no data returned")
     log.info(f"[marketstack] {len(data['data'])} EOD bars across {len(pending)} symbols")
     return rows
 
@@ -892,13 +1170,15 @@ def _hist_has_data(db_path: "Path", symbol: str, source: str,
         return False
     try:
         con = sqlite3.connect(db_path)
-        n = con.execute(
-            "SELECT COUNT(*) FROM prices "
-            "WHERE symbol=? AND source=? AND interval='1d' "
-            "AND data_date>=? AND data_date<=?",
-            (symbol, source, str(date_from), str(date_to))
-        ).fetchone()[0]
-        con.close()
+        try:
+            n = con.execute(
+                "SELECT COUNT(*) FROM prices "
+                "WHERE symbol=? AND source=? AND interval='1d' "
+                "AND timestamp>=? AND timestamp<=?",
+                (symbol, source, str(date_from), str(date_to))
+            ).fetchone()[0]
+        finally:
+            con.close()
         return n > 0
     except Exception:
         return False
@@ -907,29 +1187,24 @@ def _hist_has_data(db_path: "Path", symbol: str, source: str,
 
 def _live_has_today(symbol: str, source: str, interval: str = "1d") -> bool:
     """
-    Return True if (symbol, source, interval) already has a row dated today
-    in the live DB.  Used by live fetchers to skip redundant API calls.
-    Checks both exact date match (daily) and any row from today (intraday).
+    Return True if (symbol, source, interval) already has a row for today
+    in the live DB. Checks timestamp LIKE 'today%' — works for both
+    date-only-origin rows (stored as 2026-03-31T00:00:00+00:00) and
+    full intraday timestamps.
     """
     if not DB_PATH.exists():
         return False
     today_str = str(date.today())
     try:
         con = sqlite3.connect(DB_PATH)
-        if interval == "1d":
+        try:
             n = con.execute(
                 "SELECT COUNT(*) FROM prices "
-                "WHERE symbol=? AND source=? AND interval=? AND data_date=?",
-                (symbol, source, interval, today_str)
-            ).fetchone()[0]
-        else:
-            # intraday: check for any row whose data_date starts with today
-            n = con.execute(
-                "SELECT COUNT(*) FROM prices "
-                "WHERE symbol=? AND source=? AND interval=? AND data_date LIKE ?",
+                "WHERE symbol=? AND source=? AND interval=? AND timestamp LIKE ?",
                 (symbol, source, interval, today_str + "%")
             ).fetchone()[0]
-        con.close()
+        finally:
+            con.close()
         return n > 0
     except Exception:
         return False
@@ -951,13 +1226,15 @@ def _quote_is_fresh(symbol: str, source: str, minutes: int = 25) -> bool:
         from datetime import datetime, timezone, timedelta
         cutoff = (datetime.now(timezone.utc) - timedelta(minutes=minutes)).isoformat()
         con = sqlite3.connect(DB_PATH)
-        n = con.execute(
-            "SELECT COUNT(*) FROM prices "
-            "WHERE symbol=? AND source=? AND interval='1d' "
-            "AND fetched_at >= ?",
-            (symbol, source, cutoff)
-        ).fetchone()[0]
-        con.close()
+        try:
+            n = con.execute(
+                "SELECT COUNT(*) FROM prices "
+                "WHERE symbol=? AND source=? AND interval='1d' "
+                "AND fetched_at >= ?",
+                (symbol, source, cutoff)
+            ).fetchone()[0]
+        finally:
+            con.close()
         return n > 0
     except Exception:
         return False
@@ -966,7 +1243,7 @@ def _quote_is_fresh(symbol: str, source: str, minutes: int = 25) -> bool:
 def _hourly_bar_is_current(symbol: str, source: str) -> bool:
     """
     Return True if (symbol, source, interval='1h') already has a bar whose
-    data_date falls within the current UTC hour.  Allows hourly-bar fetchers
+    timestamp falls within the current UTC hour.  Allows hourly-bar fetchers
     to collect fresh bars on each cron run within the same day.
     """
     if not DB_PATH.exists():
@@ -976,13 +1253,15 @@ def _hourly_bar_is_current(symbol: str, source: str) -> bool:
         now        = datetime.now(timezone.utc)
         hour_start = now.strftime("%Y-%m-%dT%H:")   # e.g. "2026-03-31T14:"
         con = sqlite3.connect(DB_PATH)
-        n = con.execute(
-            "SELECT COUNT(*) FROM prices "
-            "WHERE symbol=? AND source=? AND interval='1h' "
-            "AND data_date LIKE ?",
-            (symbol, source, hour_start + "%")
-        ).fetchone()[0]
-        con.close()
+        try:
+            n = con.execute(
+                "SELECT COUNT(*) FROM prices "
+                "WHERE symbol=? AND source=? AND interval='1h' "
+                "AND timestamp LIKE ?",
+                (symbol, source, hour_start + "%")
+            ).fetchone()[0]
+        finally:
+            con.close()
         return n > 0
     except Exception:
         return False
@@ -999,6 +1278,9 @@ def _hist_yfinance(symbols, db_path, date_from, date_to, state) -> list:
         return []
     rows = []
     for sym in symbols:
+        if is_suppressed(sym, "yfinance"):
+            log.debug(f"[hist/yfinance] {sym}: suppressed")
+            continue
         if _hist_has_data(db_path, sym, "yfinance", date_from, date_to):
             log.info(f"[hist/yfinance] {sym}: already in DB, skipping")
             continue
@@ -1063,6 +1345,7 @@ def _hist_alphavantage(symbols, db_path, date_from, date_to, state) -> list:
         if not data or "Time Series (Daily)" not in data:
             reason = _av_error(data) if data else "no response"
             log.warning(f"[hist/alphavantage] {sym}: {reason}")
+            record_failure(sym, "alphavantage", reason)
             continue
         kept = 0
         for date_str, bar in data["Time Series (Daily)"].items():
@@ -1105,7 +1388,9 @@ def _hist_finnhub(symbols, db_path, date_from, date_to, state) -> list:
                              "from": from_ts, "to": to_ts, "token": key})
         sleep_for_rate("finnhub")
         if not c or c.get("s") != "ok":
-            log.warning(f"[hist/finnhub] {sym}: {c.get('s') if c else 'no response'}")
+            reason = c.get("s") if c else "no response"
+            log.warning(f"[hist/finnhub] {sym}: {reason}")
+            record_failure(sym, "finnhub", reason)
             continue
         for i, ts in enumerate(c["t"]):
             rows.append(make_row(
@@ -1173,13 +1458,17 @@ def _hist_fmp(symbols, db_path, date_from, date_to, state) -> list:
         record_call(state, "fmp")
         if data is None:
             log.warning(f"[hist/fmp] {sym}: no response")
+            record_failure(sym, "fmp", "no response")
             continue
         if isinstance(data, dict) and data.get("_error") == 402:
             log.info(f"[hist/fmp] {sym}: requires paid plan — skipping")
+            record_failure(sym, "fmp", "paid plan required (402)")
             continue
         if isinstance(data, dict):
             if "message" in data:
-                log.warning(f"[hist/fmp] {sym}: {data.get('message','API error')}")
+                msg = data.get("message","API error")
+                log.warning(f"[hist/fmp] {sym}: {msg}")
+                record_failure(sym, "fmp", msg[:80])
                 continue
             # old format fallback
             bars = data.get("historical", [])
@@ -1190,6 +1479,7 @@ def _hist_fmp(symbols, db_path, date_from, date_to, state) -> list:
             continue
         if not bars:
             log.warning(f"[hist/fmp] {sym}: empty response")
+            record_failure(sym, "fmp", "empty response")
             continue
         for bar in bars:
             rows.append(make_row(
@@ -1321,7 +1611,7 @@ def _load_plot_data(symbols: list[str], use_csv: bool, field: str,
                      db_path: "Path | None" = None) -> "pd.DataFrame":
     """
     Load daily rows from SQLite or CSV.
-    Returns a tidy DataFrame: symbol, source, data_date, <field>
+    Returns a tidy DataFrame: symbol, source, timestamp, <field>
     db_path overrides DB_PATH (used by --historical to point at the right DB).
     """
     if use_csv:
@@ -1336,17 +1626,19 @@ def _load_plot_data(symbols: list[str], use_csv: bool, field: str,
             return pd.DataFrame()
         import sqlite3
         con = sqlite3.connect(active_db)
-        df = pd.read_sql("SELECT * FROM prices", con)
-        con.close()
+        try:
+            df = pd.read_sql("SELECT * FROM prices", con)
+        finally:
+            con.close()
 
     df = df[df["interval"] == "1d"].copy()
     df = df[df["symbol"].isin([s.upper() for s in symbols])]
-    df["data_date"] = pd.to_datetime(df["data_date"], utc=True, errors="coerce")
-    df = df.dropna(subset=["data_date", field])
+    df["timestamp"] = pd.to_datetime(df["timestamp"], utc=True, errors="coerce")
+    df = df.dropna(subset=["timestamp", field])
     df[field] = pd.to_numeric(df[field], errors="coerce")
     df = df.dropna(subset=[field])
-    df = df.sort_values("data_date")
-    return df[["symbol", "source", "data_date", field]].reset_index(drop=True)
+    df = df.sort_values("timestamp")
+    return df[["symbol", "source", "timestamp", field]].reset_index(drop=True)
 
 
 # ── gnuplot ───────────────────────────────────────
@@ -1381,10 +1673,10 @@ def plot_gnuplot(symbols: list[str], use_csv: bool, field: str,
             f.write(f"# stock_collector.py — {sym}  field: {field}\n")
             f.write(f"# columns: date  {field}\n\n")
             for src in sources:
-                grp = sym_df[sym_df["source"] == src].sort_values("data_date")
+                grp = sym_df[sym_df["source"] == src].sort_values("timestamp")
                 f.write(f"# --- index block: source={src} ---\n")
                 for _, row in grp.iterrows():
-                    date_str = str(row["data_date"])[:10]
+                    date_str = str(row["timestamp"])[:10]
                     f.write(f"{date_str}\t{row[field]}\n")
                 f.write("\n\n")    # gnuplot index block separator (two blank lines)
 
@@ -1461,7 +1753,7 @@ def plot_matplotlib(symbols: list[str], use_csv: bool, field: str,
         for src in sorted(df[df["symbol"] == sym]["source"].unique()):
             grp = df[(df["symbol"] == sym) & (df["source"] == src)]
             ax.plot(
-                grp["data_date"], grp[field],
+                grp["timestamp"], grp[field],
                 label=f"{sym} / {src}",
                 color=colors[idx % len(colors)],
                 marker=markers[idx % len(markers)],
@@ -1607,6 +1899,7 @@ def main():
             plot_gnuplot(symbols, use_csv=False, field=plot_field, db_path=active_db)
         if args.plot_matplotlib:
             plot_matplotlib(symbols, use_csv=False, field=plot_field, db_path=active_db)
+        flush_failures()
         log.info("Done.\n")
         return
 
@@ -1667,6 +1960,9 @@ def main():
         plot_matplotlib(symbols, use_csv, plot_field)
 
     log.info("Done.\n")
+
+    # ── cleanup ────────────────────────────────────────
+    flush_failures()          # write accumulated failures to stock_failures.csv
 
 
 if __name__ == "__main__":

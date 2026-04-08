@@ -128,7 +128,7 @@ def discover_dbs() -> list[Path]:
 def load_raw(dbs: list[Path], symbols: list[str] | None = None) -> pd.DataFrame:
     """
     Load all rows from every DB, optionally filtered to the requested symbols.
-    Columns: fetched_at, symbol, source, data_date, interval,
+    Columns: fetched_at, symbol, source, timestamp, interval,
              open, high, low, close, volume, vwap, change_pct, extra
     """
     frames = []
@@ -142,7 +142,7 @@ def load_raw(dbs: list[Path], symbols: list[str] | None = None) -> pd.DataFrame:
                 where  = f" WHERE symbol IN ({placeholders})"
                 params = [s.upper() for s in symbols]
             df = pd.read_sql(
-                f"SELECT * FROM prices{where} ORDER BY data_date", con,
+                f"SELECT * FROM prices{where} ORDER BY timestamp", con,
                 params=params
             )
             con.close()
@@ -160,15 +160,15 @@ def load_raw(dbs: list[Path], symbols: list[str] | None = None) -> pd.DataFrame:
     raw = pd.concat(frames, ignore_index=True)
     # format="mixed" handles both "2024-03-25" (daily) and
     # "2024-03-25T10:00:00+00:00" (intraday) in the same column
-    raw["data_date"] = pd.to_datetime(raw["data_date"], format="mixed", utc=True, errors="coerce")
+    raw["timestamp"] = pd.to_datetime(raw["timestamp"], format="mixed", utc=True, errors="coerce")
     for col in ["open", "high", "low", "close", "volume", "vwap", "change_pct"]:
         raw[col] = pd.to_numeric(raw[col], errors="coerce")
-    return raw.dropna(subset=["data_date", "close"])
+    return raw.dropna(subset=["timestamp", "close"])
 
 
 def resolve_source(df: pd.DataFrame, preferred: str | None) -> pd.DataFrame:
     """
-    When multiple sources report the same (symbol, data_date), keep only one.
+    When multiple sources report the same (symbol, timestamp), keep only one.
 
     If --source is given, filter to that source first.
     Otherwise use SOURCE_PRIORITY: for each (symbol, date) keep the
@@ -189,19 +189,19 @@ def resolve_source(df: pd.DataFrame, preferred: str | None) -> pd.DataFrame:
     df["_prio"] = df["source"].map(lambda s: prio.get(s, len(SOURCE_PRIORITY)))
     df = df.sort_values("_prio")
     # Keep the highest-priority (lowest rank) row per (symbol, date, interval)
-    df = df.drop_duplicates(subset=["symbol", "data_date", "interval"], keep="first")
+    df = df.drop_duplicates(subset=["symbol", "timestamp", "interval"], keep="first")
     return df.drop(columns=["_prio"])
 
 
 def auto_granularity(df: pd.DataFrame, intraday: bool = False) -> str:
     """Choose a sensible granularity based on the actual date/time span."""
     if intraday:
-        span_h = (df["data_date"].max() - df["data_date"].min()).total_seconds() / 3600
+        span_h = (df["timestamp"].max() - df["timestamp"].min()).total_seconds() / 3600
         for threshold, gran in _AUTO_GRAN_INTRADAY:
             if span_h <= threshold:
                 return gran
         return "1d"
-    span = (df["data_date"].max() - df["data_date"].min()).days
+    span = (df["timestamp"].max() - df["timestamp"].min()).days
     for threshold, gran in _AUTO_GRAN:
         if span <= threshold:
             return gran
@@ -217,13 +217,13 @@ def apply_granularity(df: pd.DataFrame, gran: str, field: str = "close") -> pd.D
     low=min, close=last, volume=sum.  Missing periods are forward-filled.
     """
     if gran == "raw":
-        return df.sort_values(["symbol", "data_date"]).reset_index(drop=True)
+        return df.sort_values(["symbol", "timestamp"]).reset_index(drop=True)
 
     alias = _GRAN_ALIAS[gran]
     results = []
 
     for sym, grp in df.groupby("symbol"):
-        grp = grp.set_index("data_date").sort_index()
+        grp = grp.set_index("timestamp").sort_index()
         # keep one source label (already resolved before this call)
         source = grp["source"].iloc[0] if "source" in grp.columns else "merged"
         ohlcv = grp[["open", "high", "low", "close", "volume"]].copy()
@@ -250,7 +250,7 @@ def apply_granularity(df: pd.DataFrame, gran: str, field: str = "close") -> pd.D
         resampled["symbol"] = sym
         resampled["source"] = source
         resampled["interval"] = gran
-        results.append(resampled.reset_index().rename(columns={"index": "data_date"}))
+        results.append(resampled.reset_index().rename(columns={"index": "timestamp"}))
 
     if not results:
         return df
@@ -300,9 +300,9 @@ def load_data(symbols: list[str] | None,
 
     # ── date range filter ─────────────────────────────────────────────────
     if date_from:
-        df = df[df["data_date"] >= pd.Timestamp(date_from, tz="UTC")]
+        df = df[df["timestamp"] >= pd.Timestamp(date_from, tz="UTC")]
     if date_to:
-        df = df[df["data_date"] <= pd.Timestamp(date_to, tz="UTC")]
+        df = df[df["timestamp"] <= pd.Timestamp(date_to, tz="UTC")]
 
     if df.empty:
         print("[error] No data in the requested date range.")
@@ -324,8 +324,8 @@ def load_data(symbols: list[str] | None,
 
     df = apply_granularity(df, effective_gran, field)
 
-    span_str = (f"{df['data_date'].min().strftime('%Y-%m-%d %H:%M')}" 
-                f" → {df['data_date'].max().strftime('%Y-%m-%d %H:%M')}")
+    span_str = (f"{df['timestamp'].min().strftime('%Y-%m-%d %H:%M')}" 
+                f" → {df['timestamp'].max().strftime('%Y-%m-%d %H:%M')}")
     print(f"Loaded {len(df)} rows  |  "
           f"symbols: {sorted(df['symbol'].unique())}  |  "
           f"source interval: {interval}  |  "
@@ -368,7 +368,7 @@ def analysis_summary(df: pd.DataFrame, field: str, gran: str = "1d"):
     _sep("SUMMARY")
     rows = []
     for sym, grp in df.groupby("symbol"):
-        grp = grp.sort_values("data_date")
+        grp = grp.sort_values("timestamp")
         s = grp[field].dropna()
         if s.empty:
             continue
@@ -411,12 +411,12 @@ def analysis_regression(df: pd.DataFrame, field: str, plot: bool):
     plot_data = {}   # sym → (x_dates, y_values, slope, intercept, r2, ci_upper, ci_lower)
 
     for sym, grp in df.groupby("symbol"):
-        grp = grp.sort_values("data_date").dropna(subset=[field])
+        grp = grp.sort_values("timestamp").dropna(subset=[field])
         if len(grp) < 3:
             continue
         # x = elapsed days from first bar
-        x0 = grp["data_date"].iloc[0]
-        x  = (grp["data_date"] - x0).dt.days.values.astype(float)
+        x0 = grp["timestamp"].iloc[0]
+        x  = (grp["timestamp"] - x0).dt.days.values.astype(float)
         y  = grp[field].values.astype(float)
 
         slope, intercept, r, p, se = sp_stats.linregress(x, y)
@@ -444,7 +444,7 @@ def analysis_regression(df: pd.DataFrame, field: str, plot: bool):
             "yes" if p < 0.05 else "no",
         ))
 
-        plot_data[sym] = (grp["data_date"], y, y_hat, ci_u, ci_l)
+        plot_data[sym] = (grp["timestamp"], y, y_hat, ci_u, ci_l)
 
     _tbl(rows, ["Symbol", "Slope", "Ann.trend", "R²", "p-value", "Sig(5%)"])
 
@@ -483,7 +483,7 @@ def analysis_returns(df: pd.DataFrame, field: str, plot: bool, gran: str = "1d")
     hist_data = {}
 
     for sym, grp in df.groupby("symbol"):
-        grp  = grp.sort_values("data_date")
+        grp  = grp.sort_values("timestamp")
         rets = grp[field].pct_change().dropna() * 100   # in %
         if rets.empty:
             continue
@@ -531,14 +531,14 @@ def analysis_volatility(df: pd.DataFrame, field: str, window: int, plot: bool, g
 
     plot_data = {}
     for sym, grp in df.groupby("symbol"):
-        grp  = grp.sort_values("data_date")
+        grp  = grp.sort_values("timestamp")
         rets = grp[field].pct_change()
         vol  = rets.rolling(window).std() * np.sqrt(ann_factor(gran)) * 100
         latest = vol.dropna().iloc[-1] if not vol.dropna().empty else float("nan")
         mean_v = vol.dropna().mean()
         print(f"  {sym:10s}  latest={latest:.1f}%  mean={mean_v:.1f}%  "
               f"min={vol.min():.1f}%  max={vol.max():.1f}%")
-        plot_data[sym] = (grp["data_date"].values, vol.values)
+        plot_data[sym] = (grp["timestamp"].values, vol.values)
 
     if plot and plot_data:
         import matplotlib.pyplot as plt
@@ -571,7 +571,7 @@ def analysis_correlation(df: pd.DataFrame, field: str, plot: bool):
         return
 
     # Pivot to wide format: date × symbol
-    wide = df.pivot_table(index="data_date", columns="symbol", values=field)
+    wide = df.pivot_table(index="timestamp", columns="symbol", values=field)
     rets = wide.pct_change().dropna(how="all")
     corr = rets.corr()
 
@@ -616,7 +616,7 @@ def analysis_sma(df: pd.DataFrame, field: str, windows: list[int], plot: bool):
 
     plot_data = {}
     for sym, grp in df.groupby("symbol"):
-        grp  = grp.sort_values("data_date").reset_index(drop=True)
+        grp  = grp.sort_values("timestamp").reset_index(drop=True)
         smas = {}
         rows = []
         for w in windows:
@@ -628,7 +628,7 @@ def analysis_sma(df: pd.DataFrame, field: str, windows: list[int], plot: bool):
             rows.append((sym, w, f"{latest_sma:.2f}", f"{latest_price:.2f}", direction))
             smas[col] = grp[col]
         _tbl(rows, ["Symbol", "Window", "SMA", "Price", "Position"])
-        plot_data[sym] = (grp["data_date"], grp[field], smas)
+        plot_data[sym] = (grp["timestamp"], grp[field], smas)
 
     if plot and plot_data:
         import matplotlib.pyplot as plt
@@ -674,9 +674,9 @@ def analysis_drawdown(df: pd.DataFrame, field: str, plot: bool):
     plot_data = {}
 
     for sym, grp in df.groupby("symbol"):
-        grp   = grp.sort_values("data_date").reset_index(drop=True)
+        grp   = grp.sort_values("timestamp").reset_index(drop=True)
         price = grp[field].values.astype(float)
-        dates = grp["data_date"].values
+        dates = grp["timestamp"].values
 
         # Rolling maximum (high-water mark)
         hwm = np.maximum.accumulate(price)
@@ -767,7 +767,7 @@ def analysis_rsi(df: pd.DataFrame, field: str, window: int, plot: bool):
     plot_data = {}
 
     for sym, grp in df.groupby("symbol"):
-        grp   = grp.sort_values("data_date").reset_index(drop=True)
+        grp   = grp.sort_values("timestamp").reset_index(drop=True)
         rsi   = _rsi(grp[field], window)
         latest = rsi.dropna().iloc[-1] if not rsi.dropna().empty else float("nan")
 
@@ -783,7 +783,7 @@ def analysis_rsi(df: pd.DataFrame, field: str, window: int, plot: bool):
         os = int((rsi <= 30).sum())
 
         rows.append((sym, f"{latest:.1f}", signal, str(ob), str(os)))
-        plot_data[sym] = (grp["data_date"].values, grp[field].values, rsi.values)
+        plot_data[sym] = (grp["timestamp"].values, grp[field].values, rsi.values)
 
     _tbl(rows, ["Symbol", "RSI", "Signal", "Bars ≥70", "Bars ≤30"])
 
@@ -841,9 +841,9 @@ def analysis_bbands(df: pd.DataFrame, field: str, window: int, plot: bool):
     plot_data = {}
 
     for sym, grp in df.groupby("symbol"):
-        grp    = grp.sort_values("data_date").reset_index(drop=True)
+        grp    = grp.sort_values("timestamp").reset_index(drop=True)
         price  = grp[field]
-        dates  = grp["data_date"].values
+        dates  = grp["timestamp"].values
 
         mid    = price.rolling(window).mean()
         std    = price.rolling(window).std()
@@ -923,7 +923,7 @@ def analysis_montecarlo(df: pd.DataFrame, field: str, n_paths: int,
     _sep(f"MONTE CARLO  (paths={n_paths}, horizon={horizon} bars)")
 
     for sym, grp in df.groupby("symbol"):
-        grp    = grp.sort_values("data_date").reset_index(drop=True)
+        grp    = grp.sort_values("timestamp").reset_index(drop=True)
         price  = grp[field].dropna().values.astype(float)
         if len(price) < 10:
             print(f"  {sym}: not enough data")
@@ -1048,7 +1048,7 @@ def analysis_hurst(df: pd.DataFrame, field: str, plot: bool):
     plot_data = {}
 
     for sym, grp in df.groupby("symbol"):
-        grp   = grp.sort_values("data_date").reset_index(drop=True)
+        grp   = grp.sort_values("timestamp").reset_index(drop=True)
         price = grp[field].dropna().values.astype(float)
         if len(price) < 40:
             print(f"  {sym}: not enough data (need ≥40 bars)")
@@ -1108,7 +1108,7 @@ def list_symbols():
         try:
             con = sqlite3.connect(db)
             res = con.execute(
-                "SELECT symbol, COUNT(*) as n, MIN(data_date), MAX(data_date) "
+                "SELECT symbol, COUNT(*) as n, MIN(timestamp), MAX(timestamp) "
                 "FROM prices WHERE interval='1d' "
                 "GROUP BY symbol ORDER BY symbol"
             ).fetchall()
@@ -1306,4 +1306,3 @@ examples:
 
 if __name__ == "__main__":
     main()
-

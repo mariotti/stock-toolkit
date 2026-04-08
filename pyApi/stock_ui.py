@@ -220,7 +220,7 @@ CHART_LAYOUT = dict(
 def price_chart(df: pd.DataFrame, title: str = "") -> go.Figure:
     fig = go.Figure()
     fig.add_trace(go.Scatter(
-        x=df["data_date"], y=df["close"],
+        x=df["timestamp"], y=df["close"],
         mode="lines", name="close",
         line=dict(color="#38bdf8", width=1.5),
         hovertemplate="%{x|%Y-%m-%d}<br>%{y:.2f}<extra></extra>",
@@ -275,7 +275,7 @@ def drawdown_chart(df: pd.DataFrame) -> go.Figure:
     dd   = (s - hwm) / hwm * 100
     fig  = go.Figure()
     fig.add_trace(go.Scatter(
-        x=df["data_date"], y=dd,
+        x=df["timestamp"], y=dd,
         fill="tozeroy",
         mode="lines",
         line=dict(color="#f87171", width=1),
@@ -295,10 +295,10 @@ def rsi_chart(df: pd.DataFrame, window: int = 14) -> go.Figure:
 
     fig = make_subplots(rows=2, cols=1, row_heights=[0.65, 0.35], shared_xaxes=True,
                         vertical_spacing=0.04)
-    fig.add_trace(go.Scatter(x=df["data_date"], y=df["close"],
+    fig.add_trace(go.Scatter(x=df["timestamp"], y=df["close"],
                              mode="lines", name="Price",
                              line=dict(color="#38bdf8", width=1.5)), row=1, col=1)
-    fig.add_trace(go.Scatter(x=df["data_date"], y=rsi,
+    fig.add_trace(go.Scatter(x=df["timestamp"], y=rsi,
                              mode="lines", name="RSI",
                              line=dict(color="#a78bfa", width=1.5)), row=2, col=1)
     fig.add_hline(y=70, line_dash="dot", line_color="#f87171", row=2, col=1)
@@ -320,17 +320,17 @@ def bbands_chart(df: pd.DataFrame, window: int = 20) -> go.Figure:
     lower = mid - 2 * std
 
     fig = go.Figure()
-    fig.add_trace(go.Scatter(x=df["data_date"], y=upper,
+    fig.add_trace(go.Scatter(x=df["timestamp"], y=upper,
                              line=dict(color="#6b7280", width=0.8, dash="dot"),
                              name="Upper", showlegend=False))
-    fig.add_trace(go.Scatter(x=df["data_date"], y=lower,
+    fig.add_trace(go.Scatter(x=df["timestamp"], y=lower,
                              fill="tonexty", fillcolor="rgba(56,189,248,0.06)",
                              line=dict(color="#6b7280", width=0.8, dash="dot"),
                              name="Lower", showlegend=False))
-    fig.add_trace(go.Scatter(x=df["data_date"], y=mid,
+    fig.add_trace(go.Scatter(x=df["timestamp"], y=mid,
                              line=dict(color="#6b7280", width=1),
                              name="SMA", showlegend=False))
-    fig.add_trace(go.Scatter(x=df["data_date"], y=close,
+    fig.add_trace(go.Scatter(x=df["timestamp"], y=close,
                              line=dict(color="#38bdf8", width=1.5),
                              name="Price"))
     fig.update_layout(**CHART_LAYOUT, title=f"Bollinger Bands ({window})")
@@ -397,7 +397,7 @@ def price_compare_chart(dfs: dict[str, pd.DataFrame]) -> go.Figure:
             continue
         norm = s / s.iloc[0] * 100
         fig.add_trace(go.Scatter(
-            x=df["data_date"], y=norm,
+            x=df["timestamp"], y=norm,
             mode="lines", name=sym,
             line=dict(color=COLORS[i % len(COLORS)], width=1.8),
             hovertemplate=f"{sym}<br>%{{x|%Y-%m-%d}}<br>%{{y:.1f}}<extra></extra>",
@@ -416,7 +416,7 @@ def drawdown_compare_chart(dfs: dict[str, pd.DataFrame]) -> go.Figure:
         hwm = np.maximum.accumulate(s)
         dd  = (s - hwm) / hwm * 100
         fig.add_trace(go.Scatter(
-            x=df["data_date"], y=dd,
+            x=df["timestamp"], y=dd,
             mode="lines", name=sym,
             line=dict(color=COLORS[i % len(COLORS)], width=1.5),
             hovertemplate=f"{sym}  %{{y:.1f}}%<extra></extra>",
@@ -430,7 +430,7 @@ def correlation_heatmap(dfs: dict[str, pd.DataFrame]) -> go.Figure:
     """Pearson correlation matrix of weekly returns."""
     series = {}
     for sym, df in dfs.items():
-        w = df.set_index("data_date")["close"].resample("W-FRI").last().dropna()
+        w = df.set_index("timestamp")["close"].resample("W-FRI").last().dropna()
         if len(w) > 5:
             series[sym] = w.pct_change().dropna()
 
@@ -575,12 +575,12 @@ with tab_score:
 
             gran = profile["gran"]
             try:
-                df_r = df.set_index("data_date").resample(gran).agg(
+                df_r = df.set_index("timestamp").resample(gran).agg(
                     {"open":"first","high":"max","low":"min","close":"last","volume":"sum"}
                 ).dropna(subset=["close"]).reset_index()
             except Exception:
                 fb = {"ME":"M","QE":"Q"}.get(gran, gran)
-                df_r = df.set_index("data_date").resample(fb).agg(
+                df_r = df.set_index("timestamp").resample(fb).agg(
                     {"open":"first","high":"max","low":"min","close":"last","volume":"sum"}
                 ).dropna(subset=["close"]).reset_index()
 
@@ -1079,13 +1079,13 @@ with tab_brief:
 
             gran = profile["gran"]
             try:
-                df_r = df.set_index("data_date").resample(gran).agg(
+                df_r = df.set_index("timestamp").resample(gran).agg(
                     {"open":"first","high":"max","low":"min",
                      "close":"last","volume":"sum"}
                 ).dropna(subset=["close"]).reset_index()
             except Exception:
                 fb   = {"ME":"M","QE":"Q"}.get(gran, gran)
-                df_r = df.set_index("data_date").resample(fb).agg(
+                df_r = df.set_index("timestamp").resample(fb).agg(
                     {"open":"first","high":"max","low":"min",
                      "close":"last","volume":"sum"}
                 ).dropna(subset=["close"]).reset_index()
@@ -1551,8 +1551,8 @@ with tab_collect:
         if _db.exists():
             _con = _sq3.connect(_db)
             _syms = _con.execute(
-                "SELECT symbol, COUNT(*) as n, MIN(data_date) as first, "
-                "MAX(data_date) as last FROM prices WHERE interval='1d' "
+                "SELECT symbol, COUNT(*) as n, MIN(timestamp) as first, "
+                "MAX(timestamp) as last FROM prices WHERE interval='1d' "
                 "GROUP BY symbol ORDER BY symbol"
             ).fetchall()
             _con.close()

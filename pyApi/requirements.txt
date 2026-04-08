@@ -14,3 +14,8 @@ matplotlib>=3.7.0
 # Streamlit UI (stock_ui.py)
 streamlit>=1.30.0
 plotly>=5.18.0
+
+# Documentation generation (optional — needed for make_docs.py)
+# Install with: pip install pdoc pylint
+# pdoc>=14.0.0
+# pylint>=3.0.0
