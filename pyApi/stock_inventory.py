@@ -249,18 +249,14 @@ def cmd_check(dbs: list[Path], symbol_filter: list[str] | None) -> None:
         for sym, d in rows:
             sym_dates[sym].add(d[:10])
 
-        # Build a single trading-day calendar: days where ≥75% of all symbols
-        # have data. This naturally excludes holidays — if most symbols are
-        # closed on a day, it won't be counted as a trading day.
-        all_dates: dict[str, int] = defaultdict(int)
-        for dates in sym_dates.values():
-            for d in dates:
-                all_dates[d] += 1
-        n_syms = len(sym_dates)
-        trading_days = {
-            d for d, count in all_dates.items()
-            if count >= max(1, round(n_syms * 0.75))
-        }
+        # Build a trading-day calendar PER SYMBOL using only that symbol's own
+        # data.  A "trading day" for symbol X is any day where X itself has a bar.
+        # This avoids false gaps caused by different exchange holidays:
+        # e.g. Italian Unity Day is not a trading day for CSMIB.MI, but would
+        # appear as a gap if the calendar were built from US symbols that traded.
+        # For the gap check we infer "expected" trading days as any day that falls
+        # within the symbol's active date range AND appears in the symbol's own
+        # peer group (same symbol across all sources combined).
 
         # ── check each symbol ──────────────────────────────────────────────────
         sym_issues: list[str] = []
@@ -268,12 +264,33 @@ def cmd_check(dbs: list[Path], symbol_filter: list[str] | None) -> None:
             d_min = min(dates)
             d_max = max(dates)
 
-            # Expected trading days within this symbol's own range
-            expected = {
-                d for d in trading_days
-                if d_min <= d <= d_max
-            }
-            missing = sorted(expected - dates)
+            # Build this symbol's own trading calendar: days where it has data.
+            # Then flag any gap of > 1 consecutive missing day within that range.
+            # Single missing days are ignored — they may be exchange-specific
+            # holidays not shared by other symbols (and thus not in this calendar).
+            sorted_dates = sorted(dates)
+            missing = []
+            for i in range(1, len(sorted_dates)):
+                prev = sorted_dates[i - 1]
+                curr = sorted_dates[i]
+                # compute calendar days between consecutive bars
+                from datetime import date as _date
+                p = _date.fromisoformat(prev)
+                c = _date.fromisoformat(curr)
+                gap_days = (c - p).days
+                # Gap threshold for flagging missing data:
+                #   3 days = normal weekend (Fri→Mon) — skip
+                #   4 days = long weekend / single holiday (Fri→Tue) — skip
+                #   5 days = two consecutive holidays or one mid-week holiday — skip
+                #   6+ days = genuinely missing data (e.g. week of missed collection)
+                # This trades some sensitivity for zero false positives on exchange
+                # holidays (German Unity Day, Italian holidays, etc.)
+                if gap_days > 5:
+                    # flag the business days in the gap
+                    for offset in range(1, gap_days):
+                        candidate = (p + __import__('datetime').timedelta(days=offset))
+                        if candidate.weekday() < 5:   # Mon–Fri only
+                            missing.append(str(candidate))
 
             # Group consecutive missing days into ranges for compact display
             if missing:
@@ -281,26 +298,30 @@ def cmd_check(dbs: list[Path], symbol_filter: list[str] | None) -> None:
                 n_missing = len(missing)
                 all_clean = False
                 sym_issues.append({
-                    "db":       db.name,
-                    "symbol":   sym,
-                    "issue":    "missing days",
-                    "detail":   f"{n_missing} missing trading day(s): "
-                                + ", ".join(gaps[:5])
-                                + (" …" if len(gaps) > 5 else ""),
-                    "n_bars":   len(dates),
+                    "db":        db.name,
+                    "symbol":    sym,
+                    "issue":     "missing days",
+                    "detail":    f"{n_missing} missing trading day(s): "
+                                 + ", ".join(gaps[:5])
+                                 + (" …" if len(gaps) > 5 else ""),
+                    "n_bars":    len(dates),
                     "date_from": d_min,
                     "date_to":   d_max,
                 })
 
-            # Thin coverage warning: < 60% of expected bars present
-            n_expected = len(expected)
+            # Thin coverage warning: estimate expected bars from date range
+            # Use ~252 trading days/year as a rough baseline
+            import datetime as _dt
+            date_range_days = (_dt.date.fromisoformat(d_max) -
+                               _dt.date.fromisoformat(d_min)).days
+            n_expected = max(1, round(date_range_days * 252 / 365))
             if n_expected > 10 and len(dates) < n_expected * 0.6:
                 all_clean = False
                 sym_issues.append({
                     "db":       db.name,
                     "symbol":   sym,
                     "issue":    "thin coverage",
-                    "detail":   f"{len(dates)} bars vs {n_expected} expected "
+                    "detail":   f"{len(dates)} bars vs ~{n_expected} expected "
                                 f"({100*len(dates)//n_expected}%)",
                     "n_bars":   len(dates),
                     "date_from": d_min,

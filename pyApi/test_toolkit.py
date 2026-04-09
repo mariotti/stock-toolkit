@@ -1033,9 +1033,10 @@ class TestInventory(FixtureTestCase):
                     "INSERT INTO prices VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
                     ("x", sym, "yfinance", day, "1d", 300, 301, 299, 300,
                      100000, 300, 0, ""))
-        # AAPL: day index 4 missing (calendar day present in 2/3 = 67% > threshold)
+        # AAPL: days 4, 5, 6 missing — Jan 5 (Fri) → Jan 11 (Thu) = 6 calendar days
+        # This represents genuinely missing data (not just a public holiday)
         for i, day in enumerate(days):
-            if i == 4:
+            if i in (4, 5, 6):
                 continue
             con.execute(
                 "INSERT INTO prices VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
