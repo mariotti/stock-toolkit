@@ -106,39 +106,56 @@ stock_score.py
 stock_backtest.py
 stock_alerts.py
 stock_ui.py                 ← Streamlit dashboard
+stock_setup.py              ← interactive configuration wizard
 test_toolkit.py             ← offline test suite (no API calls)
 test_live_apis.py           ← live API connectivity tests
 make_dist.py                ← create a clean public distribution
+make_docs.py                ← generate HTML docs and diagrams
+install.sh                  ← one-command installer
+startUI.sh                  ← launch the dashboard
 crontab.demo                ← example crontab (copy and edit)
 config.env                  ← API keys and symbols (keep out of git)
+VERSION                     ← semver version number (edit before release)
 README.md
+QUICKSTART.md               ← 3-step install guide (dist users)
+QUICKSTART_DEV.md           ← CLI usage guide (developers)
 ANALYSIS.md
 README_SCORE.md
 README_BACKTEST.md
 README_ALERTS.md
 requirements.txt
 
+bin/                        ← shell wrappers (added to PATH or used directly)
+    collect
+    analyse
+    inventory
+    score
+    backtest
+    alerts
+
 stock_data.db               ← live collection (SQLite)
-stock_data.csv              ← legacy output (--csv flag only)
+stock_failures.db           ← failure tracker — suppressed (symbol, source) pairs
+stock_failures_report.csv   ← human-readable export of failures (generated each run)
 collector.log               ← timestamped run log
 .collector_state.json       ← internal: daily API call counters
 .alerts_state.json          ← internal: alert edge-detection state
 
 data/                       ← historical DBs (--historical flag)
     stock_data_2024.db
-    stock_data_2010-2020.db
     stock_data_all.db
 
-gnuplot-data/               ← gnuplot output (--plot-gnuplot)
-    stock_gnuplot_AAPL.dat
-    stock_plot.gp
+docs/                       ← generated HTML docs (make_docs.py)
+    stock_collector.html
+    diagrams/
+        packages_StockToolkit.png
+        classes_StockToolkit.png
 
+gnuplot-data/               ← gnuplot output (--plot-gnuplot)
 matplot/                    ← matplotlib output (--plot-matplotlib)
-    stock_plot_close.png
 ```
 
-The `data/`, `gnuplot-data/`, and `matplot/` folders are created automatically
-on first use.
+The `bin/`, `data/`, `docs/`, `gnuplot-data/`, and `matplot/` folders are
+created automatically on first use.
 
 ---
 
@@ -182,18 +199,36 @@ generous call budgets.
 
 ### Configuration
 
-All settings are at the top of the file in the `CONFIG` section:
+All settings live in `config.env` in the project directory:
 
-```python
-# Symbols to track
-SYMBOLS = ["AAPL", "MSFT", "GOOGL", "AMZN", "TSLA"]
+```bash
+# Symbols to track (comma-separated, exchange suffixes for non-US)
+SYMBOLS=AAPL,MSFT,GOOGL,AMZN,TSLA,ENEL.MI,SAP.DE
 
-# API keys (see above)
-API_KEYS = { ... }
+# Symbols to never collect — blocks bare EU tickers that duplicate .MI/.DE versions
+SYMBOLS_IGNORE=ENI,ENEL,CSMIB,SAP
+
+# Stop requesting a (symbol, source) pair after this many consecutive failures
+FAILURE_THRESHOLD=5
+
+# API keys (all optional — yfinance works without any key)
+ALPHAVANTAGE_KEY=
+FINNHUB_KEY=
+MASSIVE_KEY=
+FMP_KEY=
+TWELVEDATA_KEY=
+MARKETSTACK_KEY=
+ANTHROPIC_KEY=           # for the Briefing tab in the UI
 
 # Paid tier flags
-FINNHUB_PAID      = False   # set True to unlock /stock/candle bars
-ALPHAVANTAGE_PAID = False   # set True to unlock adjusted closes + full history
+FINNHUB_PAID=false
+ALPHAVANTAGE_PAID=false
+```
+
+Run the interactive wizard to configure keys:
+
+```bash
+python3 stock_setup.py
 ```
 
 ### Live collection
@@ -225,25 +260,25 @@ python3 stock_collector.py --csv
 | yfinance | `1d` | Last 7 days of daily OHLCV |
 | yfinance | `1h` | Last 5 days of hourly OHLCV |
 | Alpha Vantage | `1d` | Last ~100 days (free) |
-| Finnhub | `quote` | Real-time snapshot (open, high, low, close, volume, % change) |
+| Finnhub | `1d` | Real-time snapshot (open, high, low, close, volume, % change) |
 | Polygon | `1d` | Last 30 days |
-| FMP | `quote` | Real-time snapshot + P/E, market cap, 52-week high/low |
 | FMP | `1d` | Last 90 days |
 | Twelve Data | `1d` | Last 30 days |
 | Twelve Data | `1h` | Last 24 hours |
 | Marketstack | `1d` | Last batch (all symbols in one call) |
 
+All seven sources run **in parallel** — their rate-limit sleeps overlap rather
+than stack, so a full run completes in roughly the time of the slowest single
+source rather than the sum of all sources.
+
 **Running via cron:**
 
 ```bash
-# every 30 minutes
-*/30 * * * * /usr/bin/python3 /path/to/stock_collector.py
+# every 30 minutes on weekdays (use bin/collect wrapper)
+*/30 7-22 * * 1-5  /path/to/stock-toolkit/bin/collect --sources yfinance finnhub fmp
+0    22  * * 1-5   /path/to/stock-toolkit/bin/collect --sources alphavantage polygon marketstack
 
-# every 10 minutes
-*/10 * * * * /usr/bin/python3 /path/to/stock_collector.py
-
-# single symbol, every hour
-0 * * * * /usr/bin/python3 /path/to/stock_collector.py -s AAPL
+# see crontab.demo for a full tiered schedule
 ```
 
 ### Historical collection
@@ -321,12 +356,32 @@ Data is never duplicated. The pipeline has two layers:
 1. **Before the API call** — `_live_has_today()` checks if today's row already
    exists in the DB. If it does, the HTTP request is skipped entirely,
    protecting your daily API budgets.
-2. **After fetching** — `INSERT OR IGNORE` on a `UNIQUE (symbol, source,
-   data_date, interval)` constraint catches anything that slips through (e.g.
-   two cron jobs overlapping).
+2. **After fetching** — `INSERT OR IGNORE` on a `UNIQUE (symbol, source, timestamp)`
+   constraint catches anything that slips through (e.g. two cron jobs overlapping).
 
 The same logic applies to `--historical` via `_hist_has_data()`, which checks
 whether a `(symbol, source)` pair already has rows in the requested date range.
+
+### Failure tracking
+
+Repeated failures for a `(symbol, source)` pair are tracked in `stock_failures.db`.
+After `FAILURE_THRESHOLD` (default: 5) consecutive failures, the pair is suppressed
+— the API call is silently skipped on future runs.
+
+A human-readable report is exported to `stock_failures_report.csv` after each run.
+
+To reset a suppressed symbol:
+
+```bash
+# reset a specific (symbol, source) pair
+sqlite3 stock_failures.db "DELETE FROM failures WHERE symbol='ENI' AND source='yfinance'"
+
+# reset all failures for a symbol across all sources
+sqlite3 stock_failures.db "DELETE FROM failures WHERE symbol='ENI'"
+
+# view all suppressed pairs
+sqlite3 stock_failures.db "SELECT * FROM failures WHERE hits >= 5"
+```
 
 ### Rate limits and budgets
 
@@ -1122,15 +1177,21 @@ python3 -m pytest test_toolkit.py::TestBacktest -v
 |---|---|
 | `TestCollectorConfig` | `config.env` parser — inline comments, quoted values, missing file |
 | `TestCollectorDedup` | `_live_has_today` and `_hist_has_data` — hit, miss, wrong symbol, future range |
+| `TestCollectorSkipLogic` | Quote freshness, hourly bar currency, sources filter |
 | `TestScoreSteps` | All seven step functions, all five horizon profiles, penalty logic |
 | `TestBacktest` | All four strategies, equity length, no-lookahead, commission effect |
 | `TestAlerts` | `build_context`, `evaluate_condition`, edge detection, state persistence |
+| `TestInventory` | Gap detection, `--remove`, calendar threshold |
 | `TestPipeline` | End-to-end: score → backtest → alert on the same data; determinism check |
+| `TestFailureTracker` | `record_failure`, `is_suppressed`, `flush_failures`, SQLite persistence |
+| `TestTimestamp` | `_to_timestamp()` normalisation across all input types |
+| `TestSchemaMigration` | `data_date` → `timestamp` DB migration correctness |
+| `TestFdLeak` | File descriptor leak stress test — 200+ sequential DB opens per function |
 
 Expected output:
 ```
-Ran 55 tests in 2.9s
-55/55 passed  ✓ all green
+Ran 105 tests in ~9s
+105/105 passed  ✓ all green
 ```
 
 ---
@@ -1150,19 +1211,36 @@ RUN_LIVE=1 python3 test_live_apis.py
 |---|---|---|
 | yfinance | `Ticker.fast_info` + 5-day history | 0 (no key) |
 | Alpha Vantage | `GLOBAL_QUOTE` with public `demo` key (IBM only) | 0 of your 25/day |
-| FMP | Real-key auth check only (demo key revoked in 2025) | 0–1 of your 250/day |
+| FMP | Real-key auth check only | 0–1 of your 250/day |
 | Finnhub | `/quote?symbol=AAPL` | 1 of 60/min |
 | Polygon | `/v2/aggs` single day | 1 of 5/min |
 | Twelve Data | `/quote?symbol=AAPL` | 1 of 800/day |
 | Marketstack | `/tickers/AAPL` metadata | 1 of 100/month |
 
-Sources without a key in `config.env` are skipped automatically with a clear
-message. The connectivity tests (can we reach each domain?) always run first.
+Sources without a key in `config.env` are skipped automatically.
+API failures (403, rate limits) are reported as `skipped`, not `failed`.
 
-Expected output with Finnhub + Alpha Vantage configured:
+---
+
+## Documentation
+
+Generate HTML API docs and module relationship diagrams:
+
+```bash
+# install tools first (one time)
+pip install pdoc pylint
+brew install graphviz        # macOS
+# sudo apt install graphviz  # Ubuntu
+
+# generate into docs/
+python3 make_docs.py
+
+# open in browser
+open docs/stock_collector.html
 ```
-14 passed  |  6 skipped  |  0 failed  ✓ all green
-```
+
+Output is idempotent — timestamps are stripped so git diff is clean between
+runs unless the docstrings actually changed. Safe to commit `docs/` to the repo.
 
 ---
 
