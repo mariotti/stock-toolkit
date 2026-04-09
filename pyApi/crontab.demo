@@ -6,7 +6,7 @@
 #   crontab -e
 #   (paste the relevant lines, adjust STOCK_DIR)
 #
-# Verify what is installed:
+# Verify:
 #   crontab -l
 #
 # macOS note: cron is unreliable after sleep/wake cycles.
@@ -14,122 +14,127 @@
 # ─────────────────────────────────────────────────────────────────────────────
 
 # ─────────────────────────────────────────────────────────────────────────────
-# VARIABLES
-# Adjust STOCK_DIR to where your scripts live.
-# PYTHON can be a virtualenv path for full isolation.
+# VARIABLES — adjust to your installation path
 # ─────────────────────────────────────────────────────────────────────────────
 
-STOCK_DIR=/Users/mariotti/GIT/stock_py_api/pyApi
-PYTHON=/usr/bin/python3
-# PYTHON=/Users/mariotti/GIT/stock_py_api/pyApi/venv/bin/python
-
-# Optional: log output to a file instead of letting cron email it
-# LOGFILE=/Users/mariotti/GIT/stock_py_api/pyApi/cron.log
+STOCK_DIR=/path/to/stock-toolkit
 
 # ─────────────────────────────────────────────────────────────────────────────
 # MARKET HOURS (UTC — adjust for DST by widening the window)
 #
-# European markets (Milan, Frankfurt, London):
-#   Winter: 08:00–16:30 UTC
-#   Summer: 07:00–15:30 UTC
+# European markets (Milan, Frankfurt):
+#   Winter: 08:00–16:30 UTC   |   Summer: 07:00–15:30 UTC
 #   Safe window: 07:00–17:00 UTC
 #
 # US markets (NYSE, NASDAQ):
-#   Winter: 14:30–21:00 UTC
-#   Summer: 13:30–20:00 UTC
+#   Winter: 14:30–21:00 UTC   |   Summer: 13:30–20:00 UTC
 #   Safe window: 13:00–21:30 UTC
 #
 # Combined window covering both: 07:00–21:30 UTC year-round
-# Includes 30 min before open and after close as buffer.
 # ─────────────────────────────────────────────────────────────────────────────
 
 # ─────────────────────────────────────────────────────────────────────────────
-# COLLECTION — frequency matched to data type
+# RECOMMENDED: 3 RUNS PER DAY
 #
-# Three tiers based on how often each source's data actually changes:
+# This is the minimum schedule that guarantees:
+#   ✓ yfinance hourly bars are never lost (5-day rolling window — if the
+#     collector misses 5 consecutive days, those hours are gone permanently)
+#   ✓ EOD bars are fresh every morning
+#   ✓ No rate limit concerns on any free-tier source
 #
-#  Real-time quotes  (Finnhub, FMP)     → every 30 min during market hours
-#  Hourly bars       (yfinance, Twelve) → every hour during market hours
-#  Daily closes      (AV, Polygon, MS)  → once per day after close
+# All 7 sources run in parallel — total wall-clock time ≈ slowest source
 # ─────────────────────────────────────────────────────────────────────────────
 
-# ── Tier 1: Real-time quote sources — every 30 min ───────────────────────────
-# Finnhub /quote and FMP /quote give live snapshots.
-# _quote_is_fresh() ensures we only skip if the last collection was < 25 min ago,
-# so every cron run gets a genuinely fresh price.
+# Run 1 — Morning: pick up overnight and pre-market data
+0 8 * * 1-5    $STOCK_DIR/bin/collect --sources yfinance
 
-*/30 7-21 * * 1-5   collect --sources finnhub fmp
+# Run 2 — Midday: hourly bars + EU real-time quotes
+0 13 * * 1-5   $STOCK_DIR/bin/collect --sources yfinance finnhub
 
-# ── Tier 2: Hourly bar sources — every hour ───────────────────────────────────
-# yfinance and Twelve Data return hourly OHLCV bars.
-# _hourly_bar_is_current() skips only if the current hour is already stored,
-# so each cron run adds the latest completed hour bar.
+# Run 3 — Evening: full EOD sweep after US close  ← most important run
+# 23:00 UTC = all markets closed, all EOD bars finalised
+0 23 * * 1-5   $STOCK_DIR/bin/collect --sources yfinance alphavantage polygon fmp twelvedata marketstack
 
-0 7-21 * * 1-5      collect --sources yfinance twelvedata
+# ─────────────────────────────────────────────────────────────────────────────
+# EXTENDED: TIERED SCHEDULE (for lower latency on real-time data)
+#
+# Use this instead of the 3-run schedule above if you want intraday updates.
+# Three tiers matched to how often each source's data actually changes.
+# ─────────────────────────────────────────────────────────────────────────────
 
-# ── Tier 3: Daily-close sources — once per day ────────────────────────────────
-# Alpha Vantage (25 calls/day), Polygon, and Marketstack (100 calls/month)
-# only publish end-of-day data. Running them more than once per day wastes
-# quota and returns the same data.
-# 22:00 UTC = well after NYSE close (21:00 UTC winter, 20:00 UTC summer).
+# Tier 1 — Real-time quotes every 30 min during market hours
+# Finnhub /quote: US symbols only (free tier)
+# _quote_is_fresh() ensures we skip if last call was < 25 min ago
+# */30 7-21 * * 1-5   $STOCK_DIR/bin/collect --sources finnhub fmp
 
-0 22 * * 1-5        collect --sources alphavantage polygon marketstack
+# Tier 2 — Hourly bars every hour during market hours
+# yfinance: last 5 days rolling window — must not be missed > 5 days
+# _hourly_bar_is_current() skips if current hour already stored
+# 0 7-21 * * 1-5      $STOCK_DIR/bin/collect --sources yfinance twelvedata
+
+# Tier 3 — Daily-close sources once per day after US close
+# AV: 25 calls/day, Polygon: 5/min, Marketstack: 100/month
+# Running more than once wastes quota and returns the same data
+# 0 23 * * 1-5        $STOCK_DIR/bin/collect --sources alphavantage polygon marketstack
 
 # ─────────────────────────────────────────────────────────────────────────────
 # ALERTS — during both sessions
-# Run after each real-time collection so alerts reflect the latest prices.
+# Run after each real-time collection so alerts reflect latest prices.
 # ─────────────────────────────────────────────────────────────────────────────
 
 # European session (07:00–17:00 UTC)
-*/30 7-17 * * 1-5   alerts \
-    -s CSMIB.MI ENEL.MI \
-    --when "rsi14 < 30" \
-    --when "bbands_pct_b < 0.1" \
-    --when "change_pct < -3" \
-    --notify console
+# */30 7-17 * * 1-5   $STOCK_DIR/bin/alerts \
+#     -s CSMIB.MI ENEL.MI ENI.MI LDO.MI SAP.DE \
+#     --when "rsi14 < 30" \
+#     --when "bbands_pct_b < 0.1" \
+#     --when "change_pct < -3" \
+#     --notify console
 
 # US session (13:00–21:30 UTC)
-*/30 13-21 * * 1-5  alerts \
-    -s AAPL ARM AMD AMZN MSFT GOOGL TSLA \
-    --when "rsi14 < 30" \
-    --when "bbands_pct_b < 0.1" \
-    --when "change_pct < -3" \
-    --notify console
+# */30 13-21 * * 1-5  $STOCK_DIR/bin/alerts \
+#     -s AAPL MSFT GOOGL AMZN TSLA AMD ARM MU PANW HOOD \
+#     --when "rsi14 < 30" \
+#     --when "bbands_pct_b < 0.1" \
+#     --when "change_pct < -3" \
+#     --notify console
 
 # ─────────────────────────────────────────────────────────────────────────────
 # WEEKLY SCORING — Monday morning before EU open
 # Ranks all symbols by investment score for the week ahead
-# Output goes to cron.log (redirect as needed)
 # ─────────────────────────────────────────────────────────────────────────────
 
-0 6 * * 1           score \
+0 6 * * 1           $STOCK_DIR/bin/score \
     --from 2023-01-01 \
     --horizon quarter \
     --top 5
 
 # ─────────────────────────────────────────────────────────────────────────────
 # DATABASE MAINTENANCE — Sunday midnight UTC
-# VACUUM reclaims fragmentation; ANALYZE refreshes query planner stats
+#
+# VACUUM reclaims fragmentation in both the prices DB and failures DB.
+# ANALYZE refreshes SQLite query planner statistics.
 # ─────────────────────────────────────────────────────────────────────────────
 
-0 0 * * 0           for db in $STOCK_DIR/stock_data.db $STOCK_DIR/data/*.db; \
-                        do [ -f "$db" ] && sqlite3 "$db" "VACUUM; ANALYZE;"; \
-                    done
+0 0 * * 0   for db in \
+                $STOCK_DIR/stock_data.db \
+                $STOCK_DIR/stock_failures.db \
+                $STOCK_DIR/data/*.db; \
+            do [ -f "$db" ] && sqlite3 "$db" "VACUUM; ANALYZE;"; done
 
 # ─────────────────────────────────────────────────────────────────────────────
 # LIVE API TESTS — Sunday morning (after maintenance, before week starts)
-# Only runs if keys are configured; costs ≤4 API calls total
+# Costs ≤ 7 API calls total; sources without a key are skipped automatically.
 # ─────────────────────────────────────────────────────────────────────────────
 
-30 0 * * 0          cd $STOCK_DIR && RUN_LIVE=1 $PYTHON test_live_apis.py  # no wrapper needed
+30 0 * * 0  cd $STOCK_DIR && RUN_LIVE=1 $STOCK_DIR/.venv/bin/python test_live_apis.py
 
 
 # =============================================================================
 # macOS ALTERNATIVE — launchd plist
 # =============================================================================
 #
-# cron on macOS is unreliable after sleep/wake cycles.
-# launchd is more robust for laptops. Two example plists below.
+# cron on macOS is unreliable after sleep/wake cycles (laptop lid close etc).
+# launchd survives sleep and fires missed jobs on wake — more robust for laptops.
 #
 # Install:
 #   cp com.stock.collector.plist ~/Library/LaunchAgents/
@@ -142,10 +147,8 @@ PYTHON=/usr/bin/python3
 #   launchctl list | grep stock
 #
 # ─────────────────────────────────────────────────────────────────────────────
-# FILE: ~/Library/LaunchAgents/com.stock.collector.plist
-# Tier 1: real-time quotes every 30 minutes (1800 seconds).
-# Duplicate this plist as com.stock.collector.hourly.plist (3600s) and
-# com.stock.collector.daily.plist (run at a fixed time) for tiers 2 and 3.
+# FILE: ~/Library/LaunchAgents/com.stock.collector.morning.plist
+# Run 1 — Morning collection at 08:00 UTC (09:00 CET winter, 10:00 CET summer)
 # ─────────────────────────────────────────────────────────────────────────────
 #
 # <?xml version="1.0" encoding="UTF-8"?>
@@ -154,55 +157,28 @@ PYTHON=/usr/bin/python3
 # <plist version="1.0">
 # <dict>
 #   <key>Label</key>
-#   <string>com.stock.collector</string>
+#   <string>com.stock.collector.morning</string>
 #   <key>ProgramArguments</key>
 #   <array>
-#     <string>/usr/bin/python3</string>
-#     <string>/Users/mariotti/GIT/stock_py_api/pyApi/stock_collector.py</string>
+#     <string>/path/to/stock-toolkit/bin/collect</string>
+#     <string>--sources</string>
+#     <string>yfinance</string>
 #   </array>
-#   <key>StartInterval</key>
-#   <integer>1800</integer>
-#   <key>RunAtLoad</key>
-#   <true/>
+#   <key>StartCalendarInterval</key>
+#   <dict>
+#     <key>Hour</key>   <integer>8</integer>
+#     <key>Minute</key> <integer>0</integer>
+#   </dict>
 #   <key>StandardOutPath</key>
-#   <string>/Users/mariotti/GIT/stock_py_api/pyApi/cron.log</string>
+#   <string>/path/to/stock-toolkit/collector.log</string>
 #   <key>StandardErrorPath</key>
-#   <string>/Users/mariotti/GIT/stock_py_api/pyApi/cron_err.log</string>
+#   <string>/path/to/stock-toolkit/collector.log</string>
 # </dict>
 # </plist>
 #
 # ─────────────────────────────────────────────────────────────────────────────
-# FILE: ~/Library/LaunchAgents/com.stock.alerts.plist
-# Runs alerts every 30 minutes. Adjust symbols and conditions.
+# FILE: ~/Library/LaunchAgents/com.stock.collector.evening.plist
+# Run 3 — Full EOD sweep at 23:00 UTC (most important run)
+# Duplicate the plist above changing Label to com.stock.collector.evening,
+# Hour to 23, and ProgramArguments to include all EOD sources.
 # ─────────────────────────────────────────────────────────────────────────────
-#
-# <?xml version="1.0" encoding="UTF-8"?>
-# <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
-#   "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-# <plist version="1.0">
-# <dict>
-#   <key>Label</key>
-#   <string>com.stock.alerts</string>
-#   <key>ProgramArguments</key>
-#   <array>
-#     <string>/usr/bin/python3</string>
-#     <string>/Users/mariotti/GIT/stock_py_api/pyApi/stock_alerts.py</string>
-#     <string>-s</string>
-#     <string>AAPL</string>
-#     <string>CSMIB.MI</string>
-#     <string>ENEL.MI</string>
-#     <string>--when</string>
-#     <string>rsi14 &lt; 30</string>
-#     <string>--notify</string>
-#     <string>console</string>
-#   </array>
-#   <key>StartInterval</key>
-#   <integer>1800</integer>
-#   <key>RunAtLoad</key>
-#   <false/>
-#   <key>StandardOutPath</key>
-#   <string>/Users/mariotti/GIT/stock_py_api/pyApi/alerts.log</string>
-#   <key>StandardErrorPath</key>
-#   <string>/Users/mariotti/GIT/stock_py_api/pyApi/alerts_err.log</string>
-# </dict>
-# </plist>

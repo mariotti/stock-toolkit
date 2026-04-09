@@ -273,13 +273,28 @@ source rather than the sum of all sources.
 
 **Running via cron:**
 
-```bash
-# every 30 minutes on weekdays (use bin/collect wrapper)
-*/30 7-22 * * 1-5  /path/to/stock-toolkit/bin/collect --sources yfinance finnhub fmp
-0    22  * * 1-5   /path/to/stock-toolkit/bin/collect --sources alphavantage polygon marketstack
+The optimal schedule depends on what data you need. Three runs per day is the
+recommended minimum — it guarantees hourly bars are never lost (yfinance keeps
+only a 5-day rolling window) and EOD data is always fresh by morning.
 
-# see crontab.demo for a full tiered schedule
+```bash
+# Run 1 — Morning: pick up overnight data (EU pre-market)
+0 8 * * 1-5    /path/to/stock-toolkit/bin/collect --sources yfinance
+
+# Run 2 — Midday: hourly bars + EU real-time quotes
+0 13 * * 1-5   /path/to/stock-toolkit/bin/collect --sources yfinance finnhub
+
+# Run 3 — Evening: full EOD sweep after US close  ← most important
+# 23:00 UTC = all markets closed, all EOD bars finalised
+0 23 * * 1-5   /path/to/stock-toolkit/bin/collect
 ```
+
+For lower latency, use the tiered schedule in `crontab.demo` which runs
+real-time quote sources every 30 minutes and hourly bar sources every hour
+during market hours.
+
+See `crontab.demo` for the complete schedule including alerts, weekly scoring,
+database maintenance, and macOS launchd alternatives.
 
 ### Historical collection
 
