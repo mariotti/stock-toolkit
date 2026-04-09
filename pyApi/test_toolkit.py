@@ -1111,28 +1111,52 @@ class TestInventory(FixtureTestCase):
 
 
 class TestFailureTracker(FixtureTestCase):
-    """Tests for record_failure / is_suppressed / flush_failures."""
+    """Tests for record_failure / is_suppressed / flush_failures (SQLite backend)."""
 
     def setUp(self):
         self.sc = _load_module("stock_collector", self.db, self.tmp_dir)
-        # Point failures file to a temp location
-        self.failures_path = self.tmp_dir / "test_failures.csv"
-        self.sc.FAILURES_PATH = self.failures_path
-        self.sc._failures = None   # reset module-level cache
+        # Use a unique DB per test so tests don't share failure state
+        import uuid
+        uid = uuid.uuid4().hex[:8]
+        self.sc.FAILURES_DB_PATH     = self.tmp_dir / f"test_failures_{uid}.db"
+        self.sc.FAILURES_REPORT_PATH = self.tmp_dir / f"test_failures_report_{uid}.csv"
 
-    def test_record_failure_creates_file(self):
-        """First failure creates the CSV."""
+    def _hits(self, symbol: str, source: str) -> int:
+        """Helper: read hit count directly from the failures DB."""
+        import sqlite3
+        con = sqlite3.connect(self.sc.FAILURES_DB_PATH)
+        try:
+            row = con.execute(
+                "SELECT hits FROM failures WHERE symbol=? AND source=?",
+                (symbol.upper(), source)
+            ).fetchone()
+        finally:
+            con.close()
+        return row[0] if row else 0
+
+    def _reason(self, symbol: str, source: str) -> str:
+        """Helper: read reason directly from the failures DB."""
+        import sqlite3
+        con = sqlite3.connect(self.sc.FAILURES_DB_PATH)
+        try:
+            row = con.execute(
+                "SELECT reason FROM failures WHERE symbol=? AND source=?",
+                (symbol.upper(), source)
+            ).fetchone()
+        finally:
+            con.close()
+        return row[0] if row else ""
+
+    def test_record_failure_creates_db(self):
+        """First failure creates the SQLite DB."""
         self.sc.record_failure("AAPL", "yfinance", "0 bars")
-        self.sc.flush_failures()
-        self.assertTrue(self.failures_path.exists())
+        self.assertTrue(self.sc.FAILURES_DB_PATH.exists())
 
     def test_record_failure_increments_hits(self):
         """Hitting the same pair multiple times increments the counter."""
         for _ in range(3):
             self.sc.record_failure("MSFT", "fmp", "paid plan")
-        self.sc.flush_failures()
-        f = self.sc._load_failures()
-        self.assertEqual(f[("MSFT", "fmp")]["hits"], 3)
+        self.assertEqual(self._hits("MSFT", "fmp"), 3)
 
     def test_is_suppressed_below_threshold(self):
         """Below threshold: not suppressed."""
@@ -1153,21 +1177,31 @@ class TestFailureTracker(FixtureTestCase):
         self.assertTrue(self.sc.is_suppressed("GOOGL", "marketstack"))
         self.assertFalse(self.sc.is_suppressed("GOOGL", "yfinance"))
 
-    def test_flush_then_reload(self):
-        """Failures survive a flush-and-reload cycle."""
+    def test_record_is_realtime(self):
+        """Failures are persisted immediately — no flush needed to read back."""
         self.sc.record_failure("AMZN", "polygon", "bad status")
-        self.sc.flush_failures()
-        self.sc._failures = None   # clear cache to force reload
-        self.assertEqual(self.sc._get_failures()[("AMZN", "polygon")]["hits"], 1)
+        # Read back directly from DB without any flush
+        self.assertEqual(self._hits("AMZN", "polygon"), 1)
 
     def test_reason_updated_on_new_failure(self):
         """Most recent reason overwrites the old one."""
         self.sc.record_failure("MU", "alphavantage", "first reason")
         self.sc.record_failure("MU", "alphavantage", "second reason")
-        self.assertEqual(
-            self.sc._get_failures()[("MU", "alphavantage")]["reason"],
-            "second reason"
-        )
+        self.assertEqual(self._reason("MU", "alphavantage"), "second reason")
+
+    def test_flush_exports_csv_report(self):
+        """flush_failures() exports a CSV report from the DB."""
+        self.sc.record_failure("SAP", "fmp", "paid plan")
+        self.sc.flush_failures()
+        self.assertTrue(self.sc.FAILURES_REPORT_PATH.exists())
+        content = self.sc.FAILURES_REPORT_PATH.read_text()
+        self.assertIn("SAP", content)
+        self.assertIn("fmp", content)
+
+    def test_no_csv_without_failures(self):
+        """flush_failures() does nothing if no failures recorded."""
+        self.sc.flush_failures()
+        self.assertFalse(self.sc.FAILURES_REPORT_PATH.exists())
 
 
 class TestTimestamp(FixtureTestCase):

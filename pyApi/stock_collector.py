@@ -149,7 +149,8 @@ LOG_PATH       = OUTPUT_DIR / _cfg.get("LOG_FILE",     "collector.log")
 GNUPLOT_DIR    = OUTPUT_DIR / _cfg.get("GNUPLOT_DIR",  "gnuplot-data")
 MATPLOTLIB_DIR = OUTPUT_DIR / _cfg.get("MATPLOT_DIR",  "matplot")
 HIST_DIR       = OUTPUT_DIR / _cfg.get("HIST_DIR",     "data")
-FAILURES_PATH  = OUTPUT_DIR / _cfg.get("FAILURES_FILE","stock_failures.csv")
+FAILURES_DB_PATH     = OUTPUT_DIR / _cfg.get("FAILURES_DB",     "stock_failures.db")
+FAILURES_REPORT_PATH = OUTPUT_DIR / _cfg.get("FAILURES_REPORT", "stock_failures_report.csv")
 
 # ── rate limits (not user-configurable via config.env) ───────────────────────
 
@@ -206,102 +207,125 @@ def save_state(state: dict):
 #  FAILURE TRACKER — stock_failures.csv
 # ─────────────────────────────────────────────
 
-def _load_failures() -> dict:
+def _failures_db_connect() -> sqlite3.Connection:
     """
-    Load stock_failures.csv into a dict keyed by (symbol, source).
-    Returns {} if the file doesn't exist yet.
-    Format: symbol,source,reason,hits,first_seen,last_seen
+    Open (and if needed initialise) the failures SQLite database.
+    Separate from the main prices DB so it can be written to in real-time
+    from parallel fetcher threads without interfering with price data.
+    WAL mode allows concurrent readers alongside the writer.
     """
-    failures = {}
-    if not FAILURES_PATH.exists():
-        return failures
-    try:
-        with open(FAILURES_PATH, newline="") as f:
-            for row in csv.DictReader(f):
-                key = (row["symbol"].upper(), row["source"])
-                failures[key] = {
-                    "reason":     row.get("reason", "unknown"),
-                    "hits":       int(row.get("hits", 1)),
-                    "first_seen": row.get("first_seen", ""),
-                    "last_seen":  row.get("last_seen", ""),
-                }
-    except Exception as e:
-        log.warning(f"[failures] could not load {FAILURES_PATH.name}: {e}")
-    return failures
-
-
-def _save_failures(failures: dict) -> None:
-    """Write the failure dict back to stock_failures.csv."""
-    try:
-        with open(FAILURES_PATH, "w", newline="") as f:
-            writer = csv.DictWriter(
-                f, fieldnames=["symbol","source","reason","hits","first_seen","last_seen"]
-            )
-            writer.writeheader()
-            for (sym, src), info in sorted(failures.items()):
-                writer.writerow({
-                    "symbol":     sym,
-                    "source":     src,
-                    "reason":     info["reason"],
-                    "hits":       info["hits"],
-                    "first_seen": info["first_seen"],
-                    "last_seen":  info["last_seen"],
-                })
-    except Exception as e:
-        log.warning(f"[failures] could not save {FAILURES_PATH.name}: {e}")
-
-
-# Module-level cache so all fetchers share one load per run
-_failures: dict | None = None
-
-def _get_failures() -> dict:
-    global _failures
-    if _failures is None:
-        _failures = _load_failures()
-    return _failures
+    con = sqlite3.connect(FAILURES_DB_PATH, timeout=10)
+    con.execute("PRAGMA journal_mode=WAL")
+    con.execute("""
+        CREATE TABLE IF NOT EXISTS failures (
+            symbol      TEXT NOT NULL,
+            source      TEXT NOT NULL,
+            reason      TEXT,
+            hits        INTEGER NOT NULL DEFAULT 0,
+            first_seen  TEXT NOT NULL,
+            last_seen   TEXT NOT NULL,
+            PRIMARY KEY (symbol, source)
+        )
+    """)
+    con.commit()
+    return con
 
 
 def record_failure(symbol: str, source: str, reason: str) -> None:
     """
-    Record a failed fetch for (symbol, source).
-    Increments the hit counter and updates last_seen.
-    Failures are saved to disk at end of run via flush_failures().
-    When hits reach FAILURE_THRESHOLD, logs a warning.
+    Record a failed fetch for (symbol, source) directly in the failures DB.
+    Safe to call from parallel threads — SQLite serialises concurrent writes.
+    When hits reach FAILURE_THRESHOLD, logs a warning once.
     """
     today = str(date.today())
-    key   = (symbol.upper(), source)
-    f     = _get_failures()
-
-    if key not in f:
-        f[key] = {"reason": reason, "hits": 0,
-                  "first_seen": today, "last_seen": today}
-    entry = f[key]
-    entry["hits"]     += 1
-    entry["last_seen"] = today
-    entry["reason"]    = reason   # update to most recent reason
-
-    if entry["hits"] == FAILURE_THRESHOLD:
-        log.warning(
-            f"[failures] {symbol}/{source}: {FAILURE_THRESHOLD} failures "
-            f"({reason}) — will be skipped automatically from now on. "
-            f"Edit {FAILURES_PATH.name} to retry."
-        )
-
-
-def flush_failures() -> None:
-    """Write accumulated failures to disk. Called once at end of run."""
-    if _failures:
-        _save_failures(_failures)
+    sym   = symbol.upper()
+    con = _failures_db_connect()
+    try:
+        con.execute("""
+            INSERT INTO failures (symbol, source, reason, hits, first_seen, last_seen)
+            VALUES (?, ?, ?, 1, ?, ?)
+            ON CONFLICT(symbol, source) DO UPDATE SET
+                hits      = hits + 1,
+                reason    = excluded.reason,
+                last_seen = excluded.last_seen
+        """, (sym, source, reason, today, today))
+        con.commit()
+        # check if we just crossed the threshold
+        hits = con.execute(
+            "SELECT hits FROM failures WHERE symbol=? AND source=?",
+            (sym, source)
+        ).fetchone()[0]
+        if hits == FAILURE_THRESHOLD:
+            log.warning(
+                f"[failures] {sym}/{source}: {FAILURE_THRESHOLD} failures "
+                f"({reason}) — will be skipped automatically. "
+                f"Reset: delete or UPDATE the row in {FAILURES_DB_PATH.name}"
+            )
+    finally:
+        con.close()
 
 
 def is_suppressed(symbol: str, source: str) -> bool:
     """
-    Return True if (symbol, source) has hit the failure threshold
-    and should be silently skipped.
+    Return True if (symbol, source) has reached the failure threshold.
+    Queries the failures DB directly — no in-memory cache needed.
     """
-    key   = (symbol.upper(), source)
-    entry = _get_failures().get(key)
-    return entry is not None and entry["hits"] >= FAILURE_THRESHOLD
+    if not FAILURES_DB_PATH.exists():
+        return False
+    try:
+        con = _failures_db_connect()
+        try:
+            row = con.execute(
+                "SELECT hits FROM failures WHERE symbol=? AND source=?",
+                (symbol.upper(), source)
+            ).fetchone()
+        finally:
+            con.close()
+        return row is not None and row[0] >= FAILURE_THRESHOLD
+    except Exception:
+        return False
+
+
+def flush_failures() -> None:
+    """
+    Export the failures DB to a human-readable CSV report.
+    Called once at end of run. The CSV is for inspection only —
+    the DB is the authoritative source.
+    """
+    if not FAILURES_DB_PATH.exists():
+        return
+    try:
+        con = _failures_db_connect()
+        try:
+            rows = con.execute("""
+                SELECT symbol, source, reason, hits, first_seen, last_seen
+                FROM failures
+                ORDER BY hits DESC, symbol, source
+            """).fetchall()
+        finally:
+            con.close()
+        if not rows:
+            return
+        with open(FAILURES_REPORT_PATH, "w", newline="") as f:
+            writer = csv.writer(f)
+            writer.writerow(["symbol", "source", "reason", "hits",
+                             "first_seen", "last_seen"])
+            writer.writerows(rows)
+        suppressed = sum(1 for r in rows if r[3] >= FAILURE_THRESHOLD)
+        log.info(f"[failures] report written to {FAILURES_REPORT_PATH.name} "
+                 f"({len(rows)} entries, {suppressed} suppressed)")
+    except Exception as e:
+        log.warning(f"[failures] could not write report: {e}")
+        with open(FAILURES_REPORT_PATH, "w", newline="") as f:
+            writer = csv.writer(f)
+            writer.writerow(["symbol", "source", "reason", "hits",
+                             "first_seen", "last_seen"])
+            writer.writerows(rows)
+        suppressed = sum(1 for r in rows if r[3] >= FAILURE_THRESHOLD)
+        log.info(f"[failures] report written to {FAILURES_REPORT_PATH.name} "
+                 f"({len(rows)} entries, {suppressed} suppressed)")
+    except Exception as e:
+        log.warning(f"[failures] could not write report: {e}")
 
 def budget_ok(state: dict, source: str) -> bool:
     limit = DAILY_LIMITS.get(source)
@@ -1907,35 +1931,54 @@ def main():
 
     log.info(f"Backend: {'CSV → ' + str(CSV_PATH) if use_csv else 'SQLite → ' + str(DB_PATH)}")
 
+    # Each fetcher is a (name, label, callable) tuple.
+    # Fetchers run in parallel via ThreadPoolExecutor — safe because:
+    #   - HTTP calls are I/O-bound, GIL is released during socket waits
+    #   - SQLite skip-function reads use WAL mode (readers never block)
+    #   - state["calls"] keys are per-source, no two fetchers share one
+    #   - rows are collected per-fetcher and merged after all complete
+    fetchers = [
+        ("yfinance",     "── yfinance ─────────────────────────────────────────",
+         lambda: fetch_yfinance(symbols)),
+        ("alphavantage", "── Alpha Vantage ────────────────────────────────────",
+         lambda: fetch_alphavantage(symbols, state)),
+        ("finnhub",      "── Finnhub ───────────────────────────────────────────────",
+         lambda: fetch_finnhub(symbols, state)),
+        ("polygon",      "── Massive (formerly Polygon.io) ────────────────────────",
+         lambda: fetch_polygon(symbols, state)),
+        ("fmp",          "── Financial Modeling Prep (FMP) ────────────────",
+         lambda: fetch_fmp(symbols, state)),
+        ("twelvedata",   "── Twelve Data ──────────────────────────────────────────",
+         lambda: fetch_twelvedata(symbols, state)),
+        ("marketstack",  "── Marketstack ──────────────────────────────────────────",
+         lambda: fetch_marketstack(symbols, state)),
+    ]
+
+    active = [(name, label, fn)
+              for name, label, fn in fetchers
+              if _should_run(name)]
+
     all_rows: list[dict] = []
 
-    if _should_run("yfinance"):
-        log.info("── yfinance ─────────────────────────────────────────")
-        all_rows += fetch_yfinance(symbols)
+    from concurrent.futures import ThreadPoolExecutor, as_completed
 
-    if _should_run("alphavantage"):
-        log.info("── Alpha Vantage ────────────────────────────────────")
-        all_rows += fetch_alphavantage(symbols, state)
+    def _run_fetcher(name: str, label: str, fn) -> tuple[str, list[dict]]:
+        log.info(label)
+        return name, fn()
 
-    if _should_run("finnhub"):
-        log.info("── Finnhub ───────────────────────────────────────────────")
-        all_rows += fetch_finnhub(symbols, state)
-
-    if _should_run("polygon"):
-        log.info("── Massive (formerly Polygon.io) ────────────────────────")
-        all_rows += fetch_polygon(symbols, state)
-
-    if _should_run("fmp"):
-        log.info("── Financial Modeling Prep (FMP) ────────────────")
-        all_rows += fetch_fmp(symbols, state)
-
-    if _should_run("twelvedata"):
-        log.info("── Twelve Data ──────────────────────────────────────────")
-        all_rows += fetch_twelvedata(symbols, state)
-
-    if _should_run("marketstack"):
-        log.info("── Marketstack ──────────────────────────────────────────")
-        all_rows += fetch_marketstack(symbols, state)
+    with ThreadPoolExecutor(max_workers=len(active),
+                            thread_name_prefix="fetcher") as pool:
+        futures = {
+            pool.submit(_run_fetcher, name, label, fn): name
+            for name, label, fn in active
+        }
+        for future in as_completed(futures):
+            name = futures[future]
+            try:
+                _, rows = future.result()
+                all_rows += rows
+            except Exception as e:
+                log.error(f"[{name}] fetcher raised an exception: {e}")
 
     # ── persist ──────────────────────────────────────
 
