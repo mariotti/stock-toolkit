@@ -46,6 +46,10 @@ MODULES = [
     "stock_setup",
 ]
 
+# ─────────────────────────────────────────────
+#  HELPERS
+# ─────────────────────────────────────────────
+
 # Patterns that break idempotency — stripped from generated HTML.
 # Each is a regex matching a full line containing a timestamp or version tag.
 TIMESTAMP_PATTERNS = [
@@ -75,6 +79,10 @@ def run(cmd: list, dry_run: bool, cwd: Path = SCRIPT_DIR) -> bool:
         return False
     return True
 
+
+# ─────────────────────────────────────────────
+#  DOCUMENTATION — pdoc
+# ─────────────────────────────────────────────
 
 def strip_timestamps(html_path: Path) -> int:
     """

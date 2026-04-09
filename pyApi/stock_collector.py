@@ -230,7 +230,6 @@ def _failures_db_connect() -> sqlite3.Connection:
     con.commit()
     return con
 
-
 def record_failure(symbol: str, source: str, reason: str) -> None:
     """
     Record a failed fetch for (symbol, source) directly in the failures DB.
