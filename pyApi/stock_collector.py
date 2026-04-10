@@ -160,7 +160,10 @@ DAILY_LIMITS = {
     "polygon":      None,  # 5 calls / minute  — no daily cap
     "fmp":          250,   # 250 calls / day
     "twelvedata":   800,   # 800 calls / day
-    "marketstack":  3,     # 100 calls / month → ~3/day safety budget
+}
+
+MONTHLY_LIMITS = {
+    "marketstack":  100,   # 100 calls / month (free tier)
 }
 
 MINUTE_LIMITS = {
@@ -188,14 +191,28 @@ log.debug(f"Config loaded from: {_src}")
 # ─────────────────────────────────────────────
 
 def load_state() -> dict:
+    today = str(date.today())
+    month = today[:7]   # "2026-04"
     if STATE_PATH.exists():
         with open(STATE_PATH) as f:
             state = json.load(f)
-        # reset counters if the stored date is not today
-        if state.get("date") != str(date.today()):
-            state = {"date": str(date.today()), "calls": {}}
+        # reset daily counters if date changed
+        if state.get("date") != today:
+            state["date"]  = today
+            state["calls"] = {}
+        # reset monthly counters if month changed
+        if state.get("month") != month:
+            state["month"]         = month
+            state["monthly_calls"] = {}
+        # ensure keys exist for older state files
+        state.setdefault("monthly_calls", {})
     else:
-        state = {"date": str(date.today()), "calls": {}}
+        state = {
+            "date":          today,
+            "month":         month,
+            "calls":         {},
+            "monthly_calls": {},
+        }
     return state
 
 def save_state(state: dict):
@@ -328,17 +345,30 @@ def flush_failures() -> None:
         log.warning(f"[failures] could not write report: {e}")
 
 def budget_ok(state: dict, source: str) -> bool:
-    limit = DAILY_LIMITS.get(source)
-    if limit is None:
-        return True   # no daily cap
-    used = state["calls"].get(source, 0)
-    if used >= limit:
-        log.warning(f"[{source}] daily budget exhausted ({used}/{limit}), skipping.")
-        return False
+    # Check daily limit
+    daily_limit = DAILY_LIMITS.get(source)
+    if daily_limit is not None:
+        used = state["calls"].get(source, 0)
+        if used >= daily_limit:
+            log.warning(f"[{source}] daily budget exhausted ({used}/{daily_limit}), skipping.")
+            return False
+    # Check monthly limit
+    monthly_limit = MONTHLY_LIMITS.get(source)
+    if monthly_limit is not None:
+        used = state["monthly_calls"].get(source, 0)
+        if used >= monthly_limit:
+            log.warning(
+                f"[{source}] monthly budget exhausted "
+                f"({used}/{monthly_limit} for {state.get('month','?')}), skipping."
+            )
+            return False
     return True
+
 
 def record_call(state: dict, source: str, n: int = 1):
     state["calls"][source] = state["calls"].get(source, 0) + n
+    if source in MONTHLY_LIMITS:
+        state["monthly_calls"][source] = state["monthly_calls"].get(source, 0) + n
 
 # ─────────────────────────────────────────────
 #  SHARED — column definitions
@@ -649,6 +679,8 @@ def safe_get(url: str, params: dict = None, timeout: int = 10) -> dict | None:
                 return {"_error": 402, "_message": "Payment Required — endpoint requires a paid plan"}
             if r.status_code == 403:
                 return {"_error": 403}
+            if r.status_code == 429:
+                return {"_error": 429, "_message": "Too Many Requests — rate or monthly limit hit"}
             r.raise_for_status()
             return r.json()
         finally:
@@ -1130,6 +1162,16 @@ def fetch_marketstack(symbols: list[str], state: dict) -> list[dict]:
     )
     if not data:
         log.warning("[marketstack] no response — check network or API key")
+        return []
+    if isinstance(data, dict) and data.get("_error") == 429:
+        # Monthly limit hit — exhaust the budget so we stop trying this month
+        remaining = MONTHLY_LIMITS["marketstack"] - state["monthly_calls"].get("marketstack", 0)
+        if remaining > 0:
+            state["monthly_calls"]["marketstack"] = MONTHLY_LIMITS["marketstack"]
+        log.warning(
+            f"[marketstack] monthly limit hit (429) — "
+            f"skipping for rest of {state.get('month','this month')}"
+        )
         return []
     if "error" in data:
         err = data["error"]
@@ -1915,6 +1957,8 @@ def main():
 
     state = load_state()
     log.info(f"Daily call counts so far: {state['calls']}")
+    if state.get('monthly_calls'):
+        log.info(f"Monthly call counts ({state.get('month','?')}): {state['monthly_calls']}")
 
     # ── historical mode ──────────────────────────────────────
 
@@ -1926,6 +1970,8 @@ def main():
             return
         save_state(state)
         log.info(f"Updated call counts: {state['calls']}")
+        if state.get('monthly_calls'):
+            log.info(f"Monthly totals ({state.get('month','?')}): {state['monthly_calls']}")
         if args.plot_gnuplot:
             plot_gnuplot(symbols, use_csv=False, field=plot_field, db_path=active_db)
         if args.plot_matplotlib:
@@ -2014,6 +2060,8 @@ def main():
         log.info(f"Fetched {len(all_rows)} rows | {added} new rows inserted into {DB_PATH.name}")
 
     log.info(f"Updated call counts: {state['calls']}")
+    if state.get('monthly_calls'):
+        log.info(f"Monthly totals ({state.get('month','?')}): {state['monthly_calls']}")
 
     # ── plot ───────────────────────────────────────────
 
