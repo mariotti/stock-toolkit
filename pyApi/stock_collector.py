@@ -468,6 +468,36 @@ def _infer_interval(timestamp: str) -> str:
 #  SQLITE — default storage
 # ─────────────────────────────────────────────
 
+def _sort_by_staleness(symbols: list[str]) -> list[str]:
+    """
+    Sort symbols so the ones with the oldest data come first.
+    Symbols not yet in the DB (no timestamp) are treated as most stale.
+    This ensures budget-limited sources (Alpha Vantage, FMP) serve the
+    least-recently-updated symbols first rather than always favouring
+    whichever symbols happen to be first in config.env.
+    """
+    if not DB_PATH.exists() or not symbols:
+        return symbols
+    try:
+        con = sqlite3.connect(DB_PATH)
+        try:
+            rows = con.execute(
+                f"""SELECT symbol, MAX(timestamp) as last_ts
+                    FROM prices
+                    WHERE interval='1d'
+                    AND symbol IN ({','.join('?' * len(symbols))})
+                    GROUP BY symbol""",
+                symbols
+            ).fetchall()
+        finally:
+            con.close()
+        last_seen = {sym: ts for sym, ts in rows}
+        # symbols missing from DB get epoch (always first)
+        return sorted(symbols, key=lambda s: last_seen.get(s, "1970-01-01"))
+    except Exception:
+        return symbols
+
+
 def db_connect(db_path: "Path | None" = None) -> sqlite3.Connection:
     """Open (and if needed initialise) the SQLite database."""
     con = sqlite3.connect(db_path or DB_PATH)
@@ -1942,6 +1972,10 @@ def main():
                       if s not in set(SYMBOLS) and s not in SYMBOLS_IGNORE]
             if extras:
                 log.info(f"Symbols from DB not in config (kept): {extras}")
+
+        # Sort so least-recently-updated symbols run first — ensures budget-limited
+        # sources serve stale symbols before fresh ones when limits are hit mid-run
+        symbols = _sort_by_staleness(symbols)
     use_csv    = args.csv
     plot_field = args.plot_data
     # sources filter — None means run all
