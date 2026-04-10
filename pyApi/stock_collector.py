@@ -230,6 +230,7 @@ def _failures_db_connect() -> sqlite3.Connection:
     con.commit()
     return con
 
+
 def record_failure(symbol: str, source: str, reason: str) -> None:
     """
     Record a failed fetch for (symbol, source) directly in the failures DB.
@@ -687,7 +688,7 @@ def fetch_yfinance(symbols: list[str]) -> list[dict]:
 
     for sym in symbols:
         if is_suppressed(sym, "yfinance"):
-            log.debug(f"[yfinance] {sym}: suppressed (too many failures)")
+            log.info(f"[yfinance] {sym}: suppressed after {FAILURE_THRESHOLD} failures — skipping")
             continue
         daily_done  = _live_has_today(sym, "yfinance", "1d")
         hourly_done = _hourly_bar_is_current(sym, "yfinance")
@@ -766,7 +767,7 @@ def fetch_alphavantage(symbols: list[str], state: dict) -> list[dict]:
     rows = []
     for sym in symbols:
         if is_suppressed(sym, "alphavantage"):
-            log.debug(f"[alphavantage] {sym}: suppressed (too many failures)")
+            log.info(f"[alphavantage] {sym}: suppressed after {FAILURE_THRESHOLD} failures — skipping")
             continue
         if _live_has_today(sym, "alphavantage"):
             log.info(f"[alphavantage] {sym}: already collected today, skipping")
@@ -816,7 +817,7 @@ def fetch_finnhub(symbols: list[str], state: dict) -> list[dict]:
 
     for sym in symbols:
         if is_suppressed(sym, "finnhub"):
-            log.debug(f"[finnhub] {sym}: suppressed (too many failures)")
+            log.info(f"[finnhub] {sym}: suppressed after {FAILURE_THRESHOLD} failures — skipping")
             continue
         if _quote_is_fresh(sym, "finnhub"):
             log.info(f"[finnhub] {sym}: quote is fresh, skipping")
@@ -877,7 +878,7 @@ def fetch_polygon(symbols: list[str], state: dict) -> list[dict]:
 
     for sym in symbols:
         if is_suppressed(sym, "polygon"):
-            log.debug(f"[polygon] {sym}: suppressed (too many failures)")
+            log.info(f"[polygon] {sym}: suppressed after {FAILURE_THRESHOLD} failures — skipping")
             continue
         if _live_has_today(sym, "polygon"):
             log.info(f"[polygon] {sym}: already collected today, skipping")
@@ -953,7 +954,7 @@ def fetch_fmp(symbols: list[str], state: dict) -> list[dict]:
     # --- historical EOD per symbol ---
     for sym in symbols:
         if is_suppressed(sym, "fmp"):
-            log.debug(f"[fmp] {sym}: suppressed (too many failures)")
+            log.info(f"[fmp] {sym}: suppressed after {FAILURE_THRESHOLD} failures — skipping")
             continue
         if _live_has_today(sym, "fmp"):
             log.info(f"[fmp] {sym}: already collected today, skipping")
@@ -1022,9 +1023,13 @@ def fetch_twelvedata(symbols: list[str], state: dict) -> list[dict]:
         return []
 
     rows = []
-    # filter to symbols not yet collected for each interval
-    symbols_1d = [s for s in symbols if not _live_has_today(s, "twelvedata", "1d")]
-    symbols_1h = [s for s in symbols if not _hourly_bar_is_current(s, "twelvedata")]
+    # filter to symbols not yet collected and not suppressed
+    symbols_1d = [s for s in symbols
+                  if not is_suppressed(s, "twelvedata")
+                  and not _live_has_today(s, "twelvedata", "1d")]
+    symbols_1h = [s for s in symbols
+                  if not is_suppressed(s, "twelvedata")
+                  and not _hourly_bar_is_current(s, "twelvedata")]
     if not symbols_1d:
         log.info("[twelvedata] all symbols already collected today (1d), skipping")
     if not symbols_1h:
@@ -1302,7 +1307,7 @@ def _hist_yfinance(symbols, db_path, date_from, date_to, state) -> list:
     rows = []
     for sym in symbols:
         if is_suppressed(sym, "yfinance"):
-            log.debug(f"[hist/yfinance] {sym}: suppressed")
+            log.info(f"[hist/yfinance] {sym}: suppressed after {FAILURE_THRESHOLD} failures — skipping")
             continue
         if _hist_has_data(db_path, sym, "yfinance", date_from, date_to):
             log.info(f"[hist/yfinance] {sym}: already in DB, skipping")
@@ -1956,6 +1961,20 @@ def main():
     active = [(name, label, fn)
               for name, label, fn in fetchers
               if _should_run(name)]
+
+    # Log suppression summary so it's visible at the start of each run
+    if FAILURES_DB_PATH.exists():
+        sources = [name for name, _, _ in active]
+        suppressed_counts = {
+            src: sum(1 for s in symbols if is_suppressed(s, src))
+            for src in sources
+        }
+        total_suppressed = sum(suppressed_counts.values())
+        if total_suppressed:
+            summary = ", ".join(
+                f"{src}:{n}" for src, n in suppressed_counts.items() if n > 0
+            )
+            log.info(f"Suppressed (symbol, source) pairs: {total_suppressed} — {summary}")
 
     all_rows: list[dict] = []
 
