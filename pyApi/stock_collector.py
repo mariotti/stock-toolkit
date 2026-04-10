@@ -899,7 +899,10 @@ def fetch_polygon(symbols: list[str], state: dict) -> list[dict]:
                 bar.get("o"), bar.get("h"), bar.get("l"), bar.get("c"), bar.get("v"),
                 vwap=bar.get("vw"),
             ))
-        log.info(f"[polygon] {sym}: {len(data.get('results', []))} daily bars")
+        n_bars = len(data.get("results", []))
+        log.info(f"[polygon] {sym}: {n_bars} daily bars")
+        if n_bars == 0:
+            record_failure(sym, "polygon", "0 bars returned — US-only exchange")
     return rows
 
 
