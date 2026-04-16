@@ -1460,6 +1460,404 @@ class TestFdLeak(FixtureTestCase):
             f"({len(symbols)} symbols × {len(sources)} sources × 3 checks)")
 
 
+# ─────────────────────────────────────────────────────────────
+#  7. ANALYSIS — all 11 tools in stock_analysis.py
+# ─────────────────────────────────────────────────────────────
+
+class TestAnalysis(FixtureTestCase):
+    """Tests for all 11 analysis tools in stock_analysis.py."""
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        cls.sa      = _load_module("stock_analysis", cls.db, cls.tmp_dir)
+        cls.df_raw  = cls.sa.load_raw([cls.db])
+        cls.df      = cls.sa.resolve_source(cls.df_raw, None)
+        cls.df      = cls.sa.apply_granularity(cls.df, "1d")
+
+    # ── load_raw ──────────────────────────────────────────────────────────────
+
+    def test_load_raw_returns_data(self):
+        self.assertFalse(self.df_raw.empty)
+
+    def test_load_raw_has_expected_columns(self):
+        for col in ["symbol", "source", "timestamp", "open", "high", "low",
+                    "close", "volume"]:
+            self.assertIn(col, self.df_raw.columns)
+
+    def test_load_raw_timestamp_is_datetime(self):
+        self.assertTrue(pd.api.types.is_datetime64_any_dtype(self.df_raw["timestamp"]))
+
+    def test_load_raw_symbol_filter(self):
+        df = self.sa.load_raw([self.db], symbols=["AAPL"])
+        self.assertTrue((df["symbol"] == "AAPL").all())
+        self.assertFalse(df.empty)
+
+    def test_load_raw_nonexistent_db_skipped(self):
+        """A nonexistent DB is warned and skipped; valid DB still returned."""
+        df = self.sa.load_raw([self.tmp_dir / "nonexistent.db", self.db])
+        self.assertFalse(df.empty)
+
+    # ── resolve_source ────────────────────────────────────────────────────────
+
+    def test_resolve_source_no_duplicates(self):
+        """Each (symbol, timestamp) appears exactly once after resolve."""
+        df     = self.sa.resolve_source(self.df_raw, None)
+        dupes  = df.duplicated(subset=["symbol", "timestamp"], keep=False)
+        self.assertFalse(dupes.any(),
+                         "duplicate (symbol, timestamp) rows after resolve_source")
+
+    def test_resolve_source_priority_alphavantage_wins(self):
+        """alphavantage beats yfinance when both cover the same bar."""
+        ts = pd.Timestamp("2023-06-01", tz="UTC")
+        rows = [
+            {"symbol": "TST", "source": "yfinance",     "timestamp": ts,
+             "interval": "1d", "close": 100.0, "open": 99.0,
+             "high": 101.0, "low": 98.0, "volume": 1_000_000},
+            {"symbol": "TST", "source": "alphavantage", "timestamp": ts,
+             "interval": "1d", "close": 101.0, "open": 100.0,
+             "high": 102.0, "low": 99.0, "volume": 1_100_000},
+        ]
+        df       = pd.DataFrame(rows)
+        resolved = self.sa.resolve_source(df, None)
+        self.assertEqual(len(resolved), 1)
+        self.assertEqual(resolved.iloc[0]["source"], "alphavantage")
+
+    def test_resolve_source_preferred_filter(self):
+        """Passing preferred='yfinance' retains only yfinance rows."""
+        df = self.sa.resolve_source(self.df_raw, "yfinance")
+        self.assertTrue((df["source"] == "yfinance").all())
+
+    # ── auto_granularity ──────────────────────────────────────────────────────
+
+    def test_auto_granularity_short_span_gives_daily(self):
+        """≤1 year of data → 1d."""
+        df   = self.df[self.df["symbol"] == "AAPL"].sort_values("timestamp").tail(200).copy()
+        gran = self.sa.auto_granularity(df, intraday=False)
+        self.assertEqual(gran, "1d")
+
+    def test_auto_granularity_long_span_gives_weekly_or_monthly(self):
+        """~3 years of daily data → 1w or 1M."""
+        df   = self.df[self.df["symbol"] == "AAPL"].copy()
+        gran = self.sa.auto_granularity(df, intraday=False)
+        self.assertIn(gran, ["1w", "1M"])
+
+    # ── apply_granularity ─────────────────────────────────────────────────────
+
+    def test_apply_granularity_raw_preserves_row_count(self):
+        df_aapl = self.df_raw[self.df_raw["symbol"] == "AAPL"].copy()
+        result  = self.sa.apply_granularity(df_aapl, "raw")
+        self.assertEqual(len(result), len(df_aapl))
+
+    def test_apply_granularity_weekly_fewer_than_daily(self):
+        df_aapl  = self.df[self.df["symbol"] == "AAPL"].copy()
+        df_daily = self.sa.apply_granularity(df_aapl, "1d")
+        df_week  = self.sa.apply_granularity(df_aapl, "1w")
+        self.assertLess(len(df_week), len(df_daily))
+
+    def test_apply_granularity_ohlcv_columns_present(self):
+        result = self.sa.apply_granularity(
+            self.df[self.df["symbol"] == "AAPL"].copy(), "1w"
+        )
+        for col in ["open", "high", "low", "close", "volume"]:
+            self.assertIn(col, result.columns)
+
+    def test_apply_granularity_high_gte_low(self):
+        result = self.sa.apply_granularity(
+            self.df[self.df["symbol"] == "AAPL"].copy(), "1w"
+        )
+        self.assertTrue((result["high"] >= result["low"]).all())
+
+    # ── analysis_summary ──────────────────────────────────────────────────────
+
+    def test_summary_runs_and_shows_all_symbols(self):
+        import io, contextlib
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            self.sa.analysis_summary(self.df, "close", "1d")
+        out = buf.getvalue()
+        for sym in ["AAPL", "MSFT", "ENEL.MI", "CSMIB.MI"]:
+            self.assertIn(sym, out)
+        self.assertIn("Total ret", out)
+        self.assertIn("Sharpe", out)
+
+    # ── analysis_regression ───────────────────────────────────────────────────
+
+    def test_regression_runs(self):
+        import io, contextlib
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            self.sa.analysis_regression(self.df, "close", plot=False)
+        out = buf.getvalue()
+        self.assertIn("AAPL", out)
+        self.assertIn("R²", out)
+
+    def test_regression_r2_in_zero_to_one(self):
+        import io, contextlib, re
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            self.sa.analysis_regression(self.df, "close", plot=False)
+        # R² values like "0.7823"
+        matches = re.findall(r'\b0\.\d{4}\b', buf.getvalue())
+        self.assertGreater(len(matches), 0)
+        for v in matches:
+            self.assertGreaterEqual(float(v), 0.0)
+            self.assertLessEqual(float(v), 1.0)
+
+    def test_regression_skips_symbol_with_too_few_bars(self):
+        """Fewer than 3 bars: symbol is skipped without raising."""
+        import io, contextlib
+        tiny = self.df[self.df["symbol"] == "AAPL"].head(2).copy()
+        buf  = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            self.sa.analysis_regression(tiny, "close", plot=False)
+
+    # ── analysis_returns ──────────────────────────────────────────────────────
+
+    def test_returns_runs(self):
+        import io, contextlib
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            self.sa.analysis_returns(self.df, "close", plot=False, gran="1d")
+        out = buf.getvalue()
+        self.assertIn("AAPL", out)
+        self.assertIn("Sharpe", out)
+        self.assertIn("% positive", out)
+
+    def test_returns_pct_positive_in_range(self):
+        import io, contextlib, re
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            self.sa.analysis_returns(self.df, "close", plot=False, gran="1d")
+        pcts = re.findall(r'(\d+\.\d+)%', buf.getvalue())
+        self.assertGreater(len(pcts), 0)
+        for p in pcts:
+            self.assertGreaterEqual(float(p), 0.0)
+            self.assertLessEqual(float(p), 100.0)
+
+    # ── analysis_volatility ───────────────────────────────────────────────────
+
+    def test_volatility_runs(self):
+        import io, contextlib
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            self.sa.analysis_volatility(self.df, "close", window=20,
+                                        plot=False, gran="1d")
+        out = buf.getvalue()
+        self.assertIn("AAPL", out)
+        self.assertIn("latest=", out)
+
+    def test_volatility_values_positive(self):
+        import io, contextlib, re
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            self.sa.analysis_volatility(self.df, "close", window=20,
+                                        plot=False, gran="1d")
+        matches = re.findall(r'latest=(\d+\.\d+)%', buf.getvalue())
+        self.assertGreater(len(matches), 0)
+        for v in matches:
+            self.assertGreater(float(v), 0.0)
+
+    # ── analysis_correlation ──────────────────────────────────────────────────
+
+    def test_correlation_runs_multi_symbol(self):
+        import io, contextlib
+        df2 = self.df[self.df["symbol"].isin(["AAPL", "MSFT"])].copy()
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            self.sa.analysis_correlation(df2, "close", plot=False)
+        out = buf.getvalue()
+        self.assertIn("AAPL", out)
+        self.assertIn("MSFT", out)
+        self.assertIn("1.0000", out)   # diagonal
+
+    def test_correlation_single_symbol_warns(self):
+        import io, contextlib
+        df1 = self.df[self.df["symbol"] == "AAPL"].copy()
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            self.sa.analysis_correlation(df1, "close", plot=False)
+        self.assertIn("2", buf.getvalue())   # "Need ≥ 2 symbols"
+
+    # ── analysis_sma ─────────────────────────────────────────────────────────
+
+    def test_sma_runs(self):
+        import io, contextlib
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            self.sa.analysis_sma(self.df, "close", windows=[20, 50], plot=False)
+        out = buf.getvalue()
+        self.assertIn("AAPL", out)
+        self.assertIn("SMA", out)
+
+    def test_sma_shows_direction(self):
+        import io, contextlib
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            self.sa.analysis_sma(self.df, "close", windows=[50], plot=False)
+        out = buf.getvalue()
+        self.assertTrue("above" in out or "below" in out)
+
+    # ── analysis_drawdown ─────────────────────────────────────────────────────
+
+    def test_drawdown_runs(self):
+        import io, contextlib
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            self.sa.analysis_drawdown(self.df, "close", plot=False)
+        out = buf.getvalue()
+        self.assertIn("AAPL", out)
+        self.assertIn("Max DD", out)
+        self.assertIn("Calmar", out)
+
+    def test_drawdown_max_dd_is_negative(self):
+        """Max drawdown must be ≤ 0% for all symbols."""
+        import io, contextlib, re
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            self.sa.analysis_drawdown(self.df, "close", plot=False)
+        dds = re.findall(r'(-\d+\.\d+)%', buf.getvalue())
+        self.assertGreater(len(dds), 0)
+        for dd in dds:
+            self.assertLessEqual(float(dd), 0.0)
+
+    # ── analysis_rsi ─────────────────────────────────────────────────────────
+
+    def test_rsi_runs(self):
+        import io, contextlib
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            self.sa.analysis_rsi(self.df, "close", window=14, plot=False)
+        out = buf.getvalue()
+        self.assertIn("AAPL", out)
+        self.assertIn("RSI", out)
+
+    def test_rsi_values_in_range(self):
+        """All RSI values must be in [0, 100]."""
+        import io, contextlib, re
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            self.sa.analysis_rsi(self.df, "close", window=14, plot=False)
+        matches = re.findall(r'(\d+\.\d+)\s+(overbought|oversold|neutral)',
+                             buf.getvalue())
+        self.assertGreater(len(matches), 0)
+        for val, _ in matches:
+            self.assertGreaterEqual(float(val),   0.0)
+            self.assertLessEqual(float(val),    100.0)
+
+    # ── analysis_bbands ───────────────────────────────────────────────────────
+
+    def test_bbands_runs(self):
+        import io, contextlib
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            self.sa.analysis_bbands(self.df, "close", window=20, plot=False)
+        out = buf.getvalue()
+        self.assertIn("AAPL", out)
+        self.assertIn("Bandwidth", out)
+        self.assertIn("Lower", out)
+        self.assertIn("Upper", out)
+
+    def test_bbands_squeeze_is_yes_or_no(self):
+        import io, contextlib
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            self.sa.analysis_bbands(self.df, "close", window=20, plot=False)
+        out = buf.getvalue()
+        self.assertTrue("yes" in out or "no" in out)
+
+    # ── analysis_montecarlo ───────────────────────────────────────────────────
+
+    def test_montecarlo_runs(self):
+        import io, contextlib
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            self.sa.analysis_montecarlo(
+                self.df[self.df["symbol"] == "AAPL"].copy(),
+                "close", n_paths=100, horizon=21, plot=False
+            )
+        out = buf.getvalue()
+        self.assertIn("AAPL", out)
+        self.assertIn("P50", out)
+
+    def test_montecarlo_percentile_order(self):
+        """P5 ≤ P25 ≤ P50 ≤ P75 ≤ P95 always holds."""
+        import io, contextlib, re
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            self.sa.analysis_montecarlo(
+                self.df[self.df["symbol"] == "AAPL"].copy(),
+                "close", n_paths=200, horizon=21, plot=False
+            )
+        vals = re.findall(r'P\d+\s*=\s*(\d+\.\d+)', buf.getvalue())
+        self.assertEqual(len(vals), 5, "expected exactly 5 percentile values")
+        p5, p25, p50, p75, p95 = [float(v) for v in vals]
+        self.assertLessEqual(p5,  p25)
+        self.assertLessEqual(p25, p50)
+        self.assertLessEqual(p50, p75)
+        self.assertLessEqual(p75, p95)
+
+    def test_montecarlo_prob_in_range(self):
+        import io, contextlib, re
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            self.sa.analysis_montecarlo(
+                self.df[self.df["symbol"] == "AAPL"].copy(),
+                "close", n_paths=200, horizon=21, plot=False
+            )
+        m = re.search(r'Prob\(price > S0\):\s*(\d+\.\d+)%', buf.getvalue())
+        self.assertIsNotNone(m, "prob(price > S0) not found in output")
+        prob = float(m.group(1))
+        self.assertGreaterEqual(prob,   0.0)
+        self.assertLessEqual(prob,    100.0)
+
+    def test_montecarlo_skips_thin_data(self):
+        """Fewer than 10 bars: prints 'not enough data' without raising."""
+        import io, contextlib
+        tiny = self.df[self.df["symbol"] == "AAPL"].head(5).copy()
+        buf  = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            self.sa.analysis_montecarlo(tiny, "close",
+                                        n_paths=50, horizon=10, plot=False)
+        self.assertIn("not enough", buf.getvalue().lower())
+
+    # ── analysis_hurst ────────────────────────────────────────────────────────
+
+    def test_hurst_runs(self):
+        import io, contextlib
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            self.sa.analysis_hurst(self.df, "close", plot=False)
+        out = buf.getvalue()
+        self.assertIn("AAPL", out)
+        self.assertIn("HURST EXPONENT", out)
+
+    def test_hurst_value_in_open_unit_interval(self):
+        """H should be in (0, 1) for real price data."""
+        import io, contextlib, re
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            self.sa.analysis_hurst(
+                self.df[self.df["symbol"] == "AAPL"].copy(),
+                "close", plot=False
+            )
+        # "0.5432" — 4 decimal places
+        matches = re.findall(r'\b(0\.\d{4})\b', buf.getvalue())
+        self.assertGreater(len(matches), 0)
+        for v in matches:
+            self.assertGreater(float(v), 0.0)
+            self.assertLess(float(v),    1.0)
+
+    def test_hurst_warns_on_insufficient_data(self):
+        """Fewer than 40 bars: prints warning, does not raise."""
+        import io, contextlib
+        tiny = self.df[self.df["symbol"] == "AAPL"].head(30).copy()
+        buf  = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            self.sa.analysis_hurst(tiny, "close", plot=False)
+        self.assertIn("not enough", buf.getvalue().lower())
+
+
 if __name__ == "__main__":
     # Friendly summary output
     loader = unittest.TestLoader()
@@ -1478,6 +1876,7 @@ if __name__ == "__main__":
         TestTimestamp,
         TestSchemaMigration,
         TestFdLeak,
+        TestAnalysis,
     ]:
         suite.addTests(loader.loadTestsFromTestCase(cls))
 
