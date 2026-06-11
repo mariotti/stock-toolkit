@@ -62,36 +62,9 @@ try:
 except ImportError:
     HAS_YFINANCE = False
 
-CONFIG_PATH = SCRIPT_DIR / "config.env"
+from stock_common import CONFIG_PATH, load_config
 
-
-def _load_config() -> dict:
-    """Parse config.env and return a dict of key→value."""
-    cfg: dict = {}
-    if not CONFIG_PATH.exists():
-        return cfg
-    with open(CONFIG_PATH) as f:
-        for raw in f:
-            line = raw.strip()
-            if not line or line.startswith("#"):
-                continue
-            if "=" not in line:
-                continue
-            key, _, val = line.partition("=")
-            key = key.strip()
-            val = val.strip()
-            if val.startswith("#"):
-                val = ""
-            elif " #" in val:
-                val = val[:val.index(" #")].strip()
-            if (val.startswith('"') and val.endswith('"')) or \
-               (val.startswith("'") and val.endswith("'")):
-                val = val[1:-1]
-            cfg[key] = val
-    return cfg
-
-
-CFG = _load_config()
+CFG = load_config(CONFIG_PATH)
 
 # ── API key helpers ───────────────────────────────────────────────────────────
 

@@ -29,7 +29,6 @@ import json
 import sqlite3
 import sys
 import warnings
-from datetime import date
 from pathlib import Path
 
 import numpy as np
@@ -37,13 +36,7 @@ import pandas as pd
 
 warnings.filterwarnings("ignore")
 
-# ─────────────────────────────────────────────
-#  PATHS  (mirror stock_collector.py layout)
-# ─────────────────────────────────────────────
-
-BASE_DIR = Path(__file__).parent
-LIVE_DB  = BASE_DIR / "stock_data.db"
-HIST_DIR = BASE_DIR / "data"
+from stock_common import LIVE_DB, HIST_DIR
 
 SOURCE_PRIORITY = [
     "alphavantage", "fmp", "yfinance",
@@ -638,7 +631,6 @@ examples:
         return
 
     # ── ranked table ──────────────────────────────────────────────────────────
-    s_col = "Score /100"
     rows  = []
     for rank, r in enumerate(results, 1):
         s  = r.get("summary",    {})
@@ -708,11 +700,11 @@ examples:
                 pair = candidates[0]
                 print(f"\n  Best pair: {top_sym} + {pair['symbol']}  "
                       f"(scores: {top['score']:.1f} + {pair['score']:.1f})")
-                print(f"  Rationale: different market families → likely low correlation")
+                print("  Rationale: different market families → likely low correlation")
 
     print()
-    print(f"  ⚠  Score is a data summary, not investment advice.")
-    print(f"     Always run the full 7-step analysis before investing.\n")
+    print("  ⚠  Score is a data summary, not investment advice.")
+    print("     Always run the full 7-step analysis before investing.\n")
 
 
 if __name__ == "__main__":

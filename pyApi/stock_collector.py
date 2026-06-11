@@ -16,7 +16,6 @@ API keys and symbols: set in config.env (run stock_setup.py to create it
 interactively). Each API without a key configured is skipped.
 """
 
-import os
 import csv
 import json
 import sqlite3
@@ -35,46 +34,12 @@ from pathlib import Path
 #           hardcoded defaults as fallback
 # ─────────────────────────────────────────────
 
-def _load_config(config_path: Path) -> dict:
-    """
-    Parse a simple KEY=VALUE config file.
-    - Lines starting with # are comments.
-    - Inline comments (value # comment) are stripped.
-    - Quoted values ("value" or 'value') have quotes stripped.
-    - Missing file is silently ignored (defaults apply).
-    """
-    cfg: dict = {}
-    if not config_path.exists():
-        return cfg
-    with open(config_path) as f:
-        for raw in f:
-            line = raw.strip()
-            if not line or line.startswith("#"):
-                continue
-            if "=" not in line:
-                continue
-            key, _, val = line.partition("=")
-            key = key.strip()
-            val = val.strip()
-            # strip inline comment (covers both "value # comment" and "  # comment")
-            if val.startswith("#"):
-                val = ""
-            elif " #" in val:
-                val = val[:val.index(" #")].strip()
-            # strip matching quotes
-            if (val.startswith('"') and val.endswith('"')) or \
-               (val.startswith("'") and val.endswith("'")):
-                val = val[1:-1]
-            cfg[key] = val
-    return cfg
+from stock_common import CONFIG_PATH, load_config
 
-
-# Config file sits next to this script — keep it out of git (see .gitignore)
-_CONFIG_PATH = Path(__file__).parent / "config.env"
-_cfg = _load_config(_CONFIG_PATH)
+_cfg = load_config(CONFIG_PATH)
 
 if _cfg:
-    _src = str(_CONFIG_PATH)
+    _src = str(CONFIG_PATH)
 else:
     _src = "built-in defaults (config.env not found)"
 
@@ -669,7 +634,7 @@ def csv_append_rows(rows: list[dict], seen: set) -> int:
         writer.writerows(new_rows)
     return len(new_rows)
 
-def make_row(symbol, source, ts, interval, o, h, l, c, v,
+def make_row(symbol, source, ts, interval, o, h, lo, c, v,
              vwap=None, change_pct=None, extra=None) -> dict:
     """
     Build a price row dict ready for db_insert_rows.
@@ -686,7 +651,7 @@ def make_row(symbol, source, ts, interval, o, h, l, c, v,
         "interval":    interval if interval is not None else _infer_interval(timestamp),
         "open":        round(float(o), 4) if o not in (None, "") else "",
         "high":        round(float(h), 4) if h not in (None, "") else "",
-        "low":         round(float(l), 4) if l not in (None, "") else "",
+        "low":         round(float(lo), 4) if lo not in (None, "") else "",
         "close":       round(float(c), 4) if c not in (None, "") else "",
         "volume":      int(float(v)) if v not in (None, "") else "",
         "vwap":        round(float(vwap), 4) if vwap not in (None, "") else "",
@@ -1117,7 +1082,7 @@ def fetch_twelvedata(symbols: list[str], state: dict) -> list[dict]:
                 log.warning("[twelvedata] daily budget exhausted, stopping")
                 return
             if i > 0:
-                log.info(f"[twelvedata] rate-limit pause 62s before next batch…")
+                log.info("[twelvedata] rate-limit pause 62s before next batch…")
                 time.sleep(62)
             data = safe_get(
                 "https://api.twelvedata.com/time_series",

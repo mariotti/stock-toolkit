@@ -13,7 +13,6 @@ Run:
 """
 
 import importlib.util
-import json
 import os
 import pathlib
 import sqlite3
@@ -164,7 +163,7 @@ class FixtureTestCase(unittest.TestCase):
 # ─────────────────────────────────────────────────────────────
 
 class TestCollectorConfig(FixtureTestCase):
-    """Tests for config.env parser (_load_config)."""
+    """Tests for the config.env parser (stock_common.load_config)."""
 
     @classmethod
     def setUpClass(cls):
@@ -178,38 +177,38 @@ class TestCollectorConfig(FixtureTestCase):
 
     def test_basic_key_value(self):
         p   = self._write_cfg("SYMBOLS=AAPL,MSFT\nFMP_KEY=abc123\n")
-        cfg = self.sc._load_config(p)
+        cfg = self.sc.load_config(p)
         self.assertEqual(cfg["SYMBOLS"], "AAPL,MSFT")
         self.assertEqual(cfg["FMP_KEY"], "abc123")
 
     def test_inline_comment_stripped(self):
         p   = self._write_cfg("POLYGON_KEY=   # https://polygon.io\n")
-        cfg = self.sc._load_config(p)
+        cfg = self.sc.load_config(p)
         self.assertEqual(cfg["POLYGON_KEY"], "")
 
     def test_value_with_inline_comment(self):
         p   = self._write_cfg("ALPHAVANTAGE_KEY=mykey123   # sign up free\n")
-        cfg = self.sc._load_config(p)
+        cfg = self.sc.load_config(p)
         self.assertEqual(cfg["ALPHAVANTAGE_KEY"], "mykey123")
 
     def test_quoted_value(self):
         p   = self._write_cfg('FMP_KEY="quoted_value"\n')
-        cfg = self.sc._load_config(p)
+        cfg = self.sc.load_config(p)
         self.assertEqual(cfg["FMP_KEY"], "quoted_value")
 
     def test_comment_lines_ignored(self):
         p   = self._write_cfg("# this is a comment\nFOO=bar\n")
-        cfg = self.sc._load_config(p)
+        cfg = self.sc.load_config(p)
         self.assertNotIn("# this is a comment", cfg)
         self.assertEqual(cfg["FOO"], "bar")
 
     def test_missing_file_returns_empty(self):
-        cfg = self.sc._load_config(self.tmp_dir / "nonexistent.env")
+        cfg = self.sc.load_config(self.tmp_dir / "nonexistent.env")
         self.assertEqual(cfg, {})
 
     def test_bool_parsing(self):
         p   = self._write_cfg("FINNHUB_PAID=true\nALPHAVANTAGE_PAID=false\n")
-        cfg = self.sc._load_config(p)
+        cfg = self.sc.load_config(p)
         self.assertEqual(cfg["FINNHUB_PAID"].lower(), "true")
         self.assertEqual(cfg["ALPHAVANTAGE_PAID"].lower(), "false")
 
@@ -248,7 +247,6 @@ class TestCollectorDedup(FixtureTestCase):
         self.assertFalse(self.sc._live_has_today("UNKNOWN", "yfinance", "1d"))
 
     def test_hist_has_data_hit(self):
-        from datetime import date as d
         result = self.sc._hist_has_data(
             self.db, "AAPL", "yfinance",
             date(2022, 1, 1), date(2023, 12, 31)
@@ -986,7 +984,8 @@ class TestInventory(FixtureTestCase):
 
     def test_check_fixture_runs_without_error(self):
         """cmd_check must complete without raising on the fixture DB."""
-        import io, contextlib
+        import io
+        import contextlib
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf):
             self.inv.cmd_check([self.db], None)
@@ -996,7 +995,8 @@ class TestInventory(FixtureTestCase):
 
     def test_check_symbol_filter(self):
         """Filtering to a single symbol should not raise."""
-        import io, contextlib
+        import io
+        import contextlib
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf):
             self.inv.cmd_check([self.db], ["AAPL"])
@@ -1006,7 +1006,11 @@ class TestInventory(FixtureTestCase):
 
     def test_check_detects_gap(self):
         """Inject a gap into a temp DB and verify --check reports it."""
-        import io, contextlib, sqlite3 as _sq, tempfile, shutil
+        import io
+        import contextlib
+        import sqlite3 as _sq
+        import tempfile
+        import shutil
         from datetime import date, timedelta
 
         # Build a small DB with a deliberate weekday gap.
@@ -1057,7 +1061,8 @@ class TestInventory(FixtureTestCase):
 
     def test_remove_nonexistent_symbol(self):
         """Removing a symbol not in the DB prints a not-found message."""
-        import io, contextlib
+        import io
+        import contextlib
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf):
             self.inv.cmd_remove("NONEXISTENT_XYZ", [self.db])
@@ -1068,7 +1073,10 @@ class TestInventory(FixtureTestCase):
         With STOCK_INV_REMOVE=allow, cmd_remove deletes without prompting.
         Uses a copy of the fixture DB so the main fixture is unaffected.
         """
-        import io, contextlib, shutil, sqlite3 as _sq
+        import io
+        import contextlib
+        import shutil
+        import sqlite3 as _sq
 
         # count rows for a symbol before removal
         con = _sq.connect(self.db)
@@ -1264,7 +1272,7 @@ class TestSchemaMigration(FixtureTestCase):
 
     def test_migration_renames_column(self):
         """Old DB with data_date column is migrated to timestamp."""
-        import sqlite3, pathlib
+        import sqlite3
         old_db = self.tmp_dir / "old_schema.db"
         con = sqlite3.connect(old_db)
         con.execute("""CREATE TABLE prices (
@@ -1571,7 +1579,8 @@ class TestAnalysis(FixtureTestCase):
     # ── analysis_summary ──────────────────────────────────────────────────────
 
     def test_summary_runs_and_shows_all_symbols(self):
-        import io, contextlib
+        import io
+        import contextlib
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf):
             self.sa.analysis_summary(self.df, "close", "1d")
@@ -1584,7 +1593,8 @@ class TestAnalysis(FixtureTestCase):
     # ── analysis_regression ───────────────────────────────────────────────────
 
     def test_regression_runs(self):
-        import io, contextlib
+        import io
+        import contextlib
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf):
             self.sa.analysis_regression(self.df, "close", plot=False)
@@ -1593,7 +1603,9 @@ class TestAnalysis(FixtureTestCase):
         self.assertIn("R²", out)
 
     def test_regression_r2_in_zero_to_one(self):
-        import io, contextlib, re
+        import io
+        import contextlib
+        import re
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf):
             self.sa.analysis_regression(self.df, "close", plot=False)
@@ -1606,7 +1618,8 @@ class TestAnalysis(FixtureTestCase):
 
     def test_regression_skips_symbol_with_too_few_bars(self):
         """Fewer than 3 bars: symbol is skipped without raising."""
-        import io, contextlib
+        import io
+        import contextlib
         tiny = self.df[self.df["symbol"] == "AAPL"].head(2).copy()
         buf  = io.StringIO()
         with contextlib.redirect_stdout(buf):
@@ -1615,7 +1628,8 @@ class TestAnalysis(FixtureTestCase):
     # ── analysis_returns ──────────────────────────────────────────────────────
 
     def test_returns_runs(self):
-        import io, contextlib
+        import io
+        import contextlib
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf):
             self.sa.analysis_returns(self.df, "close", plot=False, gran="1d")
@@ -1625,7 +1639,9 @@ class TestAnalysis(FixtureTestCase):
         self.assertIn("% positive", out)
 
     def test_returns_pct_positive_in_range(self):
-        import io, contextlib, re
+        import io
+        import contextlib
+        import re
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf):
             self.sa.analysis_returns(self.df, "close", plot=False, gran="1d")
@@ -1638,7 +1654,8 @@ class TestAnalysis(FixtureTestCase):
     # ── analysis_volatility ───────────────────────────────────────────────────
 
     def test_volatility_runs(self):
-        import io, contextlib
+        import io
+        import contextlib
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf):
             self.sa.analysis_volatility(self.df, "close", window=20,
@@ -1648,7 +1665,9 @@ class TestAnalysis(FixtureTestCase):
         self.assertIn("latest=", out)
 
     def test_volatility_values_positive(self):
-        import io, contextlib, re
+        import io
+        import contextlib
+        import re
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf):
             self.sa.analysis_volatility(self.df, "close", window=20,
@@ -1661,7 +1680,8 @@ class TestAnalysis(FixtureTestCase):
     # ── analysis_correlation ──────────────────────────────────────────────────
 
     def test_correlation_runs_multi_symbol(self):
-        import io, contextlib
+        import io
+        import contextlib
         df2 = self.df[self.df["symbol"].isin(["AAPL", "MSFT"])].copy()
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf):
@@ -1672,7 +1692,8 @@ class TestAnalysis(FixtureTestCase):
         self.assertIn("1.0000", out)   # diagonal
 
     def test_correlation_single_symbol_warns(self):
-        import io, contextlib
+        import io
+        import contextlib
         df1 = self.df[self.df["symbol"] == "AAPL"].copy()
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf):
@@ -1682,7 +1703,8 @@ class TestAnalysis(FixtureTestCase):
     # ── analysis_sma ─────────────────────────────────────────────────────────
 
     def test_sma_runs(self):
-        import io, contextlib
+        import io
+        import contextlib
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf):
             self.sa.analysis_sma(self.df, "close", windows=[20, 50], plot=False)
@@ -1691,7 +1713,8 @@ class TestAnalysis(FixtureTestCase):
         self.assertIn("SMA", out)
 
     def test_sma_shows_direction(self):
-        import io, contextlib
+        import io
+        import contextlib
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf):
             self.sa.analysis_sma(self.df, "close", windows=[50], plot=False)
@@ -1701,7 +1724,8 @@ class TestAnalysis(FixtureTestCase):
     # ── analysis_drawdown ─────────────────────────────────────────────────────
 
     def test_drawdown_runs(self):
-        import io, contextlib
+        import io
+        import contextlib
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf):
             self.sa.analysis_drawdown(self.df, "close", plot=False)
@@ -1712,7 +1736,9 @@ class TestAnalysis(FixtureTestCase):
 
     def test_drawdown_max_dd_is_negative(self):
         """Max drawdown must be ≤ 0% for all symbols."""
-        import io, contextlib, re
+        import io
+        import contextlib
+        import re
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf):
             self.sa.analysis_drawdown(self.df, "close", plot=False)
@@ -1724,7 +1750,8 @@ class TestAnalysis(FixtureTestCase):
     # ── analysis_rsi ─────────────────────────────────────────────────────────
 
     def test_rsi_runs(self):
-        import io, contextlib
+        import io
+        import contextlib
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf):
             self.sa.analysis_rsi(self.df, "close", window=14, plot=False)
@@ -1734,7 +1761,9 @@ class TestAnalysis(FixtureTestCase):
 
     def test_rsi_values_in_range(self):
         """All RSI values must be in [0, 100]."""
-        import io, contextlib, re
+        import io
+        import contextlib
+        import re
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf):
             self.sa.analysis_rsi(self.df, "close", window=14, plot=False)
@@ -1748,7 +1777,8 @@ class TestAnalysis(FixtureTestCase):
     # ── analysis_bbands ───────────────────────────────────────────────────────
 
     def test_bbands_runs(self):
-        import io, contextlib
+        import io
+        import contextlib
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf):
             self.sa.analysis_bbands(self.df, "close", window=20, plot=False)
@@ -1759,7 +1789,8 @@ class TestAnalysis(FixtureTestCase):
         self.assertIn("Upper", out)
 
     def test_bbands_squeeze_is_yes_or_no(self):
-        import io, contextlib
+        import io
+        import contextlib
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf):
             self.sa.analysis_bbands(self.df, "close", window=20, plot=False)
@@ -1769,7 +1800,8 @@ class TestAnalysis(FixtureTestCase):
     # ── analysis_montecarlo ───────────────────────────────────────────────────
 
     def test_montecarlo_runs(self):
-        import io, contextlib
+        import io
+        import contextlib
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf):
             self.sa.analysis_montecarlo(
@@ -1782,7 +1814,9 @@ class TestAnalysis(FixtureTestCase):
 
     def test_montecarlo_percentile_order(self):
         """P5 ≤ P25 ≤ P50 ≤ P75 ≤ P95 always holds."""
-        import io, contextlib, re
+        import io
+        import contextlib
+        import re
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf):
             self.sa.analysis_montecarlo(
@@ -1798,7 +1832,9 @@ class TestAnalysis(FixtureTestCase):
         self.assertLessEqual(p75, p95)
 
     def test_montecarlo_prob_in_range(self):
-        import io, contextlib, re
+        import io
+        import contextlib
+        import re
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf):
             self.sa.analysis_montecarlo(
@@ -1813,7 +1849,8 @@ class TestAnalysis(FixtureTestCase):
 
     def test_montecarlo_skips_thin_data(self):
         """Fewer than 10 bars: prints 'not enough data' without raising."""
-        import io, contextlib
+        import io
+        import contextlib
         tiny = self.df[self.df["symbol"] == "AAPL"].head(5).copy()
         buf  = io.StringIO()
         with contextlib.redirect_stdout(buf):
@@ -1824,7 +1861,8 @@ class TestAnalysis(FixtureTestCase):
     # ── analysis_hurst ────────────────────────────────────────────────────────
 
     def test_hurst_runs(self):
-        import io, contextlib
+        import io
+        import contextlib
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf):
             self.sa.analysis_hurst(self.df, "close", plot=False)
@@ -1834,7 +1872,9 @@ class TestAnalysis(FixtureTestCase):
 
     def test_hurst_value_in_open_unit_interval(self):
         """H should be in (0, 1) for real price data."""
-        import io, contextlib, re
+        import io
+        import contextlib
+        import re
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf):
             self.sa.analysis_hurst(
@@ -1850,7 +1890,8 @@ class TestAnalysis(FixtureTestCase):
 
     def test_hurst_warns_on_insufficient_data(self):
         """Fewer than 40 bars: prints warning, does not raise."""
-        import io, contextlib
+        import io
+        import contextlib
         tiny = self.df[self.df["symbol"] == "AAPL"].head(30).copy()
         buf  = io.StringIO()
         with contextlib.redirect_stdout(buf):

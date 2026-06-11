@@ -1,0 +1,16 @@
+target-version = "py310"
+line-length = 120
+
+extend-exclude = [
+    "pyApi/venv",
+    "pyApi/dist",
+    "pyApi/docs",
+    "pyApi/old_data",
+]
+
+[lint]
+# default rule set: pycodestyle errors (E4/E7/E9) + pyflakes (F)
+# ignored rules clash with the existing script style:
+#   E402 — imports after sys.path setup; E701/E702 — compact one-liners;
+#   E731 — lambda assignments used as small inline helpers
+ignore = ["E402", "E701", "E702", "E731"]

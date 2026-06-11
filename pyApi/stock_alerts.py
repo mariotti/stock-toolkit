@@ -33,7 +33,6 @@ import argparse
 import json
 import smtplib
 import sqlite3
-import sys
 from datetime import datetime, timezone
 from email.mime.text import MIMEText
 from pathlib import Path
@@ -45,44 +44,16 @@ import pandas as pd
 #  PATHS AND CONFIG
 # ─────────────────────────────────────────────
 
-BASE_DIR    = Path(__file__).parent
-LIVE_DB     = BASE_DIR / "stock_data.db"
-HIST_DIR    = BASE_DIR / "data"
-STATE_PATH  = BASE_DIR / ".alerts_state.json"
-CONFIG_PATH = BASE_DIR / "config.env"
+from stock_common import BASE_DIR, LIVE_DB, HIST_DIR, CONFIG_PATH, load_config
+
+STATE_PATH = BASE_DIR / ".alerts_state.json"
 
 SOURCE_PRIORITY = [
     "alphavantage", "fmp", "yfinance",
     "finnhub", "twelvedata", "polygon", "marketstack",
 ]
 
-
-def _load_config(path: Path) -> dict:
-    cfg = {}
-    if not path.exists():
-        return cfg
-    with open(path) as f:
-        for raw in f:
-            line = raw.strip()
-            if not line or line.startswith("#"):
-                continue
-            if "=" not in line:
-                continue
-            key, _, val = line.partition("=")
-            key = key.strip()
-            val = val.strip()
-            if val.startswith("#"):
-                val = ""
-            elif " #" in val:
-                val = val[:val.index(" #")].strip()
-            if (val.startswith('"') and val.endswith('"')) or \
-               (val.startswith("'") and val.endswith("'")):
-                val = val[1:-1]
-            cfg[key] = val
-    return cfg
-
-
-_cfg = _load_config(CONFIG_PATH)
+_cfg = load_config(CONFIG_PATH)
 
 
 # ─────────────────────────────────────────────
@@ -214,9 +185,9 @@ def build_context(df: pd.DataFrame) -> dict:
         bw    = ((upper - lower) / mid * 100).dropna()
         pct_b = (close - lower) / (upper - lower)
 
-        ctx["bbands_upper"]   = float(upper.iloc[-1]) if not upper.iloc[-1] is np.nan else None
+        ctx["bbands_upper"]   = float(upper.iloc[-1]) if upper.iloc[-1] is not np.nan else None
         ctx["bbands_mid"]     = float(mid.iloc[-1])
-        ctx["bbands_lower"]   = float(lower.iloc[-1]) if not lower.iloc[-1] is np.nan else None
+        ctx["bbands_lower"]   = float(lower.iloc[-1]) if lower.iloc[-1] is not np.nan else None
         ctx["bbands_pct_b"]   = float(pct_b.iloc[-1]) if not np.isnan(pct_b.iloc[-1]) else None
         ctx["bbands_bw"]      = float(bw.iloc[-1]) if len(bw) > 0 else None
         # squeeze: bandwidth in bottom 20th percentile

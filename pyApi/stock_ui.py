@@ -25,35 +25,13 @@ import streamlit as st
 SCRIPT_DIR = Path(__file__).parent
 sys.path.insert(0, str(SCRIPT_DIR))
 
-# ── load config.env (same logic as stock_collector.py) ───────────────────────
-def _load_cfg(path: Path) -> dict:
-    cfg: dict = {}
-    if not path.exists():
-        return cfg
-    with open(path) as f:
-        for line in f:
-            line = line.strip()
-            if not line or line.startswith("#"):
-                continue
-            if "=" not in line:
-                continue
-            key, _, val = line.partition("=")
-            val = val.strip()
-            if val.startswith("#") or not val:
-                val = ""
-            elif " #" in val:
-                val = val[:val.index(" #")].strip()
-            if len(val) >= 2 and val[0] in ('"', "'") and val[-1] == val[0]:
-                val = val[1:-1]
-            cfg[key.strip()] = val
-    return cfg
+from stock_common import load_config
 
-_cfg = _load_cfg(SCRIPT_DIR / "config.env")
+_cfg = load_config(SCRIPT_DIR / "config.env")
 
 # ── lazy imports with friendly error messages ─────────────────────────────────
 try:
     import plotly.graph_objects as go
-    import plotly.express as px
     from plotly.subplots import make_subplots
 except ImportError:
     st.error("plotly not installed — run: pip install plotly")
@@ -61,7 +39,7 @@ except ImportError:
 
 try:
     import stock_score  as ss
-    import stock_analysis as sa
+    import stock_analysis as sa  # noqa: F401 — imported to fail fast if missing
     import stock_backtest as sb
     import stock_alerts  as sal
 except ImportError as e:
@@ -1415,7 +1393,7 @@ Keep responses concise and conversational."""
 # ═════════════════════════════════════════════
 
 with tab_collect:
-    import subprocess, threading
+    import subprocess
 
     st.markdown("### 📥  Data Collection")
     st.markdown(

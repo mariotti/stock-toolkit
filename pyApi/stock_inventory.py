@@ -20,11 +20,7 @@ import sqlite3
 import sys
 from pathlib import Path
 
-# ── paths (mirror stock_collector.py) ────────────────────────────────────────
-
-BASE_DIR = Path(__file__).parent
-LIVE_DB  = BASE_DIR / "stock_data.db"
-HIST_DIR = BASE_DIR / "data"
+from stock_common import LIVE_DB, HIST_DIR
 
 # ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -206,7 +202,7 @@ def cmd_check(dbs: list[Path], symbol_filter: list[str] | None) -> None:
     are treated as holidays/non-trading days and excluded from gap counts.
     """
     try:
-        import pandas as pd
+        import pandas as pd  # noqa: F401 — availability probe with friendly exit
     except ImportError:
         print("pandas required for --check  (pip install pandas)")
         sys.exit(1)
@@ -332,7 +328,6 @@ def cmd_check(dbs: list[Path], symbol_filter: list[str] | None) -> None:
 
     # ── report ────────────────────────────────────────────────────────────────
     if all_clean and not issues:
-        syms_checked = len({r[0] for db in dbs for r in _fetch_symbols(db)})
         print(f"✓  No consistency issues found across {len(dbs)} database(s).")
         return
 
@@ -530,113 +525,6 @@ examples:
           f"{n_intervals} interval type(s)  ·  "
           f"{n_sources} source(s)  ·  "
           f"{len(dbs)} database(s)")
-
-
-# ── paths (mirror stock_collector.py) ────────────────────────────────────────
-
-BASE_DIR = Path(__file__).parent
-LIVE_DB  = BASE_DIR / "stock_data.db"
-HIST_DIR = BASE_DIR / "data"
-
-# ── helpers ───────────────────────────────────────────────────────────────────
-
-def discover_dbs(extra_dir: Path | None = None) -> list[Path]:
-    dbs = []
-    if LIVE_DB.exists():
-        dbs.append(LIVE_DB)
-    hist = extra_dir or HIST_DIR
-    if hist.exists():
-        dbs += sorted(hist.glob("*.db"))
-    return dbs
-
-
-def query_db(db: Path, symbol_filter: list[str] | None) -> list[dict]:
-    """
-    Return one record per (symbol, interval, source) from this database.
-    """
-    try:
-        con = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
-    except sqlite3.OperationalError:
-        con = sqlite3.connect(db)   # fallback for older SQLite
-
-    where = ""
-    params: list = []
-    if symbol_filter:
-        placeholders = ",".join("?" * len(symbol_filter))
-        where  = f" WHERE symbol IN ({placeholders})"
-        params = [s.upper() for s in symbol_filter]
-
-    try:
-        rows = con.execute(
-            f"""
-            SELECT
-                symbol,
-                source,
-                interval,
-                COUNT(*)                      AS n_rows,
-                MIN(timestamp)                AS date_from,
-                MAX(timestamp)                AS date_to
-            FROM prices{where}
-            GROUP BY symbol, source, interval
-            ORDER BY symbol, interval, source
-            """,
-            params,
-        ).fetchall()
-    except sqlite3.OperationalError:
-        rows = []   # table doesn't exist yet
-    finally:
-        con.close()
-
-    return [
-        {
-            "db":        db.name,
-            "symbol":    r[0],
-            "source":    r[1],
-            "interval":  r[2],
-            "n_rows":    r[3],
-            "date_from": r[4][:10] if r[4] else "—",
-            "date_to":   r[5][:10] if r[5] else "—",
-        }
-        for r in rows
-    ]
-
-
-def col_widths(headers: list[str], rows: list[list]) -> list[int]:
-    widths = [len(h) for h in headers]
-    for row in rows:
-        for i, v in enumerate(row):
-            widths[i] = max(widths[i], len(str(v)))
-    return widths
-
-
-def print_table(headers: list[str], rows: list[list]):
-    widths = col_widths(headers, rows)
-    fmt    = "  ".join(f"{{:<{w}}}" for w in widths)
-    print(fmt.format(*headers))
-    print("  ".join("─" * w for w in widths))
-    for row in rows:
-        print(fmt.format(*[str(v) for v in row]))
-
-
-def date_span(date_from: str, date_to: str) -> str:
-    """Human-readable span label, e.g. '3 years 2 months'."""
-    if date_from == "—" or date_to == "—":
-        return "—"
-    from datetime import date
-    try:
-        d0 = date.fromisoformat(date_from)
-        d1 = date.fromisoformat(date_to)
-        days = (d1 - d0).days
-        if days < 7:
-            return f"{days}d"
-        if days < 60:
-            return f"{days // 7}w"
-        months = days // 30
-        if months < 24:
-            return f"{months}mo"
-        return f"{months // 12}yr {months % 12}mo"
-    except ValueError:
-        return "—"
 
 
 if __name__ == "__main__":

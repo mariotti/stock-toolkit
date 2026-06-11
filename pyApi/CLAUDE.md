@@ -81,6 +81,7 @@ config.env (symbols, API keys) → stock_collector.py → stock_data.db
 
 ### Key Conventions
 
+- `stock_common.py`: shared `config.env` parser (`load_config`) and path constants (`BASE_DIR`, `CONFIG_PATH`, `LIVE_DB`, `HIST_DIR`) — import from here, don't re-implement
 - `_symbols_from_db()`: filters symbols with <2 daily bars to exclude stale/broken entries
 - `SYMBOLS_IGNORE` in config: blocks bare EU tickers (e.g., `ENI` vs `ENI.MI`)
 - `UI_COLLECT_SOURCES` in config: gates which sources can be triggered from the Streamlit UI

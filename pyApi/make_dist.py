@@ -33,6 +33,7 @@ SCRIPT_DIR = Path(__file__).parent
 
 # Files to include verbatim (after path scrubbing)
 SOURCE_FILES = [
+    "stock_common.py",
     "stock_collector.py",
     "stock_analysis.py",
     "stock_inventory.py",
@@ -508,11 +509,11 @@ examples:
         else:
             print("  Next steps:")
             print(f"    cd {out_dir}")
-            print(f"    git init")
-            print(f"    git add .")
-            print(f"    git commit -m 'Initial release'")
-            print(f"    git remote add origin <your-repo-url>")
-            print(f"    git push -u origin main")
+            print("    git init")
+            print("    git add .")
+            print("    git commit -m 'Initial release'")
+            print("    git remote add origin <your-repo-url>")
+            print("    git push -u origin main")
     print(f"{'─'*60}\n")
 
 

@@ -22,19 +22,12 @@ Install dependencies:
 import argparse
 import sqlite3
 import sys
-from datetime import date
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
 
-# ─────────────────────────────────────────────
-#  PATHS
-# ─────────────────────────────────────────────
-
-BASE_DIR = Path(__file__).parent
-LIVE_DB  = BASE_DIR / "stock_data.db"
-HIST_DIR = BASE_DIR / "data"
+from stock_common import LIVE_DB, HIST_DIR
 
 SOURCE_PRIORITY = [
     "alphavantage", "fmp", "yfinance",

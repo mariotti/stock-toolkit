@@ -30,12 +30,12 @@ import argparse
 import re
 import shutil
 import subprocess
-import sys
 from pathlib import Path
 
 SCRIPT_DIR = Path(__file__).parent
 
 MODULES = [
+    "stock_common",
     "stock_collector",
     "stock_analysis",
     "stock_inventory",
@@ -215,7 +215,7 @@ examples:
     out_dir = SCRIPT_DIR / args.out
     dry_run = args.dry_run
 
-    print(f"\nStock Toolkit — Documentation Generator")
+    print("\nStock Toolkit — Documentation Generator")
     print(f"Output directory: {out_dir}")
     if dry_run:
         print("(dry run — no files will be written)")

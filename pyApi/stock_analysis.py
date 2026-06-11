@@ -24,19 +24,12 @@ Install dependencies:
 import argparse
 import sqlite3
 import sys
-from datetime import date, datetime
 from pathlib import Path
 
 import pandas as pd
 import numpy as np
 
-# ─────────────────────────────────────────────
-#  PATHS  (mirror stock_collector.py layout)
-# ─────────────────────────────────────────────
-
-BASE_DIR  = Path(__file__).parent
-LIVE_DB   = BASE_DIR / "stock_data.db"
-HIST_DIR  = BASE_DIR / "data"
+from stock_common import LIVE_DB, HIST_DIR
 
 # ─────────────────────────────────────────────
 #  CONSTANTS
@@ -856,13 +849,11 @@ def analysis_bbands(df: pd.DataFrame, field: str, window: int, plot: bool):
         # Bandwidth: (upper - lower) / mid  — squeeze = low bandwidth
         bw     = ((upper - lower) / mid * 100).dropna()
         latest_bw = bw.iloc[-1] if not bw.empty else float("nan")
-        min_bw    = bw.min()
 
         # Squeeze: bandwidth near its 20-bar minimum
         squeeze = "yes" if latest_bw < bw.quantile(0.2) else "no"
 
         latest_pct_b = pct_b.dropna().iloc[-1] if not pct_b.dropna().empty else float("nan")
-        latest_price = price.iloc[-1]
         latest_upper = upper.dropna().iloc[-1] if not upper.dropna().empty else float("nan")
         latest_lower = lower.dropna().iloc[-1] if not lower.dropna().empty else float("nan")
 
