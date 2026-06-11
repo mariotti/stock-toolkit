@@ -36,7 +36,7 @@ import pandas as pd
 
 warnings.filterwarnings("ignore")
 
-from stock_common import LIVE_DB, HIST_DIR
+from stock_toolkit.common import LIVE_DB, HIST_DIR
 
 SOURCE_PRIORITY = [
     "alphavantage", "fmp", "yfinance",

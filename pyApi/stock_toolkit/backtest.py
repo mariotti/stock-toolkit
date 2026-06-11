@@ -27,7 +27,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from stock_common import LIVE_DB, HIST_DIR
+from stock_toolkit.common import LIVE_DB, HIST_DIR
 
 SOURCE_PRIORITY = [
     "alphavantage", "fmp", "yfinance",

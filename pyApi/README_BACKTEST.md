@@ -1,6 +1,6 @@
 # Backtesting
 
-`stock_backtest.py` replays a trading strategy against historical price data
+`stock_toolkit/backtest.py` replays a trading strategy against historical price data
 and measures how it would have performed. Every run automatically compares
 the strategy against a buy-and-hold benchmark so you can see whether the
 strategy actually adds value.
@@ -10,7 +10,7 @@ strategy actually adds value.
 ## How it works
 
 1. Daily price data is loaded from the SQLite databases created by
-   `stock_collector.py`.
+   `stock_toolkit/collector/`.
 2. A signal function scans the price series and emits `BUY` or `SELL` at
    each bar. Signals are generated at bar close — there is no lookahead.
 3. Trades execute at the same bar's close price, adjusted for slippage.
@@ -41,12 +41,12 @@ SELL when RSI crosses above --sell-at  (default: 70)
 ```
 
 Best suited for: range-bound or mean-reverting assets. Check `hurst` in
-`stock_analysis.py` first — RSI signals work better when H < 0.5.
+`stock_toolkit/analysis.py` first — RSI signals work better when H < 0.5.
 
 ```bash
-python3 stock_backtest.py -s AAPL --strategy rsi --window 14 --plot
-python3 stock_backtest.py -s AAPL --strategy rsi --window 14 --buy-at 25 --sell-at 65 --plot
-python3 stock_backtest.py -s AAPL MSFT TSLA --strategy rsi --window 14
+stock-backtest -s AAPL --strategy rsi --window 14 --plot
+stock-backtest -s AAPL --strategy rsi --window 14 --buy-at 25 --sell-at 65 --plot
+stock-backtest -s AAPL MSFT TSLA --strategy rsi --window 14
 ```
 
 ---
@@ -66,9 +66,9 @@ typically 2–6 per year on daily data with 20/50 windows. Generates many
 false signals in sideways markets.
 
 ```bash
-python3 stock_backtest.py -s AAPL --strategy sma_cross --fast 20 --slow 50 --plot
-python3 stock_backtest.py -s AAPL --strategy sma_cross --fast 50 --slow 200 --plot
-python3 stock_backtest.py -s AAPL MSFT NVDA --strategy sma_cross --fast 20 --slow 50
+stock-backtest -s AAPL --strategy sma_cross --fast 20 --slow 50 --plot
+stock-backtest -s AAPL --strategy sma_cross --fast 50 --slow 200 --plot
+stock-backtest -s AAPL MSFT NVDA --strategy sma_cross --fast 20 --slow 50
 ```
 
 ---
@@ -85,12 +85,12 @@ SELL when price crosses above middle band (SMA)
 
 Best suited for: low-volatility, mean-reverting assets. In strongly trending
 assets the lower band is rarely touched, producing very few trades. Combine
-with `--analysis bbands` in `stock_analysis.py` to check current band width
+with `--analysis bbands` in `stock_toolkit/analysis.py` to check current band width
 before backtesting.
 
 ```bash
-python3 stock_backtest.py -s AAPL --strategy bbands --window 20 --plot
-python3 stock_backtest.py -s ENEL.MI --strategy bbands --window 20 --plot
+stock-backtest -s AAPL --strategy bbands --window 20 --plot
+stock-backtest -s ENEL.MI --strategy bbands --window 20 --plot
 ```
 
 ---
@@ -111,8 +111,8 @@ many trades in choppy markets as price repeatedly crosses the rolling
 high/low.
 
 ```bash
-python3 stock_backtest.py -s AAPL --strategy breakout --window 20 --plot
-python3 stock_backtest.py -s TSLA --strategy breakout --window 10 --plot
+stock-backtest -s AAPL --strategy breakout --window 20 --plot
+stock-backtest -s TSLA --strategy breakout --window 10 --plot
 ```
 
 ---
@@ -124,14 +124,14 @@ check whether the strategy generalises beyond the data it was observed on.
 
 ```bash
 # Train on 2018–2022, test on 2023 onwards
-python3 stock_backtest.py -s AAPL \
+stock-backtest -s AAPL \
     --strategy sma_cross --fast 20 --slow 50 \
     --from 2018-01-01 \
     --test-from 2023-01-01 \
     --plot
 
 # RSI walk-forward
-python3 stock_backtest.py -s AAPL \
+stock-backtest -s AAPL \
     --strategy rsi --window 14 \
     --from 2015-01-01 \
     --test-from 2022-01-01 \
@@ -200,36 +200,36 @@ Every run prints a side-by-side comparison of the strategy and buy-and-hold:
 
 ```bash
 # Quick overview: all four strategies on AAPL
-python3 stock_backtest.py -s AAPL --strategy rsi      --window 14 --plot
-python3 stock_backtest.py -s AAPL --strategy sma_cross --fast 20 --slow 50 --plot
-python3 stock_backtest.py -s AAPL --strategy bbands    --window 20 --plot
-python3 stock_backtest.py -s AAPL --strategy breakout  --window 20 --plot
+stock-backtest -s AAPL --strategy rsi      --window 14 --plot
+stock-backtest -s AAPL --strategy sma_cross --fast 20 --slow 50 --plot
+stock-backtest -s AAPL --strategy bbands    --window 20 --plot
+stock-backtest -s AAPL --strategy breakout  --window 20 --plot
 
 # Compare same strategy across multiple symbols
-python3 stock_backtest.py -s AAPL MSFT GOOGL TSLA NVDA \
+stock-backtest -s AAPL MSFT GOOGL TSLA NVDA \
     --strategy sma_cross --fast 20 --slow 50
 
 # Use historical data (requires prior --historical collection)
-python3 stock_backtest.py -s AAPL \
+stock-backtest -s AAPL \
     --from 2010-01-01 \
     --strategy sma_cross --fast 50 --slow 200 \
     --plot
 
 # Walk-forward: does the strategy hold out-of-sample?
-python3 stock_backtest.py -s AAPL \
+stock-backtest -s AAPL \
     --strategy rsi --window 14 \
     --from 2015-01-01 \
     --test-from 2022-01-01 \
     --plot
 
 # Higher commission and slippage for more realistic simulation
-python3 stock_backtest.py -s AAPL \
+stock-backtest -s AAPL \
     --strategy sma_cross --fast 20 --slow 50 \
     --commission 0.002 --slippage 0.002 \
     --plot
 
 # Print every trade
-python3 stock_backtest.py -s AAPL --strategy rsi --window 14 --show-trades
+stock-backtest -s AAPL --strategy rsi --window 14 --show-trades
 ```
 
 ---

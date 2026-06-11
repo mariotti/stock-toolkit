@@ -1,6 +1,6 @@
 # Stock Scorer
 
-`stock_score.py` runs all seven analysis steps against one or more symbols
+`stock_toolkit/score.py` runs all seven analysis steps against one or more symbols
 and produces a ranked investment score from 0 to 100. Designed to answer a
 single question: **right now, for my time horizon, which of these symbols
 looks best to buy?**
@@ -28,19 +28,19 @@ full 7-step output before committing capital.
 
 ```bash
 # Score all symbols in the database, default horizon (quarter)
-python3 stock_score.py
+stock-score
 
 # Score specific symbols
-python3 stock_score.py -s AAPL MSFT GOOGL CSMIB.MI TSLA ENEL.MI
+stock-score -s AAPL MSFT GOOGL CSMIB.MI TSLA ENEL.MI
 
 # With a date range and a horizon
-python3 stock_score.py \
+stock-score \
     -s AAPL MSFT GOOGL CSMIB.MI TSLA ENEL.MI \
     --from 2023-01-01 \
     --horizon quarter
 
 # Show top 3 with per-metric breakdown
-python3 stock_score.py --from 2023-01-01 --top 3 --detail
+stock-score --from 2023-01-01 --top 3 --detail
 ```
 
 ---
@@ -257,7 +257,7 @@ diversification partner, since cross-family correlation tends to be low.
 
 ```bash
 # Quick weekly scan on your watchlist
-python3 stock_score.py \
+stock-score \
     -s AAPL ARM AMD AMZN MSFT GOOGL CSMIB.MI TSLA ENEL.MI \
     --from 2023-01-01 \
     --horizon week
@@ -267,7 +267,7 @@ python3 stock_score.py \
 
 ```bash
 # Balanced score — entry timing + trend + risk
-python3 stock_score.py \
+stock-score \
     -s AAPL ARM AMD AMZN MSFT GOOGL CSMIB.MI TSLA ENEL.MI \
     --from 2023-01-01 \
     --horizon quarter \
@@ -279,7 +279,7 @@ python3 stock_score.py \
 
 ```bash
 # Ignore entry timing completely — score on 10-year trend quality and risk
-python3 stock_score.py \
+stock-score \
     -s AAPL MSFT GOOGL CSMIB.MI ENEL.MI \
     --horizon life \
     --detail
@@ -289,7 +289,7 @@ python3 stock_score.py \
 
 ```bash
 # Discover and score everything automatically
-python3 stock_score.py --horizon quarter --top 5
+stock-score --horizon quarter --top 5
 ```
 
 ### Compare the same symbols across all horizons
@@ -298,7 +298,7 @@ python3 stock_score.py --horizon quarter --top 5
 # Run once per horizon to see how the ranking shifts
 for h in week month quarter year life; do
     echo "=== $h ==="
-    python3 stock_score.py \
+    stock-score \
         -s AAPL GOOGL CSMIB.MI ENEL.MI TSLA \
         --from 2023-01-01 \
         --horizon $h \
@@ -310,7 +310,7 @@ done
 
 ```bash
 # More Monte Carlo paths for a more stable probability estimate
-python3 stock_score.py \
+stock-score \
     -s AAPL GOOGL CSMIB.MI ENEL.MI \
     --from 2023-01-01 \
     --horizon quarter \
@@ -322,14 +322,14 @@ python3 stock_score.py \
 
 ```bash
 # Full JSON output — pipe to jq or save to file
-python3 stock_score.py \
+stock-score \
     -s AAPL GOOGL CSMIB.MI TSLA \
     --from 2023-01-01 \
     --horizon quarter \
     --json | jq '.[0:3] | .[] | {symbol, score, horizon}'
 
 # Save to a dated file for tracking scores over time
-python3 stock_score.py --from 2023-01-01 --json \
+stock-score --from 2023-01-01 --json \
     > scores_$(date +%Y-%m-%d).json
 ```
 
@@ -337,8 +337,8 @@ python3 stock_score.py --from 2023-01-01 --json \
 
 ```bash
 # Collect fresh data, then score immediately
-python3 stock_collector.py && \
-python3 stock_score.py \
+stock-collect && \
+stock-score \
     -s AAPL GOOGL CSMIB.MI ENEL.MI TSLA \
     --from 2023-01-01 \
     --horizon quarter \
@@ -351,7 +351,7 @@ If you have the `analyse` shell wrapper in `~/bin`:
 
 ```bash
 # The scorer is a standalone script — call it directly or wrap it yourself
-python3 /path/to/stock_score.py --horizon quarter --top 3
+python3 /path/to/stock_toolkit/score.py --horizon quarter --top 3
 ```
 
 ---
@@ -390,7 +390,7 @@ European/other). This is a coarse proxy for low correlation — the proper
 check is always to run:
 
 ```bash
-python3 stock_analysis.py -s SYM1 SYM2 --from 2023-01-01 --analysis correlation
+stock-analyse -s SYM1 SYM2 --from 2023-01-01 --analysis correlation
 ```
 
 before committing to a two-position split.
@@ -412,7 +412,7 @@ data. A high score describes what has happened, not what will happen.
 
 **Entry timing is daily-data dependent.** RSI and %B are computed on the
 most recently collected bars. If the collector has not run today, the entry
-signals may be stale. Always run `stock_collector.py` before `stock_score.py`
+signals may be stale. Always run `stock_toolkit/collector/` before `stock_toolkit/score.py`
 on a day you plan to trade.
 
 **Monte Carlo assumes constant drift and volatility.** The GBM model

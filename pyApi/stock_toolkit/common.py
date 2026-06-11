@@ -1,14 +1,23 @@
 """
-stock_common.py
-===============
+stock_toolkit.common
+====================
 Shared configuration loading and filesystem paths for the stock toolkit.
-All stock_* modules import from here instead of re-implementing the
+All toolkit modules import from here instead of re-implementing the
 config.env parser and the database path constants.
+
+The data directory (config.env, stock_data.db, data/) is resolved from
+the STOCK_DIR environment variable if set, otherwise the current working
+directory. The bin/ wrappers cd into STOCK_DIR before launching.
 """
 
+import os
 from pathlib import Path
 
-BASE_DIR    = Path(__file__).parent
+if os.environ.get("STOCK_DIR"):
+    BASE_DIR = Path(os.environ["STOCK_DIR"]).expanduser().resolve()
+else:
+    BASE_DIR = Path.cwd()
+
 CONFIG_PATH = BASE_DIR / "config.env"   # keep out of git (see .gitignore)
 LIVE_DB     = BASE_DIR / "stock_data.db"
 HIST_DIR    = BASE_DIR / "data"

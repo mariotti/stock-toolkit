@@ -20,7 +20,7 @@ import sqlite3
 import sys
 from pathlib import Path
 
-from stock_common import LIVE_DB, HIST_DIR
+from stock_toolkit.common import LIVE_DB, HIST_DIR
 
 # ── helpers ───────────────────────────────────────────────────────────────────
 

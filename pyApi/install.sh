@@ -74,15 +74,14 @@ header "Installing dependencies"
 info "Upgrading pip ..."
 "$VENV_PIP" install --quiet --upgrade pip
 
-REQUIREMENTS="$STOCK_DIR/requirements.txt"
-if [[ ! -f "$REQUIREMENTS" ]]; then
-    error "requirements.txt not found in $STOCK_DIR"
+if [[ ! -f "$STOCK_DIR/pyproject.toml" ]]; then
+    error "pyproject.toml not found in $STOCK_DIR"
     exit 1
 fi
 
-info "Installing packages from requirements.txt ..."
-"$VENV_PIP" install --quiet -r "$REQUIREMENTS"
-success "Dependencies installed"
+info "Installing stock-toolkit (and dependencies) into the venv ..."
+"$VENV_PIP" install --quiet "$STOCK_DIR"
+success "stock-toolkit installed (stock-collect, stock-score, ... on the venv PATH)"
 
 # ── 4. Shell wrappers ─────────────────────────────────────────────────────────
 header "Installing shell wrappers"
@@ -172,7 +171,7 @@ else
     fi
     info "Launching configuration wizard ..."
     echo ""
-    "$VENV_PYTHON" "$STOCK_DIR/stock_setup.py"
+    (cd "$STOCK_DIR" && "$VENV_PYTHON" -m stock_toolkit.setup_wizard)
 fi
 
 # ── 6. Initial data collection ────────────────────────────────────────────────
@@ -191,8 +190,8 @@ else
     answer="${answer:-Y}"
     if [[ "$answer" =~ ^[Yy]$ ]]; then
         info "Running historical collection via yfinance (this may take a minute) ..."
-        "$VENV_PYTHON" "$STOCK_DIR/stock_collector.py" \
-            --sources yfinance --historical ALL
+        (cd "$STOCK_DIR" && "$VENV_PYTHON" -m stock_toolkit.collector \
+            --sources yfinance --historical ALL)
         success "Historical data collected"
     else
         info "Skipped. Run 'bin/collect --sources yfinance --historical ALL' whenever you are ready."

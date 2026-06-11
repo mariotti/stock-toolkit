@@ -10,23 +10,23 @@ A stock market data toolkit with collection, analysis, scoring, backtesting, ale
 
 **Install dependencies:**
 ```bash
-pip install -r requirements.txt
+pip install -e .
 ```
 
 **Run the Streamlit dashboard:**
 ```bash
-streamlit run stock_ui.py
+stock-ui
 ```
 
 **Run tests (no external API calls, fully self-contained):**
 ```bash
-python3 test_toolkit.py
-python3 -m pytest test_toolkit.py -v --tb=short   # if pytest installed
+python3 tests/test_toolkit.py
+python3 -m pytest tests/test_toolkit.py -v --tb=short   # if pytest installed
 ```
 
 **Run live API integration tests (requires valid API keys in config.env):**
 ```bash
-python3 test_live_apis.py
+python3 tests/test_live_apis.py
 ```
 
 **Generate docs and module diagrams (requires pdoc, pylint):**
@@ -41,28 +41,28 @@ python3 make_dist.py --package toolkit
 
 **Interactive config setup:**
 ```bash
-python3 stock_setup.py
+stock-setup
 ```
 
 ## Architecture
 
 ### Three-Phase Design
 
-**Phase 1 — Collection (`stock_collector.py`)**
+**Phase 1 — Collection (`stock_toolkit/collector/`)**
 - Fetches OHLCV data from 7 sources: yfinance, Alpha Vantage, Finnhub, Polygon/Massive, FMP, Twelve Data, Marketstack
 - Stores in SQLite with `UNIQUE(symbol, source, timestamp)` deduplication
 - Per-source rate limiting; tiered cron scheduling (real-time / hourly / daily)
 - Tracks failures in `stock_failures.db`; suppresses broken `(symbol, source)` pairs after N failures
 
-**Phase 2 — Analysis (`stock_analysis.py`, `stock_score.py`, `stock_backtest.py`)**
+**Phase 2 — Analysis (`stock_toolkit/analysis.py`, `stock_toolkit/score.py`, `stock_toolkit/backtest.py`)**
 - 11 analysis tools: summary, regression, returns, volatility, correlation, SMA, drawdown, RSI, Bollinger Bands, Monte Carlo, Hurst
 - 5-horizon scoring (week/month/quarter/year/life) with dynamic weight profiles; ranks symbols 0–100
 - 4 backtest strategies (RSI, SMA cross, Bollinger Bands, breakout) with commission modeling vs buy-and-hold benchmark
 - Source priority: alphavantage > fmp > yfinance > others; resampling from 1h → daily/weekly/monthly/quarterly
 - Multi-DB support: live `stock_data.db` + historical DBs in `./data/`
-- `stock_inventory.py`: lists what's on disk per symbol (sources, intervals, date ranges); `--check` consistency report (missing trading days, thin coverage); `--remove` deletes a symbol from all DBs
+- `stock_toolkit/inventory.py`: lists what's on disk per symbol (sources, intervals, date ranges); `--check` consistency report (missing trading days, thin coverage); `--remove` deletes a symbol from all DBs
 
-**Phase 3 — UI & Alerts (`stock_ui.py`, `stock_alerts.py`)**
+**Phase 3 — UI & Alerts (`stock_toolkit/ui/`, `stock_toolkit/alerts.py`)**
 - Streamlit dashboard with 6 tabs: Score, Analysis, Backtest, Alerts, Briefing, Collect
 - Briefing tab integrates with Claude API (`ANTHROPIC_API_KEY` in config.env) for multi-turn chat
 - Alert system uses edge detection (fires once on False→True transition) with state in `.alerts_state.json`
@@ -71,17 +71,17 @@ python3 stock_setup.py
 ### Data Flow
 
 ```
-config.env (symbols, API keys) → stock_collector.py → stock_data.db
+config.env (symbols, API keys) → stock_toolkit/collector/ → stock_data.db
                                                             ↓
-                          stock_analysis.py / stock_score.py / stock_backtest.py
+                          stock_toolkit/analysis.py / stock_toolkit/score.py / stock_toolkit/backtest.py
                                                             ↓
-                                              stock_ui.py (Streamlit)
-                                              stock_alerts.py (cron)
+                                              stock_toolkit/ui/ (Streamlit)
+                                              stock_toolkit/alerts.py (cron)
 ```
 
 ### Key Conventions
 
-- `stock_common.py`: shared `config.env` parser (`load_config`) and path constants (`BASE_DIR`, `CONFIG_PATH`, `LIVE_DB`, `HIST_DIR`) — import from here, don't re-implement
+- `stock_toolkit/common.py`: shared `config.env` parser (`load_config`) and path constants (`BASE_DIR`, `CONFIG_PATH`, `LIVE_DB`, `HIST_DIR`) — import from here, don't re-implement
 - `_symbols_from_db()`: filters symbols with <2 daily bars to exclude stale/broken entries
 - `SYMBOLS_IGNORE` in config: blocks bare EU tickers (e.g., `ENI` vs `ENI.MI`)
 - `UI_COLLECT_SOURCES` in config: gates which sources can be triggered from the Streamlit UI

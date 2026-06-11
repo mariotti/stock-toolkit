@@ -43,7 +43,8 @@ def _count_open_fds() -> int:
 # ─────────────────────────────────────────────
 
 SCRIPT_DIR = pathlib.Path(__file__).parent
-sys.path.insert(0, str(SCRIPT_DIR))
+PKG_ROOT   = SCRIPT_DIR.parent          # directory containing stock_toolkit/
+sys.path.insert(0, str(PKG_ROOT))
 
 # Symbols used throughout. Two "US" style, two "European" (.MI suffix).
 SYMBOLS = ["AAPL", "MSFT", "ENEL.MI", "CSMIB.MI"]
@@ -119,8 +120,24 @@ def _load_module(name: str, tmp_db: pathlib.Path, tmp_dir: pathlib.Path):
     Import a toolkit module and redirect its path constants to the fixture DB.
     Must be called after make_fixture_db().
     """
+    if name == "collector":
+        # The collector is a package whose submodules read shared constants
+        # from collector.config at call time. Re-import it fresh so each test
+        # class gets pristine config/state, then patch the config submodule.
+        for key in [k for k in list(sys.modules)
+                    if k == "stock_toolkit.collector"
+                    or k.startswith("stock_toolkit.collector.")]:
+            del sys.modules[key]
+        mod = importlib.import_module("stock_toolkit.collector")
+        mod.cfg.DB_PATH              = tmp_db
+        mod.cfg.HIST_DIR             = tmp_dir / "data_nonexistent"
+        mod.cfg.STATE_PATH           = tmp_dir / ".test_collector_state.json"
+        mod.cfg.FAILURES_DB_PATH     = tmp_dir / "test_failures.db"
+        mod.cfg.FAILURES_REPORT_PATH = tmp_dir / "test_failures_report.csv"
+        return mod
+
     spec   = importlib.util.spec_from_file_location(
-        name, SCRIPT_DIR / f"{name}.py"
+        name, PKG_ROOT / "stock_toolkit" / f"{name}.py"
     )
     mod    = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
@@ -168,7 +185,7 @@ class TestCollectorConfig(FixtureTestCase):
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
-        cls.sc = _load_module("stock_collector", cls.db, cls.tmp_dir)
+        cls.sc = _load_module("collector", cls.db, cls.tmp_dir)
 
     def _write_cfg(self, text: str) -> pathlib.Path:
         p = self.tmp_dir / "test_config.env"
@@ -219,9 +236,9 @@ class TestCollectorDedup(FixtureTestCase):
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
-        cls.sc = _load_module("stock_collector", cls.db, cls.tmp_dir)
+        cls.sc = _load_module("collector", cls.db, cls.tmp_dir)
         # redirect DB_PATH so _live_has_today reads our fixture
-        cls.sc.DB_PATH = cls.db
+        cls.sc.cfg.DB_PATH = cls.db
 
     def test_live_has_today_miss(self):
         # Fixture has historical data, not today's date
@@ -283,10 +300,10 @@ class TestCollectorDedup(FixtureTestCase):
 
     def test_symbols_from_db_missing_db(self):
         """Non-existent DB returns empty list without raising."""
-        self.sc.DB_PATH = self.tmp_dir / "nonexistent.db"
+        self.sc.cfg.DB_PATH = self.tmp_dir / "nonexistent.db"
         result = self.sc._symbols_from_db()
         self.assertEqual(result, [])
-        self.sc.DB_PATH = self.db   # restore
+        self.sc.cfg.DB_PATH = self.db   # restore
 
     def test_symbols_merge_config_plus_db(self):
         """DB symbols not in config are appended after config symbols."""
@@ -313,8 +330,8 @@ class TestCollectorSkipLogic(FixtureTestCase):
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
-        cls.sc = _load_module("stock_collector", cls.db, cls.tmp_dir)
-        cls.sc.DB_PATH = cls.db
+        cls.sc = _load_module("collector", cls.db, cls.tmp_dir)
+        cls.sc.cfg.DB_PATH = cls.db
 
     # ── _quote_is_fresh ───────────────────────────────────────────────────────
 
@@ -439,7 +456,7 @@ class TestScoreSteps(FixtureTestCase):
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
-        cls.ss   = _load_module("stock_score", cls.db, cls.tmp_dir)
+        cls.ss   = _load_module("score", cls.db, cls.tmp_dir)
         cls.df   = cls.ss.load_prices("AAPL", "2022-01-01", None)
         # weekly resample used by scorer
         cls.df_w = (
@@ -593,7 +610,7 @@ class TestBacktest(FixtureTestCase):
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
-        cls.sb = _load_module("stock_backtest", cls.db, cls.tmp_dir)
+        cls.sb = _load_module("backtest", cls.db, cls.tmp_dir)
         cls.df = cls.sb.load_prices("AAPL", "2022-01-01", None, source=None)
 
     def test_load_prices(self):
@@ -686,7 +703,7 @@ class TestAlerts(FixtureTestCase):
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
-        cls.sal = _load_module("stock_alerts", cls.db, cls.tmp_dir)
+        cls.sal = _load_module("alerts", cls.db, cls.tmp_dir)
         cls.df  = cls.sal.load_series("AAPL", n_bars=250)
         cls.ctx = cls.sal.build_context(cls.df) if not cls.df.empty else {}
 
@@ -779,9 +796,9 @@ class TestPipeline(FixtureTestCase):
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
-        cls.ss  = _load_module("stock_score",    cls.db, cls.tmp_dir)
-        cls.sb  = _load_module("stock_backtest", cls.db, cls.tmp_dir)
-        cls.sal = _load_module("stock_alerts",   cls.db, cls.tmp_dir)
+        cls.ss  = _load_module("score",    cls.db, cls.tmp_dir)
+        cls.sb  = _load_module("backtest", cls.db, cls.tmp_dir)
+        cls.sal = _load_module("alerts",   cls.db, cls.tmp_dir)
 
     def test_score_multiple_symbols_ranked(self):
         """Score all four symbols and verify ranking is deterministic."""
@@ -952,7 +969,7 @@ class TestInventory(FixtureTestCase):
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
-        cls.inv = _load_module("stock_inventory", cls.db, cls.tmp_dir)
+        cls.inv = _load_module("inventory", cls.db, cls.tmp_dir)
         # patch LIVE_DB so discover_dbs finds our fixture
         cls.inv.LIVE_DB  = cls.db
         cls.inv.HIST_DIR = cls.tmp_dir / "data_nonexistent"
@@ -1123,17 +1140,17 @@ class TestFailureTracker(FixtureTestCase):
     """Tests for record_failure / is_suppressed / flush_failures (SQLite backend)."""
 
     def setUp(self):
-        self.sc = _load_module("stock_collector", self.db, self.tmp_dir)
+        self.sc = _load_module("collector", self.db, self.tmp_dir)
         # Use a unique DB per test so tests don't share failure state
         import uuid
         uid = uuid.uuid4().hex[:8]
-        self.sc.FAILURES_DB_PATH     = self.tmp_dir / f"test_failures_{uid}.db"
-        self.sc.FAILURES_REPORT_PATH = self.tmp_dir / f"test_failures_report_{uid}.csv"
+        self.sc.cfg.FAILURES_DB_PATH     = self.tmp_dir / f"test_failures_{uid}.db"
+        self.sc.cfg.FAILURES_REPORT_PATH = self.tmp_dir / f"test_failures_report_{uid}.csv"
 
     def _hits(self, symbol: str, source: str) -> int:
         """Helper: read hit count directly from the failures DB."""
         import sqlite3
-        con = sqlite3.connect(self.sc.FAILURES_DB_PATH)
+        con = sqlite3.connect(self.sc.cfg.FAILURES_DB_PATH)
         try:
             row = con.execute(
                 "SELECT hits FROM failures WHERE symbol=? AND source=?",
@@ -1146,7 +1163,7 @@ class TestFailureTracker(FixtureTestCase):
     def _reason(self, symbol: str, source: str) -> str:
         """Helper: read reason directly from the failures DB."""
         import sqlite3
-        con = sqlite3.connect(self.sc.FAILURES_DB_PATH)
+        con = sqlite3.connect(self.sc.cfg.FAILURES_DB_PATH)
         try:
             row = con.execute(
                 "SELECT reason FROM failures WHERE symbol=? AND source=?",
@@ -1159,7 +1176,7 @@ class TestFailureTracker(FixtureTestCase):
     def test_record_failure_creates_db(self):
         """First failure creates the SQLite DB."""
         self.sc.record_failure("AAPL", "yfinance", "0 bars")
-        self.assertTrue(self.sc.FAILURES_DB_PATH.exists())
+        self.assertTrue(self.sc.cfg.FAILURES_DB_PATH.exists())
 
     def test_record_failure_increments_hits(self):
         """Hitting the same pair multiple times increments the counter."""
@@ -1169,19 +1186,19 @@ class TestFailureTracker(FixtureTestCase):
 
     def test_is_suppressed_below_threshold(self):
         """Below threshold: not suppressed."""
-        for _ in range(self.sc.FAILURE_THRESHOLD - 1):
+        for _ in range(self.sc.cfg.FAILURE_THRESHOLD - 1):
             self.sc.record_failure("TSLA", "finnhub", "empty")
         self.assertFalse(self.sc.is_suppressed("TSLA", "finnhub"))
 
     def test_is_suppressed_at_threshold(self):
         """At threshold: suppressed."""
-        for _ in range(self.sc.FAILURE_THRESHOLD):
+        for _ in range(self.sc.cfg.FAILURE_THRESHOLD):
             self.sc.record_failure("AMD", "twelvedata", "not found")
         self.assertTrue(self.sc.is_suppressed("AMD", "twelvedata"))
 
     def test_suppression_is_source_specific(self):
         """Suppressed on one source does not affect another."""
-        for _ in range(self.sc.FAILURE_THRESHOLD):
+        for _ in range(self.sc.cfg.FAILURE_THRESHOLD):
             self.sc.record_failure("GOOGL", "marketstack", "no data")
         self.assertTrue(self.sc.is_suppressed("GOOGL", "marketstack"))
         self.assertFalse(self.sc.is_suppressed("GOOGL", "yfinance"))
@@ -1202,22 +1219,22 @@ class TestFailureTracker(FixtureTestCase):
         """flush_failures() exports a CSV report from the DB."""
         self.sc.record_failure("SAP", "fmp", "paid plan")
         self.sc.flush_failures()
-        self.assertTrue(self.sc.FAILURES_REPORT_PATH.exists())
-        content = self.sc.FAILURES_REPORT_PATH.read_text()
+        self.assertTrue(self.sc.cfg.FAILURES_REPORT_PATH.exists())
+        content = self.sc.cfg.FAILURES_REPORT_PATH.read_text()
         self.assertIn("SAP", content)
         self.assertIn("fmp", content)
 
     def test_no_csv_without_failures(self):
         """flush_failures() does nothing if no failures recorded."""
         self.sc.flush_failures()
-        self.assertFalse(self.sc.FAILURES_REPORT_PATH.exists())
+        self.assertFalse(self.sc.cfg.FAILURES_REPORT_PATH.exists())
 
 
 class TestTimestamp(FixtureTestCase):
     """Tests for _to_timestamp() normalisation."""
 
     def setUp(self):
-        self.sc = _load_module("stock_collector", self.db, self.tmp_dir)
+        self.sc = _load_module("collector", self.db, self.tmp_dir)
 
     def test_date_only_string(self):
         """Date-only string → midnight UTC."""
@@ -1268,7 +1285,7 @@ class TestSchemaMigration(FixtureTestCase):
     """Tests for automatic data_date → timestamp DB migration."""
 
     def setUp(self):
-        self.sc = _load_module("stock_collector", self.db, self.tmp_dir)
+        self.sc = _load_module("collector", self.db, self.tmp_dir)
 
     def test_migration_renames_column(self):
         """Old DB with data_date column is migrated to timestamp."""
@@ -1351,7 +1368,7 @@ class TestFdLeak(FixtureTestCase):
     CALLS = 200   # simulate 20 symbols × 10 checks — well above real workload
 
     def setUp(self):
-        self.sc = _load_module("stock_collector", self.db, self.tmp_dir)
+        self.sc = _load_module("collector", self.db, self.tmp_dir)
 
     @unittest.skipIf(_count_open_fds() < 0, "FD counting not available on this platform")
     def test_live_has_today_no_fd_leak(self):
@@ -1478,7 +1495,7 @@ class TestAnalysis(FixtureTestCase):
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
-        cls.sa      = _load_module("stock_analysis", cls.db, cls.tmp_dir)
+        cls.sa      = _load_module("analysis", cls.db, cls.tmp_dir)
         cls.df_raw  = cls.sa.load_raw([cls.db])
         cls.df      = cls.sa.resolve_source(cls.df_raw, None)
         cls.df      = cls.sa.apply_granularity(cls.df, "1d")

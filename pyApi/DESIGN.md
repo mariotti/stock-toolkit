@@ -42,7 +42,7 @@ It would have taken days to read all the free API documentation and build the in
 I went from CSV file downloads to a proper SQLite database with a connection manager, deduplication, and multi-DB support in a single session. This is weeks of coding without AI, not days.
 
 ### Live debugging
-I did not have to debug API errors myself. I passed error messages and log output directly to Claude and it identified the root cause and fixed it. Examples: FMP 402 errors, Twelve Data rate limit crashes (`TypeError: int is not iterable`), Marketstack 406 errors, the double `main()` bug in stock_inventory.py.
+I did not have to debug API errors myself. I passed error messages and log output directly to Claude and it identified the root cause and fixed it. Examples: FMP 402 errors, Twelve Data rate limit crashes (`TypeError: int is not iterable`), Marketstack 406 errors, the double `main()` bug in stock_toolkit/inventory.py.
 
 ### Iteration speed
 Features that would normally require a design session, implementation, debugging cycle, and test writing happened in single conversations. The scoring system (7-step, 5 horizons), the backtest engine, the Streamlit UI with 6 tabs — all built incrementally without losing what came before.
@@ -68,7 +68,7 @@ Features that would normally require a design session, implementation, debugging
 - Collect tab: on-demand collection from UI, gated by `UI_COLLECT_SOURCES` in config
 
 ### Phase 4 — Data quality
-- `stock_inventory.py` with `--remove` and `--check` flags
+- `stock_toolkit/inventory.py` with `--remove` and `--check` flags
 - Gap detection with per-symbol trading calendar (75% threshold)
 - `quote` interval merged into `1d` so all tools see today's data
 - `SYMBOLS_IGNORE` to block ghost symbols (bare EU tickers like ENI vs ENI.MI)

@@ -34,17 +34,8 @@ from pathlib import Path
 
 SCRIPT_DIR = Path(__file__).parent
 
-MODULES = [
-    "stock_common",
-    "stock_collector",
-    "stock_analysis",
-    "stock_inventory",
-    "stock_score",
-    "stock_backtest",
-    "stock_alerts",
-    "stock_ui",
-    "stock_setup",
-]
+# pdoc/pyreverse operate on the whole package
+PACKAGE = "stock_toolkit"
 
 # ─────────────────────────────────────────────
 #  HELPERS
@@ -116,13 +107,7 @@ def generate_docs(out_dir: Path, dry_run: bool) -> bool:
     if not dry_run:
         out_dir.mkdir(parents=True, exist_ok=True)
 
-    source_files = [
-        f"{m}.py"
-        for m in MODULES
-        if (SCRIPT_DIR / f"{m}.py").exists()
-    ]
-
-    cmd = ["pdoc", "--output-dir", str(out_dir)] + source_files
+    cmd = ["pdoc", "--output-dir", str(out_dir), PACKAGE]
     success = run(cmd, dry_run, cwd=SCRIPT_DIR)
 
     if success and not dry_run:
@@ -162,18 +147,13 @@ def generate_diagrams(out_dir: Path, dry_run: bool) -> bool:
     if not dry_run:
         diag_dir.mkdir(parents=True, exist_ok=True)
 
-    source_files = [
-        f"{m}.py"
-        for m in MODULES
-        if (SCRIPT_DIR / f"{m}.py").exists()
-    ]
-
     cmd = [
         "pyreverse",
         "-o", "png",
         "-p", "StockToolkit",
         "-d", str(diag_dir),
-    ] + source_files
+        PACKAGE,
+    ]
 
     success = run(cmd, dry_run, cwd=SCRIPT_DIR)
 

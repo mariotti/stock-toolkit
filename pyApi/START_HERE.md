@@ -32,7 +32,7 @@ TWELVEDATA_KEY=
 ## 3. Collect data
 
 ```bash
-python3 stock_collector.py
+stock-collect
 ```
 
 You should see something like:
@@ -51,13 +51,13 @@ INFO  Fetched 300 rows | 300 new rows inserted into stock_data.db
 ## 4. Check what you have
 
 ```bash
-python3 stock_inventory.py --summary
+stock-inventory --summary
 
 # check for missing trading days or thin coverage
-python3 stock_inventory.py --check
+stock-inventory --check
 
 # remove a symbol you no longer want
-python3 stock_inventory.py --remove TSLA
+stock-inventory --remove TSLA
 ```
 
 ```
@@ -73,20 +73,20 @@ AAPL    1h        2026-03-24  2026-03-28  4d    35    yfinance
 ## 5. Run your first analysis
 
 ```bash
-python3 stock_analysis.py -s AAPL MSFT TSLA --analysis summary
+stock-analyse -s AAPL MSFT TSLA --analysis summary
 ```
 
 ## 6. Score your symbols (which looks best right now?)
 
 ```bash
-python3 stock_score.py --from 2023-01-01 --horizon quarter --top 3
+stock-score --from 2023-01-01 --horizon quarter --top 3
 ```
 
 ## 7. Launch the browser dashboard (optional)
 
 ```bash
 pip install streamlit plotly
-streamlit run stock_ui.py
+stock-ui
 # opens at http://localhost:8501
 ```
 
@@ -106,17 +106,17 @@ SYMBOLS=AAPL,MSFT,TSLA,NVDA
 ```bash
 crontab -e
 # add this line:
-*/30 * * * * /usr/bin/python3 /path/to/stock_collector.py
+*/30 * * * * /usr/bin/python3 /path/to/stock_toolkit/collector/
 ```
 
 **Step 3 — run the morning briefing:**
 ```bash
-python3 stock_analysis.py -s AAPL MSFT TSLA NVDA --analysis summary
+stock-analyse -s AAPL MSFT TSLA NVDA --analysis summary
 ```
 
 **Step 4 — check the trend and moving averages with a plot:**
 ```bash
-python3 stock_analysis.py -s AAPL \
+stock-analyse -s AAPL \
     --analysis regression sma \
     --sma-windows 20 50 \
     --plot
@@ -134,17 +134,17 @@ of its historical behaviour, risk, and momentum.
 
 **Step 1 — pull the full available history:**
 ```bash
-python3 stock_collector.py -s AAPL --historical ALL
+stock-collect -s AAPL --historical ALL
 ```
 
 **Step 2 — check what came back:**
 ```bash
-python3 stock_inventory.py -s AAPL --summary
+stock-inventory -s AAPL --summary
 ```
 
 **Step 3 — run a full analysis for the last 3 years:**
 ```bash
-python3 stock_analysis.py -s AAPL \
+stock-analyse -s AAPL \
     --from 2022-01-01 \
     --analysis summary drawdown volatility rsi \
     --window 14 \
@@ -159,7 +159,7 @@ This tells you:
 
 **Step 4 — simulate where the price might go:**
 ```bash
-python3 stock_analysis.py -s AAPL \
+stock-analyse -s AAPL \
     --from 2022-01-01 \
     --analysis montecarlo \
     --mc-paths 2000 --mc-horizon 63 \

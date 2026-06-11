@@ -32,13 +32,13 @@ else
     exit 1
 fi
 
-if [[ ! -f "$STOCK_DIR/stock_ui.py" ]]; then
-    echo "startUI.sh: stock_ui.py not found in $STOCK_DIR" >&2
+if [[ ! -f "$STOCK_DIR/stock_toolkit/ui/app.py" ]]; then
+    echo "startUI.sh: stock_toolkit/ui/app.py not found in $STOCK_DIR" >&2
     exit 1
 fi
 
 # ── launch ────────────────────────────────────────────────────────────────────
 cd "$STOCK_DIR"
-exec "$STREAMLIT" run stock_ui.py \
+exec "$STREAMLIT" run stock_toolkit/ui/app.py \
     --server.address localhost \
     "$@"

@@ -29,7 +29,7 @@ from pathlib import Path
 import pandas as pd
 import numpy as np
 
-from stock_common import LIVE_DB, HIST_DIR
+from stock_toolkit.common import LIVE_DB, HIST_DIR
 
 # ─────────────────────────────────────────────
 #  CONSTANTS

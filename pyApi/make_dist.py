@@ -9,7 +9,7 @@ What it does:
   - Creates config.env.template (keys blanked, structure preserved)
   - Generates .gitignore
   - Generates LICENSE (MIT by default)
-  - Generates requirements.txt
+  - Ships pyproject.toml (install with: pip install .)
 
 Run:
     python3 make_dist.py
@@ -31,19 +31,10 @@ from pathlib import Path
 
 SCRIPT_DIR = Path(__file__).parent
 
-# Files to include verbatim (after path scrubbing)
+# Files to include verbatim (after path scrubbing).
+# The stock_toolkit/ package and tests/ trees are expanded at runtime.
 SOURCE_FILES = [
-    "stock_common.py",
-    "stock_collector.py",
-    "stock_analysis.py",
-    "stock_inventory.py",
-    "stock_score.py",
-    "stock_backtest.py",
-    "stock_alerts.py",
-    "stock_ui.py",
-    "stock_setup.py",
-    "test_toolkit.py",
-    "test_live_apis.py",
+    "pyproject.toml",
     "crontab.demo",
     "make_dist.py",
     "make_docs.py",
@@ -51,6 +42,16 @@ SOURCE_FILES = [
     "startUI.sh",
     "VERSION",
 ]
+
+
+def _tree_files() -> list[str]:
+    """All package + test sources, as paths relative to SCRIPT_DIR."""
+    out = []
+    for root in ("stock_toolkit", "tests"):
+        for p in sorted((SCRIPT_DIR / root).rglob("*.py")):
+            if "__pycache__" not in p.parts:
+                out.append(str(p.relative_to(SCRIPT_DIR)))
+    return out
 
 # Shell wrappers — copied to bin/ subdirectory in the dist
 WRAPPER_FILES = [
@@ -274,26 +275,10 @@ ALPHAVANTAGE_PAID=false
 
 
 # ── paths (optional) ──────────────────────────────────────────────────────────
-# All paths default to the directory containing stock_collector.py.
+# All paths default to $STOCK_DIR (or the working directory).
 # Uncomment and set OUTPUT_DIR to store data elsewhere.
 
 # OUTPUT_DIR=/data/stocks
-"""
-
-REQUIREMENTS = """\
-# Stock Toolkit — Python dependencies
-# Install with: pip install -r requirements.txt
-
-requests>=2.31.0
-yfinance>=0.2.40
-pandas>=2.0.0
-numpy>=1.24.0
-scipy>=1.11.0
-matplotlib>=3.7.0
-
-# Streamlit UI (optional — only needed for stock_ui.py)
-# streamlit>=1.30.0
-# plotly>=5.18.0
 """
 
 # ─────────────────────────────────────────────
@@ -391,13 +376,15 @@ examples:
 
     # ── source files ──────────────────────────────────────────────────────────
     print("\n  Python scripts:")
-    for name in SOURCE_FILES:
+    for name in SOURCE_FILES + _tree_files():
         src = SCRIPT_DIR / name
         dst = out_dir / name
         if not src.exists():
             print(f"  ⚠  MISSING: {name}")
             missing.append(name)
             continue
+        if not dry_run:
+            dst.parent.mkdir(parents=True, exist_ok=True)
         copy_scrubbed(src, dst, dry_run)
         print_file(name, dst, dry_run)
 
@@ -445,12 +432,6 @@ examples:
         dst.write_text(CONFIG_TEMPLATE)
     print_file("config.env.template", dst, dry_run)
 
-    # requirements.txt
-    dst = out_dir / "requirements.txt"
-    if not dry_run:
-        dst.write_text(REQUIREMENTS)
-    print_file("requirements.txt", dst, dry_run)
-
     # LICENSE
     dst = out_dir / "LICENSE"
     license_text = LICENSES[args.license](year, author)
@@ -480,7 +461,8 @@ examples:
             print("  ✓  No personal info detected")
 
     # ── summary ───────────────────────────────────────────────────────────────
-    n_files = len(SOURCE_FILES) + len(DOC_FILES) + 4  # 4 generated
+    n_files = (len(SOURCE_FILES) + len(_tree_files()) + len(WRAPPER_FILES)
+               + len(DOC_FILES) + 3)  # 3 generated: .gitignore, template, LICENSE
     n_ok    = n_files - len(missing)
 
     print(f"\n{'─'*60}")

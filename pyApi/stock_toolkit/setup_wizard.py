@@ -14,9 +14,9 @@ import argparse
 import sys
 from pathlib import Path
 
-SCRIPT_DIR = Path(__file__).parent
-CONFIG_PATH = SCRIPT_DIR / "config.env"
-TEMPLATE_PATH = SCRIPT_DIR / "config.env.template"
+from stock_toolkit.common import BASE_DIR, CONFIG_PATH
+
+TEMPLATE_PATH = BASE_DIR / "config.env.template"
 
 # ── colours ───────────────────────────────────────────────────────────────────
 def _c(code, text): return f"\033[{code}m{text}\033[0m" if sys.stdout.isatty() else text

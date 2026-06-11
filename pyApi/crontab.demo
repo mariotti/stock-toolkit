@@ -126,7 +126,7 @@ STOCK_DIR=/path/to/stock-toolkit
 # Costs ≤ 7 API calls total; sources without a key are skipped automatically.
 # ─────────────────────────────────────────────────────────────────────────────
 
-30 0 * * 0  cd $STOCK_DIR && RUN_LIVE=1 $STOCK_DIR/.venv/bin/python test_live_apis.py
+30 0 * * 0  cd $STOCK_DIR && RUN_LIVE=1 $STOCK_DIR/.venv/bin/python tests/test_live_apis.py
 
 
 # =============================================================================

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# analyse — wrapper for stock_analysis.py
+# analyse — wrapper for stock_toolkit.analysis
 # Place this file in ~/bin (or any directory on $PATH).
 
 set -euo pipefail
@@ -25,10 +25,5 @@ if ! "$PYTHON" -c "import sys; assert sys.version_info >= (3,10)" 2>/dev/null; t
     exit 1
 fi
 
-if [[ ! -f "$STOCK_DIR/stock_analysis.py" ]]; then
-    echo "analyse: stock_analysis.py not found in $STOCK_DIR" >&2
-    exit 1
-fi
-
 cd "$STOCK_DIR"
-exec "$PYTHON" stock_analysis.py "$@"
+exec "$PYTHON" -m stock_toolkit.analysis "$@"

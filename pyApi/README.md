@@ -1,15 +1,15 @@
 # Stock Data Toolkit
 
-A collection of seven Python scripts for collecting, analysing, backtesting, and monitoring stock market data from multiple free (and optionally paid) APIs — with a browser-based Streamlit dashboard that brings it all together.
+A Python package (`stock_toolkit`) for collecting, analysing, backtesting, and monitoring stock market data from multiple free (and optionally paid) APIs — with a browser-based Streamlit dashboard that brings it all together.
 
 ```
-stock_collector.py    — fetch and store data (live + historical)
-stock_analysis.py     — load, resample, and run 11 analytical tools
-stock_inventory.py    — inspect what data is on disk
-stock_score.py        — rank symbols by investment score across five horizons
-stock_backtest.py     — backtest strategies against historical data
-stock_alerts.py       — watch for conditions and send notifications
-stock_ui.py           — Streamlit dashboard (Score · Analysis · Backtest · Alerts)
+stock_toolkit/collector/    — fetch and store data (live + historical)
+stock_toolkit/analysis.py     — load, resample, and run 11 analytical tools
+stock_toolkit/inventory.py    — inspect what data is on disk
+stock_toolkit/score.py        — rank symbols by investment score across five horizons
+stock_toolkit/backtest.py     — backtest strategies against historical data
+stock_toolkit/alerts.py       — watch for conditions and send notifications
+stock_toolkit/ui/           — Streamlit dashboard (Score · Analysis · Backtest · Alerts)
 ```
 
 ## Getting started
@@ -33,7 +33,7 @@ bash install.sh       # sets up everything, downloads initial data
 - [Installation](#installation)
 - [Directory layout](#directory-layout)
 - [API keys](#api-keys)
-- [stock\_collector.py](#stock_collectorpy)
+- [stock\_toolkit/collector](#stock_toolkitcollector)
   - [Configuration](#configuration)
   - [Live collection](#live-collection)
   - [Historical collection](#historical-collection)
@@ -41,21 +41,21 @@ bash install.sh       # sets up everything, downloads initial data
   - [Deduplication and skip logic](#deduplication-and-skip-logic)
   - [Rate limits and budgets](#rate-limits-and-budgets)
   - [Paid tier flags](#paid-tier-flags)
-- [stock\_analysis.py](#stock_analysispy)
+- [stock\_toolkit/analysis](#stock_toolkitanalysis)
   - [Loading data](#loading-data)
   - [Date ranges](#date-ranges)
   - [Interval and granularity](#interval-and-granularity)
-- [stock\_score.py](#stock_scorepy)
-- [stock\_backtest.py](#stock_backtestpy)
-- [stock\_alerts.py](#stock_alertspy)
-- [stock\_ui.py](#stock_uipy)
+- [stock\_toolkit/score](#stock_toolkitscore)
+- [stock\_toolkit/backtest](#stock_toolkitbacktest)
+- [stock\_toolkit/alerts](#stock_toolkitalerts)
+- [stock\_toolkit/ui](#stock_toolkitui)
 - [Common workflows](#common-workflows)
 - [Testing](#testing)
 - [Git and data files](#git-and-data-files)
 - [Troubleshooting](#troubleshooting)
   - [Analysis tools](#analysis-tools)
   - [Exporting data](#exporting-data)
-- [stock\_inventory.py](#stock_inventorypy)
+- [stock\_toolkit/inventory](#stock_toolkitinventory)
 - [Common workflows](#common-workflows)
 - [Git and data files](#git-and-data-files)
 - [Troubleshooting](#troubleshooting)
@@ -66,20 +66,20 @@ bash install.sh       # sets up everything, downloads initial data
 
 ```bash
 # 1. Install dependencies
-pip install -r requirements.txt
+pip install -e .
 
 # 2. Set your symbols and API keys in config.env (see below)
 #    — easiest via the interactive wizard:
-python3 stock_setup.py
+stock-setup
 
 # 3. Collect today's data (yfinance works without any key)
-python3 stock_collector.py
+stock-collect
 
 # 4. See what you have
-python3 stock_inventory.py --summary
+stock-inventory --summary
 
 # 5. Analyse it
-python3 stock_analysis.py -s AAPL --analysis summary regression --plot
+stock-analyse -s AAPL --analysis summary regression --plot
 ```
 
 ---
@@ -87,7 +87,7 @@ python3 stock_analysis.py -s AAPL --analysis summary regression --plot
 ## Installation
 
 ```bash
-pip install -r requirements.txt
+pip install -e .
 ```
 
 This installs the core packages (`requests`, `yfinance`, `pandas`, `numpy`,
@@ -102,16 +102,20 @@ used by `regression` and statistical analyses. `matplotlib` is used by all
 After a typical run the directory looks like this:
 
 ```
-stock_collector.py
-stock_analysis.py
-stock_inventory.py
-stock_score.py
-stock_backtest.py
-stock_alerts.py
-stock_ui.py                 ← Streamlit dashboard
-stock_setup.py              ← interactive configuration wizard
-test_toolkit.py             ← offline test suite (no API calls)
-test_live_apis.py           ← live API connectivity tests
+stock_toolkit/              ← the Python package
+    common.py               ← shared config parser + path constants
+    collector/              ← data collection (config, db, sources/, cli, …)
+    analysis.py             ← 11 analytical tools
+    inventory.py            ← inspect what data is on disk
+    score.py                ← 5-horizon investment scoring
+    backtest.py             ← strategy backtesting
+    alerts.py               ← condition watching + notifications
+    setup_wizard.py         ← interactive configuration wizard
+    ui/                     ← Streamlit dashboard (app + one module per tab)
+tests/
+    test_toolkit.py         ← offline test suite (no API calls)
+    test_live_apis.py       ← live API connectivity tests
+pyproject.toml              ← package metadata, deps, stock-* entry points
 make_dist.py                ← create a clean public distribution
 make_docs.py                ← generate HTML docs and diagrams
 install.sh                  ← one-command installer
@@ -126,7 +130,6 @@ ANALYSIS.md
 README_SCORE.md
 README_BACKTEST.md
 README_ALERTS.md
-requirements.txt
 
 bin/                        ← shell wrappers (added to PATH or used directly)
     collect
@@ -148,7 +151,7 @@ data/                       ← historical DBs (--historical flag)
     stock_data_all.db
 
 docs/                       ← generated HTML docs (make_docs.py)
-    stock_collector.html
+    stock_toolkit/collector.html
     diagrams/
         packages_StockToolkit.png
         classes_StockToolkit.png
@@ -164,21 +167,19 @@ created automatically on first use.
 
 ## API keys
 
-Six data sources are supported. All have a free tier. Edit the `API_KEYS`
-section at the top of `stock_collector.py`:
+Six data sources are supported. All have a free tier. Set the keys in
+`config.env` (run `stock-setup` for the interactive wizard):
 
-```python
-API_KEYS = {
-    "alphavantage": "",   # https://www.alphavantage.co/support/#api-key
-    "finnhub":      "",   # https://finnhub.io/register
-    "polygon":      "",   # https://massive.com/dashboard (formerly Polygon.io)
-    "fmp":          "",   # https://financialmodelingprep.com/developer/docs
-    "twelvedata":   "",   # https://twelvedata.com/register
-    "marketstack":  "",   # https://marketstack.com/signup/free
-}
+```bash
+ALPHAVANTAGE_KEY=    # https://www.alphavantage.co/support/#api-key
+FINNHUB_KEY=         # https://finnhub.io/register
+MASSIVE_KEY=         # https://massive.com/dashboard (formerly Polygon.io)
+FMP_KEY=             # https://financialmodelingprep.com/developer/docs
+TWELVEDATA_KEY=      # https://twelvedata.com/register
+MARKETSTACK_KEY=     # https://marketstack.com/signup/free
 ```
 
-Any key left as `""` is silently skipped. `yfinance` requires no key.
+Any key left blank is silently skipped. `yfinance` requires no key.
 
 ### Free tier limits
 
@@ -198,7 +199,7 @@ generous call budgets.
 
 ---
 
-## stock\_collector.py
+## stock\_toolkit/collector
 
 ### Configuration
 
@@ -231,7 +232,7 @@ ALPHAVANTAGE_PAID=false
 Run the interactive wizard to configure keys:
 
 ```bash
-python3 stock_setup.py
+stock-setup
 ```
 
 ### Live collection
@@ -241,19 +242,19 @@ Fetches the latest data from all configured sources and appends it to
 
 ```bash
 # collect all configured symbols (all sources)
-python3 stock_collector.py
+stock-collect
 
 # collect only specific sources — useful for tiered cron scheduling
-python3 stock_collector.py --sources finnhub fmp          # real-time quotes only
-python3 stock_collector.py --sources yfinance twelvedata  # hourly bars only
-python3 stock_collector.py --sources alphavantage polygon marketstack  # daily only
+stock-collect --sources finnhub fmp          # real-time quotes only
+stock-collect --sources yfinance twelvedata  # hourly bars only
+stock-collect --sources alphavantage polygon marketstack  # daily only
 
 # collect a single symbol only
-python3 stock_collector.py -s AAPL
-python3 stock_collector.py --symbol CAT
+stock-collect -s AAPL
+stock-collect --symbol CAT
 
 # write to CSV instead of SQLite (legacy mode)
-python3 stock_collector.py --csv
+stock-collect --csv
 ```
 
 **What gets stored per run:**
@@ -306,16 +307,16 @@ dedicated database in `./data/` — never touching `stock_data.db`.
 
 ```bash
 # a single year  → data/stock_data_2024.db
-python3 stock_collector.py --historical 2024
+stock-collect --historical 2024
 
 # a year range   → data/stock_data_2010-2020.db
-python3 stock_collector.py --historical 2010-2020
+stock-collect --historical 2010-2020
 
 # everything available  → data/stock_data_all.db
-python3 stock_collector.py --historical ALL
+stock-collect --historical ALL
 
 # historical for a specific symbol only
-python3 stock_collector.py -s AAPL --historical 2020-2023
+stock-collect -s AAPL --historical 2020-2023
 ```
 
 Re-running `--historical` is safe. Before calling each API the script checks
@@ -340,20 +341,20 @@ After collecting, plots can be generated immediately:
 
 ```bash
 # generate gnuplot files
-python3 stock_collector.py --plot-gnuplot
+stock-collect --plot-gnuplot
 
 # generate matplotlib PNG (opens interactive window too)
-python3 stock_collector.py --plot-matplotlib
+stock-collect --plot-matplotlib
 
 # choose which field to plot (default: close)
-python3 stock_collector.py --plot-gnuplot --plot-data volume
-python3 stock_collector.py --plot-matplotlib --plot-data change_pct
+stock-collect --plot-gnuplot --plot-data volume
+stock-collect --plot-matplotlib --plot-data change_pct
 
 # valid --plot-data choices:
 # close (default), open, high, low, volume, vwap, change_pct
 
 # combine with --historical
-python3 stock_collector.py --historical 2020-2023 --plot-matplotlib --plot-data close
+stock-collect --historical 2020-2023 --plot-matplotlib --plot-data close
 ```
 
 **gnuplot usage** — after running `--plot-gnuplot`:
@@ -430,7 +431,7 @@ FINNHUB_PAID = True          # paid:  /quote + /stock/candle (OHLCV bars,
 
 ---
 
-## stock\_analysis.py
+## stock\_toolkit/analysis
 
 Reads from all databases (`stock_data.db` + `data/*.db`), merges them,
 deduplicates by source priority, resamples to the requested granularity,
@@ -438,13 +439,13 @@ and runs the requested analyses.
 
 ```bash
 # see what symbols are available before analysing
-python3 stock_analysis.py --list-symbols
+stock-analyse --list-symbols
 
 # basic summary for one symbol
-python3 stock_analysis.py -s AAPL
+stock-analyse -s AAPL
 
 # multiple symbols, multiple tools, with plots
-python3 stock_analysis.py -s AAPL MSFT GOOGL \
+stock-analyse -s AAPL MSFT GOOGL \
     --analysis summary regression correlation \
     --plot
 ```
@@ -463,10 +464,10 @@ Override with `--source`:
 
 ```bash
 # use only yfinance data
-python3 stock_analysis.py -s AAPL --source yfinance
+stock-analyse -s AAPL --source yfinance
 
 # use only FMP data
-python3 stock_analysis.py -s AAPL --source fmp
+stock-analyse -s AAPL --source fmp
 ```
 
 ### Date ranges
@@ -475,16 +476,16 @@ Both `--from` and `--to` are optional and can be used independently:
 
 ```bash
 # specific range
-python3 stock_analysis.py -s AAPL --from 2022-01-01 --to 2023-12-31
+stock-analyse -s AAPL --from 2022-01-01 --to 2023-12-31
 
 # everything from a date onwards
-python3 stock_analysis.py -s AAPL --from 2020-01-01
+stock-analyse -s AAPL --from 2020-01-01
 
 # everything up to a date
-python3 stock_analysis.py -s AAPL --to 2024-12-31
+stock-analyse -s AAPL --to 2024-12-31
 
 # no date filter — loads all available data
-python3 stock_analysis.py -s AAPL
+stock-analyse -s AAPL
 ```
 
 ### Interval and granularity
@@ -499,13 +500,13 @@ python3 stock_analysis.py -s AAPL
 
 ```bash
 # daily bars (default)
-python3 stock_analysis.py -s AAPL
+stock-analyse -s AAPL
 
 # intraday hourly bars
-python3 stock_analysis.py -s AAPL --interval 1h
+stock-analyse -s AAPL --interval 1h
 
 # auto-detect
-python3 stock_analysis.py -s AAPL --interval auto
+stock-analyse -s AAPL --interval auto
 ```
 
 **`--granularity`** controls how loaded bars are *resampled* before analysis:
@@ -538,20 +539,20 @@ python3 stock_analysis.py -s AAPL --interval auto
 
 ```bash
 # force weekly granularity on daily data
-python3 stock_analysis.py -s AAPL --granularity 1w
+stock-analyse -s AAPL --granularity 1w
 
 # intraday hourly data, resampled to 4-hour bars
-python3 stock_analysis.py -s AAPL --interval 1h --granularity 4h
+stock-analyse -s AAPL --interval 1h --granularity 4h
 
 # raw data, no resampling
-python3 stock_analysis.py -s AAPL --granularity raw
+stock-analyse -s AAPL --granularity raw
 ```
 
 **`--field`** selects which price column to analyse (default: `close`):
 
 ```bash
-python3 stock_analysis.py -s AAPL --field volume --analysis summary
-python3 stock_analysis.py -s AAPL --field high --analysis regression --plot
+stock-analyse -s AAPL --field volume --analysis summary
+stock-analyse -s AAPL --field high --analysis regression --plot
 # choices: close, open, high, low, volume, vwap, change_pct
 ```
 
@@ -560,7 +561,7 @@ python3 stock_analysis.py -s AAPL --field high --analysis regression --plot
 Any number of tools can be combined in a single run:
 
 ```bash
-python3 stock_analysis.py -s AAPL \
+stock-analyse -s AAPL \
     --analysis summary regression returns volatility sma drawdown rsi bbands montecarlo hurst \
     --plot
 ```
@@ -573,7 +574,7 @@ Descriptive statistics per symbol: first/last price, total return, min/max,
 mean, standard deviation, annualised volatility, Sharpe ratio, and bar count.
 
 ```bash
-python3 stock_analysis.py -s AAPL MSFT --analysis summary
+stock-analyse -s AAPL MSFT --analysis summary
 ```
 
 ---
@@ -586,8 +587,8 @@ With `--plot`: renders the price series with the regression line and a 95%
 confidence interval band.
 
 ```bash
-python3 stock_analysis.py -s AAPL --analysis regression --plot
-python3 stock_analysis.py -s AAPL MSFT --from 2020-01-01 --analysis regression --plot
+stock-analyse -s AAPL --analysis regression --plot
+stock-analyse -s AAPL MSFT --from 2020-01-01 --analysis regression --plot
 ```
 
 ---
@@ -599,8 +600,8 @@ deviation, worst/best single-period return, percentage of positive periods,
 and Sharpe ratio. With `--plot`: histogram per symbol with mean line marked.
 
 ```bash
-python3 stock_analysis.py -s AAPL --analysis returns --plot
-python3 stock_analysis.py -s AAPL --granularity 1w --analysis returns --plot
+stock-analyse -s AAPL --analysis returns --plot
+stock-analyse -s AAPL --granularity 1w --analysis returns --plot
 ```
 
 ---
@@ -612,8 +613,8 @@ factor). Reports latest, mean, min, and max volatility. With `--plot`: line
 chart per symbol.
 
 ```bash
-python3 stock_analysis.py -s AAPL --analysis volatility --window 20 --plot
-python3 stock_analysis.py -s AAPL --interval 1h --analysis volatility --window 12 --plot
+stock-analyse -s AAPL --analysis volatility --window 20 --plot
+stock-analyse -s AAPL --interval 1h --analysis volatility --window 12 --plot
 ```
 
 `--window N` — rolling window size in bars (default: 30).
@@ -630,8 +631,8 @@ Requires at least 2 symbols. With `--plot`: colour-coded heatmap
 (green = positive, red = negative correlation).
 
 ```bash
-python3 stock_analysis.py -s AAPL MSFT GOOGL AMZN --analysis correlation --plot
-python3 stock_analysis.py -s AAPL MSFT --from 2020-01-01 --analysis correlation --plot
+stock-analyse -s AAPL MSFT GOOGL AMZN --analysis correlation --plot
+stock-analyse -s AAPL MSFT --from 2020-01-01 --analysis correlation --plot
 ```
 
 ---
@@ -642,8 +643,8 @@ Simple moving average overlay. Reports current SMA values and whether price
 is above or below each. With `--plot`: price chart with SMA lines.
 
 ```bash
-python3 stock_analysis.py -s AAPL --analysis sma --plot
-python3 stock_analysis.py -s AAPL --analysis sma --sma-windows 20 50 200 --plot
+stock-analyse -s AAPL --analysis sma --plot
+stock-analyse -s AAPL --analysis sma --sma-windows 20 50 200 --plot
 ```
 
 `--sma-windows N [N ...]` — SMA periods to compute (default: `20 50 200`).
@@ -658,8 +659,8 @@ duration in bars, recovery time, annualised return, and Calmar ratio
 the drawdown over time.
 
 ```bash
-python3 stock_analysis.py -s AAPL --analysis drawdown --plot
-python3 stock_analysis.py -s AAPL MSFT --from 2020-01-01 --analysis drawdown --plot
+stock-analyse -s AAPL --analysis drawdown --plot
+stock-analyse -s AAPL MSFT --from 2020-01-01 --analysis drawdown --plot
 ```
 
 ---
@@ -672,8 +673,8 @@ and bar counts spent in each zone. With `--plot`: dual-panel chart of price
 and RSI with threshold lines.
 
 ```bash
-python3 stock_analysis.py -s AAPL --analysis rsi --window 14 --plot
-python3 stock_analysis.py -s AAPL --interval 1h --analysis rsi --window 14 --plot
+stock-analyse -s AAPL --analysis rsi --window 14 --plot
+stock-analyse -s AAPL --interval 1h --analysis rsi --window 14 --plot
 ```
 
 `--window N` — RSI period (default: 30; standard is 14).
@@ -689,7 +690,7 @@ often precedes a breakout). With `--plot`: price chart with bands and shaded
 fill.
 
 ```bash
-python3 stock_analysis.py -s AAPL --analysis bbands --window 20 --plot
+stock-analyse -s AAPL --analysis bbands --window 20 --plot
 ```
 
 `--window N` — lookback period for SMA and standard deviation (default: 30;
@@ -706,8 +707,8 @@ horizon, expected return, and probability of finishing above the current price.
 With `--plot`: path fan chart and terminal price histogram.
 
 ```bash
-python3 stock_analysis.py -s AAPL --analysis montecarlo --plot
-python3 stock_analysis.py -s AAPL --analysis montecarlo --mc-paths 5000 --mc-horizon 63 --plot
+stock-analyse -s AAPL --analysis montecarlo --plot
+stock-analyse -s AAPL --analysis montecarlo --mc-paths 5000 --mc-horizon 63 --plot
 ```
 
 `--mc-paths N` — number of simulated paths (default: 1000).
@@ -727,8 +728,8 @@ series as:
 With `--plot`: log-log scatter of R/S vs lag with fitted slope line.
 
 ```bash
-python3 stock_analysis.py -s AAPL --analysis hurst --plot
-python3 stock_analysis.py -s AAPL MSFT GOOGL --analysis hurst --plot
+stock-analyse -s AAPL --analysis hurst --plot
+stock-analyse -s AAPL MSFT GOOGL --analysis hurst --plot
 ```
 
 Requires at least 40 bars.
@@ -742,10 +743,10 @@ resampling) to a CSV file. It can be combined with any analysis run:
 
 ```bash
 # save without running any analysis
-python3 stock_analysis.py -s AAPL --save aapl.csv
+stock-analyse -s AAPL --save aapl.csv
 
 # save and also run analyses
-python3 stock_analysis.py -s AAPL MSFT \
+stock-analyse -s AAPL MSFT \
     --from 2022-01-01 --to 2024-12-31 \
     --granularity 1w \
     --analysis summary regression \
@@ -762,41 +763,41 @@ sqlite3 stock_data.db ".mode csv" ".headers on" \
 
 ---
 
-## stock\_inventory.py
+## stock\_toolkit/inventory
 
 Lists all data available on disk across all databases, with symbol, interval,
 date range, span, row count, sources, and database file.
 
 ```bash
 # detailed view: one row per (symbol, interval, source, database)
-python3 stock_inventory.py
+stock-inventory
 
 # summary view: one row per (symbol, interval), sources merged
-python3 stock_inventory.py --summary
+stock-inventory --summary
 
 # filter to specific symbols
-python3 stock_inventory.py -s AAPL MSFT
+stock-inventory -s AAPL MSFT
 
 # filter to specific symbols, summary view
-python3 stock_inventory.py -s AAPL --summary
+stock-inventory -s AAPL --summary
 
 # scan a specific folder or file
-python3 stock_inventory.py --db ./data
-python3 stock_inventory.py --db data/stock_data_2020-2023.db
+stock-inventory --db ./data
+stock-inventory --db data/stock_data_2020-2023.db
 
 # machine-readable JSON output (pipe to jq etc.)
-python3 stock_inventory.py --json
-python3 stock_inventory.py --json | jq '.[] | select(.symbol=="AAPL")'
+stock-inventory --json
+stock-inventory --json | jq '.[] | select(.symbol=="AAPL")'
 
 # remove a symbol from every database (prompts for confirmation)
-python3 stock_inventory.py --remove TSLA
+stock-inventory --remove TSLA
 
 # remove without prompt — set env var to allow (safe for scripts/cron)
-STOCK_INV_REMOVE=allow python3 stock_inventory.py --remove TSLA
+STOCK_INV_REMOVE=allow stock-inventory --remove TSLA
 
 # check data consistency: missing trading days, thin coverage
-python3 stock_inventory.py --check
-python3 stock_inventory.py --check -s AAPL MSFT   # specific symbols only
+stock-inventory --check
+stock-inventory --check -s AAPL MSFT   # specific symbols only
 ```
 
 **`--remove`** deletes all rows for the symbol across every database and runs
@@ -835,7 +836,7 @@ MSFT    1d        2024-01-02  2024-04-30  3mo        240  fmp, yfinance       st
 
 ---
 
-## stock\_score.py
+## stock\_toolkit/score
 
 Runs all seven analysis steps and ranks symbols by a 0–100 investment score.
 The `--horizon` flag reshapes the scoring weights to match your intended
@@ -844,17 +845,17 @@ and risk dominate for long ones.
 
 ```bash
 # Rank all symbols for a quarterly hold (default)
-python3 stock_score.py --from 2023-01-01
+stock-score --from 2023-01-01
 
 # What looks good to buy this week?
-python3 stock_score.py -s AAPL MSFT GOOGL CSMIB.MI TSLA ENEL.MI \
+stock-score -s AAPL MSFT GOOGL CSMIB.MI TSLA ENEL.MI \
     --from 2023-01-01 --horizon week
 
 # Best long-term compounder?
-python3 stock_score.py --from 2023-01-01 --horizon life --top 3
+stock-score --from 2023-01-01 --horizon life --top 3
 
 # Per-metric breakdown
-python3 stock_score.py --from 2023-01-01 --horizon quarter --detail
+stock-score --from 2023-01-01 --horizon quarter --detail
 ```
 
 Available horizons: `week` `month` `quarter` `year` `life`
@@ -864,7 +865,7 @@ output guide.
 
 ---
 
-## stock\_backtest.py
+## stock\_toolkit/backtest
 
 Replays a trading strategy against historical price data and compares it
 to a buy-and-hold benchmark. Signals are generated at bar close with no
@@ -872,13 +873,13 @@ lookahead. Commission and slippage are configurable.
 
 ```bash
 # RSI reversal strategy
-python3 stock_backtest.py -s AAPL --strategy rsi --window 14 --plot
+stock-backtest -s AAPL --strategy rsi --window 14 --plot
 
 # Moving average crossover
-python3 stock_backtest.py -s AAPL --strategy sma_cross --fast 20 --slow 50 --plot
+stock-backtest -s AAPL --strategy sma_cross --fast 20 --slow 50 --plot
 
 # Walk-forward validation (train 2018–2022, test 2023+)
-python3 stock_backtest.py -s AAPL --strategy sma_cross \
+stock-backtest -s AAPL --strategy sma_cross \
     --from 2018-01-01 --test-from 2023-01-01 --plot
 ```
 
@@ -889,7 +890,7 @@ and limitations.
 
 ---
 
-## stock\_alerts.py
+## stock\_toolkit/alerts
 
 Evaluates conditions against the latest collected data and fires
 notifications when a condition transitions from false to true (edge
@@ -897,17 +898,17 @@ detection — no repeated alerts for the same ongoing condition).
 
 ```bash
 # Watch for RSI oversold
-python3 stock_alerts.py -s AAPL MSFT --when "rsi14 < 30"
+stock-alerts -s AAPL MSFT --when "rsi14 < 30"
 
 # Multiple conditions, push notification
-python3 stock_alerts.py -s AAPL GOOGL CSMIB.MI \
+stock-alerts -s AAPL GOOGL CSMIB.MI \
     --when "rsi14 < 30" --when "bbands_squeeze" --notify pushover
 
 # See all available indicator names
-python3 stock_alerts.py --list-conditions
+stock-alerts --list-conditions
 
 # Check current alert state
-python3 stock_alerts.py --status
+stock-alerts --status
 ```
 
 Configure notification channels (email, Pushover, Slack) in `config.env`.
@@ -916,7 +917,7 @@ and state management.
 
 ---
 
-## stock\_ui.py
+## stock\_toolkit/ui
 
 A Streamlit browser dashboard that wraps all six scripts into a single UI.
 No duplication — it imports directly from the other scripts, so any update
@@ -926,7 +927,7 @@ to the analysis or scoring logic is immediately reflected in the UI.
 
 ```bash
 pip install streamlit plotly
-streamlit run stock_ui.py
+stock-ui
 # opens at http://localhost:8501
 ```
 
@@ -940,14 +941,14 @@ streamlit run stock_ui.py
 | 🔔 Alerts | Evaluate conditions against live data. Results table with TRUE/false badges, full indicator snapshot per symbol. |
 
 The sidebar controls which symbols and date range are active across all tabs.
-Data is cached for 5 minutes — run `stock_collector.py` to refresh.
+Data is cached for 5 minutes — run `stock_toolkit/collector/` to refresh.
 
 ---
 
 ### Rank symbols before investing
 
 ```bash
-python3 stock_score.py \
+stock-score \
     -s AAPL MSFT GOOGL CSMIB.MI TSLA ENEL.MI \
     --from 2023-01-01 \
     --horizon quarter \
@@ -958,7 +959,7 @@ python3 stock_score.py \
 ### Backtest a strategy before using it
 
 ```bash
-python3 stock_backtest.py -s AAPL \
+stock-backtest -s AAPL \
     --strategy rsi --window 14 \
     --from 2018-01-01 --test-from 2023-01-01 \
     --plot
@@ -968,7 +969,7 @@ python3 stock_backtest.py -s AAPL \
 
 ```bash
 # add to crontab — every 30 min during market hours
-*/30 9-17 * * 1-5  python3 /path/to/stock_alerts.py \
+*/30 9-17 * * 1-5  python3 /path/to/stock_toolkit/alerts.py \
     -s AAPL MSFT GOOGL CSMIB.MI \
     --when "rsi14 < 30" \
     --when "change_pct < -3" \
@@ -978,39 +979,39 @@ python3 stock_backtest.py -s AAPL \
 ### Starting from scratch
 
 ```bash
-# 1. Edit SYMBOLS and API_KEYS in stock_collector.py
+# 1. Edit SYMBOLS and API_KEYS in stock_toolkit/collector/
 # 2. Run once to test
-python3 stock_collector.py
+stock-collect
 # 3. Check what was collected
-python3 stock_inventory.py --summary
+stock-inventory --summary
 # 4. Set up cron for ongoing collection
 crontab -e
-# add: */30 * * * * /usr/bin/python3 /path/to/stock_collector.py
+# add: */30 * * * * /usr/bin/python3 /path/to/stock_toolkit/collector/
 ```
 
 ### Backfilling historical data
 
 ```bash
 # get everything available for your symbols
-python3 stock_collector.py --historical ALL
+stock-collect --historical ALL
 
 # or a specific range
-python3 stock_collector.py --historical 2015-2023
+stock-collect --historical 2015-2023
 
 # check the result
-python3 stock_inventory.py --summary
+stock-inventory --summary
 ```
 
 ### Quick daily overview
 
 ```bash
-python3 stock_analysis.py -s AAPL MSFT GOOGL --analysis summary
+stock-analyse -s AAPL MSFT GOOGL --analysis summary
 ```
 
 ### Trend analysis with plot
 
 ```bash
-python3 stock_analysis.py -s AAPL \
+stock-analyse -s AAPL \
     --from 2020-01-01 \
     --analysis regression sma \
     --sma-windows 50 200 \
@@ -1020,7 +1021,7 @@ python3 stock_analysis.py -s AAPL \
 ### Risk snapshot
 
 ```bash
-python3 stock_analysis.py -s AAPL MSFT \
+stock-analyse -s AAPL MSFT \
     --analysis volatility drawdown \
     --window 20 \
     --plot
@@ -1029,7 +1030,7 @@ python3 stock_analysis.py -s AAPL MSFT \
 ### Technical indicator dashboard
 
 ```bash
-python3 stock_analysis.py -s AAPL \
+stock-analyse -s AAPL \
     --analysis rsi bbands sma \
     --window 14 \
     --sma-windows 20 50 \
@@ -1039,7 +1040,7 @@ python3 stock_analysis.py -s AAPL \
 ### Portfolio correlation
 
 ```bash
-python3 stock_analysis.py -s AAPL MSFT GOOGL AMZN TSLA NVDA \
+stock-analyse -s AAPL MSFT GOOGL AMZN TSLA NVDA \
     --from 2022-01-01 \
     --analysis correlation \
     --plot
@@ -1048,7 +1049,7 @@ python3 stock_analysis.py -s AAPL MSFT GOOGL AMZN TSLA NVDA \
 ### Forward simulation
 
 ```bash
-python3 stock_analysis.py -s AAPL \
+stock-analyse -s AAPL \
     --analysis montecarlo \
     --mc-paths 5000 \
     --mc-horizon 126 \
@@ -1059,10 +1060,10 @@ python3 stock_analysis.py -s AAPL \
 
 ```bash
 # collect hourly data first (yfinance, Finnhub paid, Twelve Data)
-python3 stock_collector.py -s AAPL
+stock-collect -s AAPL
 
 # then analyse at 2-hour granularity
-python3 stock_analysis.py -s AAPL \
+stock-analyse -s AAPL \
     --interval 1h \
     --granularity 2h \
     --analysis summary volatility rsi \
@@ -1074,7 +1075,7 @@ python3 stock_analysis.py -s AAPL \
 
 ```bash
 # export weekly OHLCV for the last 3 years
-python3 stock_analysis.py -s AAPL MSFT \
+stock-analyse -s AAPL MSFT \
     --from 2022-01-01 \
     --granularity 1w \
     --save weekly_data.csv
@@ -1140,15 +1141,9 @@ __pycache__/
 **What to commit:**
 
 ```
-stock_collector.py   ✓
-stock_analysis.py    ✓
-stock_inventory.py   ✓
-stock_score.py       ✓
-stock_backtest.py    ✓
-stock_alerts.py      ✓
-stock_ui.py          ✓
-test_toolkit.py      ✓
-test_live_apis.py    ✓
+stock_toolkit/       ✓  (the whole package)
+tests/               ✓
+pyproject.toml       ✓
 make_dist.py         ✓
 crontab.demo         ✓
 README.md            ✓
@@ -1156,15 +1151,11 @@ ANALYSIS.md          ✓
 README_SCORE.md      ✓
 README_BACKTEST.md   ✓
 README_ALERTS.md     ✓
-requirements.txt     ✓
 .gitignore           ✓
 ```
 
-Generate `requirements.txt` with:
-
-```bash
-pip freeze | grep -E "requests|yfinance|pandas|scipy|matplotlib" > requirements.txt
-```
+Dependencies are declared in `pyproject.toml` — install everything with
+`pip install -e .`.
 
 ---
 
@@ -1172,7 +1163,7 @@ pip freeze | grep -E "requests|yfinance|pandas|scipy|matplotlib" > requirements.
 
 Two test files cover the toolkit at different levels.
 
-### Offline tests — `test_toolkit.py`
+### Offline tests — `tests/test_toolkit.py`
 
 Fully self-contained. Creates a synthetic SQLite fixture database with seeded
 OHLCV data for four symbols and runs everything against it. Zero API calls,
@@ -1180,13 +1171,13 @@ zero external dependencies beyond the toolkit itself. Completes in ~3 seconds.
 
 ```bash
 # standard runner
-python3 test_toolkit.py
+python3 tests/test_toolkit.py
 
 # pytest (if installed)
-python3 -m pytest test_toolkit.py -v --tb=short
+python3 -m pytest tests/test_toolkit.py -v --tb=short
 
 # run a single class
-python3 -m pytest test_toolkit.py::TestBacktest -v
+python3 -m pytest tests/test_toolkit.py::TestBacktest -v
 ```
 
 **What is covered:**
@@ -1214,13 +1205,13 @@ Ran 105 tests in ~9s
 
 ---
 
-### Live API tests — `test_live_apis.py`
+### Live API tests — `tests/test_live_apis.py`
 
 Hits the real API endpoints. Skipped entirely unless `RUN_LIVE=1` is set,
 so the main suite stays fast and offline at all times.
 
 ```bash
-RUN_LIVE=1 python3 test_live_apis.py
+RUN_LIVE=1 python3 tests/test_live_apis.py
 ```
 
 **Cost per run:**
@@ -1254,7 +1245,7 @@ brew install graphviz        # macOS
 python3 make_docs.py
 
 # open in browser
-open docs/stock_collector.html
+open docs/stock_toolkit.html
 ```
 
 Output is idempotent — timestamps are stripped so git diff is clean between
@@ -1290,13 +1281,13 @@ Reduce the number of symbols in `SYMBOLS` to stay within the daily budget
 
 ### `No database files found`
 
-Run `stock_collector.py` at least once to create `stock_data.db`. The analysis
+Run `stock_toolkit/collector/` at least once to create `stock_data.db`. The analysis
 and inventory scripts read from existing databases — they do not create them.
 
 ### `[error] No 1h bars found`
 
 Hourly bars are only collected by yfinance (last 5 days) and Finnhub paid tier.
-Run `stock_collector.py` first, then check `stock_inventory.py` to confirm
+Run `stock_toolkit/collector/` first, then check `stock_toolkit/inventory.py` to confirm
 hourly data exists before using `--interval 1h`.
 
 ### `yfinance` data is missing or inconsistent

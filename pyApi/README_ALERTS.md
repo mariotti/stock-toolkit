@@ -1,6 +1,6 @@
 # Alerts
 
-`stock_alerts.py` watches your collected data for conditions you define and
+`stock_toolkit/alerts.py` watches your collected data for conditions you define and
 notifies you the moment a condition becomes true. It uses edge detection —
 it fires once when a condition transitions from false to true, then stays
 silent until the condition clears and triggers again. You will not get
@@ -56,7 +56,7 @@ Conditions can be combined with `and` / `or`:
 Run `--list-conditions` to see every available indicator name:
 
 ```bash
-python3 stock_alerts.py --list-conditions
+stock-alerts --list-conditions
 ```
 
 ### Full indicator reference
@@ -138,13 +138,13 @@ became true (fire) or was already true on the previous run (stay silent).
 
 ```bash
 # Show current state: which conditions are active and when they last fired
-python3 stock_alerts.py --status
+stock-alerts --status
 
 # Clear all state (every condition will fire fresh on next run)
-python3 stock_alerts.py --reset
+stock-alerts --reset
 
 # Evaluate conditions and print results without firing or saving state
-python3 stock_alerts.py -s AAPL --when "rsi14 < 30" --dry-run
+stock-alerts -s AAPL --when "rsi14 < 30" --dry-run
 ```
 
 ---
@@ -160,10 +160,10 @@ crontab -e
 
 ```
 # Collect data every 30 minutes, Mon-Fri, 09:00-17:00 local time
-*/30 9-17 * * 1-5  /usr/bin/python3 /path/to/stock_collector.py
+*/30 9-17 * * 1-5  /usr/bin/python3 /path/to/stock_toolkit/collector/
 
 # Check alerts every 30 minutes on the same schedule
-*/30 9-17 * * 1-5  /usr/bin/python3 /path/to/stock_alerts.py \
+*/30 9-17 * * 1-5  /usr/bin/python3 /path/to/stock_toolkit/alerts.py \
     -s AAPL MSFT TSLA NVDA \
     --when "rsi14 < 30" \
     --when "price > sma200" \
@@ -175,7 +175,7 @@ Or using the shell wrapper if you set it up:
 
 ```
 */30 9-17 * * 1-5  STOCK_DIR=/path/to/stock /home/you/bin/collect
-*/30 9-17 * * 1-5  /usr/bin/python3 /path/to/stock_alerts.py -s AAPL --when "rsi14 < 30" --notify email
+*/30 9-17 * * 1-5  /usr/bin/python3 /path/to/stock_toolkit/alerts.py -s AAPL --when "rsi14 < 30" --notify email
 ```
 
 ---
@@ -204,61 +204,61 @@ Or using the shell wrapper if you set it up:
 
 ```bash
 # Single symbol, single condition
-python3 stock_alerts.py -s AAPL --when "rsi14 < 30"
+stock-alerts -s AAPL --when "rsi14 < 30"
 
 # Multiple symbols, multiple conditions
-python3 stock_alerts.py -s AAPL MSFT TSLA NVDA \
+stock-alerts -s AAPL MSFT TSLA NVDA \
     --when "rsi14 < 30" \
     --when "price > sma200" \
     --when "bbands_squeeze"
 
 # Combined condition: oversold AND still in uptrend
-python3 stock_alerts.py -s AAPL \
+stock-alerts -s AAPL \
     --when "rsi14 < 30 and price > sma200"
 
 # Big daily move alert
-python3 stock_alerts.py -s AAPL MSFT GOOGL AMZN TSLA \
+stock-alerts -s AAPL MSFT GOOGL AMZN TSLA \
     --when "change_pct < -3" \
     --when "change_pct > 3" \
     --notify console email
 
 # Volume spike with price confirmation
-python3 stock_alerts.py -s AAPL \
+stock-alerts -s AAPL \
     --when "volume_spike and change_pct > 2"
 
 # Approaching 52-week high/low
-python3 stock_alerts.py -s AAPL MSFT \
+stock-alerts -s AAPL MSFT \
     --when "near_52w_high" \
     --when "near_52w_low"
 
 # MACD crossover
-python3 stock_alerts.py -s AAPL \
+stock-alerts -s AAPL \
     --when "macd > macd_signal and macd_hist > 0"
 
 # Bollinger Band squeeze — breakout likely
-python3 stock_alerts.py -s AAPL MSFT NVDA TSLA \
+stock-alerts -s AAPL MSFT NVDA TSLA \
     --when "bbands_squeeze" \
     --notify pushover
 
 # Test conditions without firing anything (dry run)
-python3 stock_alerts.py -s AAPL \
+stock-alerts -s AAPL \
     --when "rsi14 < 30" \
     --when "price > sma200" \
     --dry-run
 
 # Check current alert state
-python3 stock_alerts.py --status
+stock-alerts --status
 
 # Clear state and start fresh
-python3 stock_alerts.py --reset
+stock-alerts --reset
 
 # Send to multiple channels
-python3 stock_alerts.py -s AAPL \
+stock-alerts -s AAPL \
     --when "rsi14 < 30" \
     --notify console email pushover slack
 
 # Italian stocks work the same way
-python3 stock_alerts.py -s ENEL.MI CSMIB.MI \
+stock-alerts -s ENEL.MI CSMIB.MI \
     --when "rsi14 < 30" \
     --when "price < sma50"
 ```

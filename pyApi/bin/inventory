@@ -25,10 +25,5 @@ if ! "$PYTHON" -c "import sys; assert sys.version_info >= (3,10)" 2>/dev/null; t
     exit 1
 fi
 
-if [[ ! -f "$STOCK_DIR/stock_inventory.py" ]]; then
-    echo "inventory: stock_inventory.py not found in $STOCK_DIR" >&2
-    exit 1
-fi
-
 cd "$STOCK_DIR"
-exec "$PYTHON" stock_inventory.py "$@"
+exec "$PYTHON" -m stock_toolkit.inventory "$@"

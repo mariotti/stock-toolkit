@@ -35,11 +35,6 @@ if ! "$PYTHON" -c "import sys; assert sys.version_info >= (3,10)" 2>/dev/null; t
     exit 1
 fi
 
-if [[ ! -f "$STOCK_DIR/stock_collector.py" ]]; then
-    echo "collect: stock_collector.py not found in $STOCK_DIR" >&2
-    exit 1
-fi
-
 # ── run ───────────────────────────────────────────────────────────────────────
 
 # Raise the open-file-descriptor limit to avoid OSError on long collection runs.
@@ -47,4 +42,4 @@ fi
 ulimit -n 1024 2>/dev/null || true
 
 cd "$STOCK_DIR"
-exec "$PYTHON" stock_collector.py "$@"
+exec "$PYTHON" -m stock_toolkit.collector "$@"

@@ -25,10 +25,5 @@ if ! "$PYTHON" -c "import sys; assert sys.version_info >= (3,10)" 2>/dev/null; t
     exit 1
 fi
 
-if [[ ! -f "$STOCK_DIR/stock_score.py" ]]; then
-    echo "score: stock_score.py not found in $STOCK_DIR" >&2
-    exit 1
-fi
-
 cd "$STOCK_DIR"
-exec "$PYTHON" stock_score.py "$@"
+exec "$PYTHON" -m stock_toolkit.score "$@"

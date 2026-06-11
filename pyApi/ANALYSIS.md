@@ -1,6 +1,6 @@
 # Analysis tools reference
 
-This document covers every tool available in `stock_analysis.py` — what it
+This document covers every tool available in `stock_toolkit/analysis.py` — what it
 measures, when to use it, how to interpret the output, known limitations, and
 practical examples.
 
@@ -99,8 +99,8 @@ symbols this doesn't matter.
 
 **Example:**
 ```bash
-python3 stock_analysis.py -s AAPL MSFT GOOGL --analysis summary
-python3 stock_analysis.py -s AAPL --from 2022-01-01 --to 2022-12-31 --analysis summary
+stock-analyse -s AAPL MSFT GOOGL --analysis summary
+stock-analyse -s AAPL --from 2022-01-01 --to 2022-12-31 --analysis summary
 ```
 
 ---
@@ -157,9 +157,9 @@ interval band around the line.
 
 **Example:**
 ```bash
-python3 stock_analysis.py -s AAPL --analysis regression --plot
-python3 stock_analysis.py -s AAPL MSFT --from 2020-01-01 --analysis regression --plot
-python3 stock_analysis.py -s AAPL --from 2015-01-01 --granularity 1M --analysis regression --plot
+stock-analyse -s AAPL --analysis regression --plot
+stock-analyse -s AAPL MSFT --from 2020-01-01 --analysis regression --plot
+stock-analyse -s AAPL --from 2015-01-01 --granularity 1M --analysis regression --plot
 ```
 
 ---
@@ -219,9 +219,9 @@ Histogram of returns per symbol, with a vertical line at zero and at the mean.
 
 **Example:**
 ```bash
-python3 stock_analysis.py -s AAPL --analysis returns --plot
-python3 stock_analysis.py -s AAPL MSFT --granularity 1w --analysis returns --plot
-python3 stock_analysis.py -s TSLA --from 2020-01-01 --analysis returns --plot
+stock-analyse -s AAPL --analysis returns --plot
+stock-analyse -s AAPL MSFT --granularity 1w --analysis returns --plot
+stock-analyse -s TSLA --from 2020-01-01 --analysis returns --plot
 ```
 
 ---
@@ -280,9 +280,9 @@ e.g. `--window 12` for a 12-hour window on hourly bars.
 
 **Example:**
 ```bash
-python3 stock_analysis.py -s AAPL --analysis volatility --window 20 --plot
-python3 stock_analysis.py -s AAPL MSFT TSLA --analysis volatility --window 30 --plot
-python3 stock_analysis.py -s AAPL --interval 1h --analysis volatility --window 12 --plot
+stock-analyse -s AAPL --analysis volatility --window 20 --plot
+stock-analyse -s AAPL MSFT TSLA --analysis volatility --window 30 --plot
+stock-analyse -s AAPL --interval 1h --analysis volatility --window 12 --plot
 ```
 
 ---
@@ -339,9 +339,9 @@ A symmetric matrix printed to the console, and a colour-coded heatmap with
 
 **Example:**
 ```bash
-python3 stock_analysis.py -s AAPL MSFT GOOGL AMZN TSLA NVDA --analysis correlation --plot
-python3 stock_analysis.py -s AAPL MSFT --from 2020-01-01 --to 2022-12-31 --analysis correlation --plot
-python3 stock_analysis.py -s AAPL MSFT --from 2023-01-01 --analysis correlation --plot
+stock-analyse -s AAPL MSFT GOOGL AMZN TSLA NVDA --analysis correlation --plot
+stock-analyse -s AAPL MSFT --from 2020-01-01 --to 2022-12-31 --analysis correlation --plot
+stock-analyse -s AAPL MSFT --from 2023-01-01 --analysis correlation --plot
 # compare the two periods above to check if correlation has changed
 ```
 
@@ -397,9 +397,9 @@ chart with SMA lines overlaid.
 
 **Example:**
 ```bash
-python3 stock_analysis.py -s AAPL --analysis sma --sma-windows 20 50 200 --plot
-python3 stock_analysis.py -s AAPL --from 2023-01-01 --analysis sma --plot
-python3 stock_analysis.py -s AAPL --interval 1h --analysis sma --sma-windows 6 12 24 --plot
+stock-analyse -s AAPL --analysis sma --sma-windows 20 50 200 --plot
+stock-analyse -s AAPL --from 2023-01-01 --analysis sma --plot
+stock-analyse -s AAPL --interval 1h --analysis sma --sma-windows 6 12 24 --plot
 ```
 
 ---
@@ -463,9 +463,9 @@ was for a buy-and-hold investor.
 
 **Example:**
 ```bash
-python3 stock_analysis.py -s AAPL --analysis drawdown --plot
-python3 stock_analysis.py -s AAPL MSFT TSLA --from 2020-01-01 --analysis drawdown --plot
-python3 stock_analysis.py -s TSLA --analysis summary drawdown  # return + worst case together
+stock-analyse -s AAPL --analysis drawdown --plot
+stock-analyse -s AAPL MSFT TSLA --from 2020-01-01 --analysis drawdown --plot
+stock-analyse -s TSLA --analysis summary drawdown  # return + worst case together
 ```
 
 ---
@@ -528,9 +528,9 @@ for the classic interpretation.
 
 **Example:**
 ```bash
-python3 stock_analysis.py -s AAPL --analysis rsi --window 14 --plot
-python3 stock_analysis.py -s AAPL TSLA --from 2023-01-01 --analysis rsi --window 14 --plot
-python3 stock_analysis.py -s AAPL --interval 1h --analysis rsi --window 14 --plot
+stock-analyse -s AAPL --analysis rsi --window 14 --plot
+stock-analyse -s AAPL TSLA --from 2023-01-01 --analysis rsi --window 14 --plot
+stock-analyse -s AAPL --interval 1h --analysis rsi --window 14 --plot
 ```
 
 ---
@@ -586,9 +586,9 @@ Price chart with the three band lines and a shaded fill between upper and lower.
 
 **Example:**
 ```bash
-python3 stock_analysis.py -s AAPL --analysis bbands --window 20 --plot
-python3 stock_analysis.py -s AAPL --analysis rsi bbands --window 14 --plot  # combine
-python3 stock_analysis.py -s AAPL --interval 1h --analysis bbands --window 20 --plot
+stock-analyse -s AAPL --analysis bbands --window 20 --plot
+stock-analyse -s AAPL --analysis rsi bbands --window 14 --plot  # combine
+stock-analyse -s AAPL --interval 1h --analysis bbands --window 20 --plot
 ```
 
 ---
@@ -659,9 +659,9 @@ paths plus a terminal price histogram.
 
 **Example:**
 ```bash
-python3 stock_analysis.py -s AAPL --analysis montecarlo --plot
-python3 stock_analysis.py -s AAPL --analysis montecarlo --mc-paths 5000 --mc-horizon 63 --plot
-python3 stock_analysis.py -s AAPL --from 2020-01-01 --analysis summary montecarlo --plot
+stock-analyse -s AAPL --analysis montecarlo --plot
+stock-analyse -s AAPL --analysis montecarlo --mc-paths 5000 --mc-horizon 63 --plot
+stock-analyse -s AAPL --from 2020-01-01 --analysis summary montecarlo --plot
 ```
 
 ---
@@ -720,9 +720,9 @@ A slope of exactly 0.5 is the random walk baseline.
 
 **Example:**
 ```bash
-python3 stock_analysis.py -s AAPL --analysis hurst --plot
-python3 stock_analysis.py -s AAPL MSFT TSLA NVDA --analysis hurst --plot
-python3 stock_analysis.py -s AAPL --from 2015-01-01 --analysis hurst regression --plot
+stock-analyse -s AAPL --analysis hurst --plot
+stock-analyse -s AAPL MSFT TSLA NVDA --analysis hurst --plot
+stock-analyse -s AAPL --from 2015-01-01 --analysis hurst regression --plot
 ```
 
 ---
@@ -733,14 +733,14 @@ Most analyses are more informative together than alone. Some useful combinations
 
 **Complete risk snapshot:**
 ```bash
-python3 stock_analysis.py -s AAPL \
+stock-analyse -s AAPL \
     --analysis summary volatility drawdown \
     --window 20 --plot
 ```
 
 **Technical analysis dashboard:**
 ```bash
-python3 stock_analysis.py -s AAPL \
+stock-analyse -s AAPL \
     --analysis sma rsi bbands \
     --window 14 --sma-windows 20 50 200 \
     --plot
@@ -749,18 +749,18 @@ python3 stock_analysis.py -s AAPL \
 **Strategy selection workflow** — start with Hurst to pick the right tools:
 ```bash
 # 1. Check the regime
-python3 stock_analysis.py -s TSLA --analysis hurst
+stock-analyse -s TSLA --analysis hurst
 
 # If H > 0.55 (trending) → use these:
-python3 stock_analysis.py -s TSLA --analysis regression sma --plot
+stock-analyse -s TSLA --analysis regression sma --plot
 
 # If H < 0.45 (mean-reverting) → use these instead:
-python3 stock_analysis.py -s TSLA --analysis rsi bbands --window 14 --plot
+stock-analyse -s TSLA --analysis rsi bbands --window 14 --plot
 ```
 
 **Portfolio analysis:**
 ```bash
-python3 stock_analysis.py -s AAPL MSFT GOOGL AMZN TSLA \
+stock-analyse -s AAPL MSFT GOOGL AMZN TSLA \
     --analysis summary correlation drawdown \
     --from 2022-01-01 \
     --plot
@@ -768,7 +768,7 @@ python3 stock_analysis.py -s AAPL MSFT GOOGL AMZN TSLA \
 
 **Forward-looking:**
 ```bash
-python3 stock_analysis.py -s AAPL \
+stock-analyse -s AAPL \
     --from 2022-01-01 \
     --analysis returns hurst montecarlo \
     --mc-paths 5000 --mc-horizon 126 \
@@ -777,7 +777,7 @@ python3 stock_analysis.py -s AAPL \
 
 **Intraday session:**
 ```bash
-python3 stock_analysis.py -s AAPL \
+stock-analyse -s AAPL \
     --interval 1h \
     --analysis summary rsi bbands sma \
     --window 14 --sma-windows 6 12 24 \

@@ -1,0 +1,44 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "stock-toolkit"
+description = "Stock market data toolkit: collection, analysis, scoring, backtesting, alerting, and a Streamlit dashboard"
+readme = "README.md"
+requires-python = ">=3.10"
+dynamic = ["version"]
+dependencies = [
+    "requests>=2.31.0",
+    "yfinance>=0.2.40",
+    "pandas>=2.0.0",
+    "numpy>=1.24.0",
+    "scipy>=1.11.0",
+    "matplotlib>=3.7.0",
+    "streamlit>=1.30.0",
+    "plotly>=5.18.0",
+]
+
+[project.optional-dependencies]
+docs = ["pdoc>=14.0.0", "pylint>=3.0.0"]
+
+[project.scripts]
+stock-collect   = "stock_toolkit.collector.cli:main"
+stock-analyse   = "stock_toolkit.analysis:main"
+stock-score     = "stock_toolkit.score:main"
+stock-backtest  = "stock_toolkit.backtest:main"
+stock-alerts    = "stock_toolkit.alerts:main"
+stock-inventory = "stock_toolkit.inventory:main"
+stock-setup     = "stock_toolkit.setup_wizard:main"
+stock-ui        = "stock_toolkit.ui:main"
+
+[tool.setuptools]
+packages = [
+    "stock_toolkit",
+    "stock_toolkit.collector",
+    "stock_toolkit.collector.sources",
+    "stock_toolkit.ui",
+]
+
+[tool.setuptools.dynamic]
+version = { file = "VERSION" }
