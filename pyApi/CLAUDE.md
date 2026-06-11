@@ -20,8 +20,11 @@ stock-ui
 
 **Run tests (no external API calls, fully self-contained):**
 ```bash
-python3 tests/test_toolkit.py
-python3 -m pytest tests/test_toolkit.py -v --tb=short   # if pytest installed
+python3 -m unittest discover -s tests        # everything (what CI runs)
+python3 tests/test_toolkit.py                # core: collector/analysis/score/backtest/alerts/inventory
+python3 tests/test_ui.py                     # Streamlit dashboard via AppTest
+python3 tests/test_sources.py                # API fetchers against canned responses
+python3 tests/test_collector_units.py        # budgets, safe_get, historical orchestration
 ```
 
 **Run live API integration tests (requires valid API keys in config.env):**

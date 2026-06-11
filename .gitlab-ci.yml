@@ -25,4 +25,4 @@ test:
     - pip install -e pyApi
   script:
     - cd pyApi
-    - python tests/test_toolkit.py
+    - python -m unittest discover -s tests -v
