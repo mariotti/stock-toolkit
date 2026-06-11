@@ -14,7 +14,19 @@ alerts_err.log
 .alerts_state.json
 
 # ─── config — contains API keys ───────────────
-config.env
+# covers config.env and local backups (config.env_key, config.env_keys, …)
+config.env*
+
+# ─── shell history snapshots ──────────────────
+hist.*
+hists/
+
+# ─── runtime failure reports ──────────────────
+stock_failures*.csv
+
+# ─── packaged releases ────────────────────────
+stock-toolkit-*.tar.gz
+stock-toolkit-*.zip
 
 # ─── generated plot output ────────────────────
 gnuplot-data/

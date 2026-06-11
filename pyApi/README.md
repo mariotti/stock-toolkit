@@ -66,9 +66,11 @@ bash install.sh       # sets up everything, downloads initial data
 
 ```bash
 # 1. Install dependencies
-pip install requests yfinance pandas scipy matplotlib
+pip install -r requirements.txt
 
-# 2. Edit stock_collector.py — set your symbols and API keys (see below)
+# 2. Set your symbols and API keys in config.env (see below)
+#    — easiest via the interactive wizard:
+python3 stock_setup.py
 
 # 3. Collect today's data (yfinance works without any key)
 python3 stock_collector.py
@@ -85,12 +87,13 @@ python3 stock_analysis.py -s AAPL --analysis summary regression --plot
 ## Installation
 
 ```bash
-pip install requests yfinance pandas scipy matplotlib
+pip install -r requirements.txt
 ```
 
-All five packages are required. `scipy` is used by `regression` and statistical
-analyses. `matplotlib` is used by all `--plot` outputs. `yfinance` is the only
-data source that needs no API key.
+This installs the core packages (`requests`, `yfinance`, `pandas`, `numpy`,
+`scipy`, `matplotlib`) plus `streamlit`/`plotly` for the dashboard. `scipy` is
+used by `regression` and statistical analyses. `matplotlib` is used by all
+`--plot` outputs. `yfinance` is the only data source that needs no API key.
 
 ---
 

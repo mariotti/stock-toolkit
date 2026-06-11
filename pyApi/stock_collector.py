@@ -5,15 +5,15 @@ Collects stock market data from multiple free APIs and appends
 to a SQLite database by default, deduplicating via a UNIQUE constraint.
 Pass --csv to write to a legacy CSV file instead.
 
-Designed to be run via cron every 10 or 30 minutes:
-  */10 * * * * /usr/bin/python3 /path/to/stock_collector.py
-  */30 * * * * /usr/bin/python3 /path/to/stock_collector.py
+Designed to be run via cron in tiers (see crontab.demo), e.g.:
+  0 8  * * 1-5  /path/to/bin/collect --sources yfinance
+  0 23 * * 1-5  /path/to/bin/collect   # full EOD sweep
 
 Install dependencies:
-  pip install requests yfinance pandas
+  pip install -r requirements.txt
 
-API keys: fill in the CONFIG section below.
-Each API that is not configured (key left as "") will be skipped.
+API keys and symbols: set in config.env (run stock_setup.py to create it
+interactively). Each API without a key configured is skipped.
 """
 
 import os
@@ -22,6 +22,7 @@ import json
 import sqlite3
 import time
 import logging
+import logging.handlers
 import hashlib
 import argparse
 import requests
@@ -179,7 +180,9 @@ logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s  %(levelname)-8s  %(message)s",
     handlers=[
-        logging.FileHandler(LOG_PATH),
+        logging.handlers.RotatingFileHandler(
+            LOG_PATH, maxBytes=1_000_000, backupCount=3
+        ),
         logging.StreamHandler(),
     ],
 )
@@ -1908,10 +1911,11 @@ def main():
         choices=["yfinance","alphavantage","finnhub","polygon","fmp","twelvedata","marketstack"],
         help=(
             "Run only these data sources (default: all configured).\n"
-            "Useful for cron jobs targeting specific collection frequencies:\n"
-            "  --sources finnhub fmp          (every 30 min — real-time quotes)\n"
-            "  --sources yfinance twelvedata  (every hour  — hourly bars)\n"
-            "  --sources alphavantage polygon marketstack  (once/day — daily bars)"
+            "Useful for tiered cron scheduling (see crontab.demo):\n"
+            "  --sources yfinance           (08:00 — overnight/EU pre-market)\n"
+            "  --sources yfinance finnhub   (13:00 — midday quotes)\n"
+            "  --sources yfinance alphavantage polygon fmp twelvedata marketstack\n"
+            "                               (23:00 — full EOD sweep after US close)"
         )
     )
     parser.add_argument(
