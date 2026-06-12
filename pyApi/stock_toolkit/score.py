@@ -54,8 +54,9 @@ HORIZON_PROFILES = {
         "mc_bars":    5,
         "min_bars":   30,
         "ann_factor": 252,
-        "weights": {"sharpe":5,"calmar":5,"r2":5,"ann_trend":5,
-                    "rsi_entry":35,"pct_b_entry":35,"prob_gain":10},
+        "weights": {"sharpe":4,"calmar":4,"r2":4,"ann_trend":4,
+                    "rsi_entry":30,"pct_b_entry":30,"prob_gain":8,
+                    "momentum":8,"hurst":8},
     },
     "month": {
         "label":      "Next month (~21 trading days)",
@@ -63,8 +64,9 @@ HORIZON_PROFILES = {
         "mc_bars":    21,
         "min_bars":   60,
         "ann_factor": 252,
-        "weights": {"sharpe":10,"calmar":10,"r2":5,"ann_trend":10,
-                    "rsi_entry":25,"pct_b_entry":25,"prob_gain":15},
+        "weights": {"sharpe":8,"calmar":8,"r2":4,"ann_trend":8,
+                    "rsi_entry":20,"pct_b_entry":20,"prob_gain":12,
+                    "momentum":12,"hurst":8},
     },
     "quarter": {
         "label":      "Next quarter (~63 trading days)",
@@ -72,8 +74,9 @@ HORIZON_PROFILES = {
         "mc_bars":    63,
         "min_bars":   60,
         "ann_factor": 52,
-        "weights": {"sharpe":20,"calmar":20,"r2":10,"ann_trend":10,
-                    "rsi_entry":15,"pct_b_entry":15,"prob_gain":10},
+        "weights": {"sharpe":16,"calmar":16,"r2":8,"ann_trend":8,
+                    "rsi_entry":12,"pct_b_entry":12,"prob_gain":8,
+                    "momentum":14,"hurst":6},
     },
     "year": {
         "label":      "Next year (~252 trading days)",
@@ -81,8 +84,9 @@ HORIZON_PROFILES = {
         "mc_bars":    252,
         "min_bars":   100,
         "ann_factor": 52,
-        "weights": {"sharpe":25,"calmar":25,"r2":20,"ann_trend":15,
-                    "rsi_entry":5,"pct_b_entry":5,"prob_gain":5},
+        "weights": {"sharpe":20,"calmar":20,"r2":16,"ann_trend":12,
+                    "rsi_entry":4,"pct_b_entry":4,"prob_gain":4,
+                    "momentum":14,"hurst":6},
     },
     "life": {
         "label":      "Long-term / buy and hold (5+ years)",
@@ -90,8 +94,9 @@ HORIZON_PROFILES = {
         "mc_bars":    60,
         "min_bars":   120,
         "ann_factor": 12,
-        "weights": {"sharpe":30,"calmar":25,"r2":25,"ann_trend":15,
-                    "rsi_entry":3,"pct_b_entry":2,"prob_gain":0},
+        "weights": {"sharpe":26,"calmar":22,"r2":22,"ann_trend":12,
+                    "rsi_entry":2,"pct_b_entry":2,"prob_gain":0,
+                    "momentum":8,"hurst":6},
     },
 }
 
@@ -355,6 +360,50 @@ def step_montecarlo(df: pd.DataFrame, n_paths: int,
     }
 
 
+def step_momentum(df: pd.DataFrame) -> dict:
+    """Step 8 — price momentum on DAILY bars (not the resampled frame).
+
+    mom_12_1: return over the last ~12 months excluding the most recent
+    month (the classic cross-sectional momentum signal). Falls back to
+    available-history-minus-last-month when fewer than ~13 months of
+    bars exist (flagged with mom_12_1_partial).
+    mom_3m: simple 3-month (63 trading day) return.
+    """
+    close = df["close"].dropna().reset_index(drop=True)
+    n = len(close)
+    out = {}
+    if n >= 64:
+        out["mom_3m"] = round((close.iloc[-1] / close.iloc[-64] - 1) * 100, 1)
+    if n >= 274:
+        out["mom_12_1"] = round((close.iloc[-22] / close.iloc[-274] - 1) * 100, 1)
+    elif n >= 120:
+        out["mom_12_1"] = round((close.iloc[-22] / close.iloc[0] - 1) * 100, 1)
+        out["mom_12_1_partial"] = True
+    return out
+
+
+def step_hurst(df: pd.DataFrame) -> dict:
+    """Step 9 — Hurst exponent of DAILY log returns (trend persistence).
+
+    Computed on returns, not prices: R/S on a drifting price series
+    saturates near H=1 for anything uptrending and discriminates nothing.
+    On returns, H≈0.5 is a random walk, H>0.5 persistent (trends carry
+    on), H<0.5 anti-persistent (mean-reverting).
+    """
+    from stock_toolkit.analysis import hurst_exponent
+
+    price = df["close"].dropna().values.astype(float)
+    if len(price) < 100:
+        return {}
+    rets = np.diff(np.log(price))
+    h, _, _ = hurst_exponent(rets)
+    if np.isnan(h):
+        return {}
+    regime = ("trending" if h > 0.55
+              else "mean-reverting" if h < 0.45 else "random walk")
+    return {"hurst": round(float(h), 3), "regime": regime}
+
+
 # ─────────────────────────────────────────────
 #  SCORING ENGINE
 # ─────────────────────────────────────────────
@@ -460,6 +509,35 @@ def score_symbol(sym: dict, weights: dict | None = None,
         total += pts
         notes.append(f"prob_gain={prob:.1f}% → {pts:.1f}/{WEIGHTS['prob_gain']}")
 
+    # ── 8. Momentum (12-1 blended with 3m) ────────────────────────────────────
+    mom = sym.get("momentum", {})
+    m12 = mom.get("mom_12_1")
+    m3  = mom.get("mom_3m")
+    if (m12 is not None or m3 is not None) and w.get("momentum"):
+        def _norm(v, lo, hi):
+            return min(max((float(v) - lo) / (hi - lo), 0.0), 1.0)
+        parts = []
+        if m12 is not None:
+            parts.append((0.6, _norm(m12, -30.0, 60.0)))
+        if m3 is not None:
+            parts.append((0.4, _norm(m3, -15.0, 30.0)))
+        blend = sum(wt * v for wt, v in parts) / sum(wt for wt, _ in parts)
+        pts = blend * w["momentum"]
+        total += pts
+        label = " ".join(
+            ([f"12-1={m12:+.1f}%"] if m12 is not None else [])
+            + ([f"3m={m3:+.1f}%"] if m3 is not None else []))
+        notes.append(f"momentum {label} → {pts:.1f}/{w['momentum']}")
+
+    # ── 9. Hurst persistence (trend trustworthiness) ─────────────────────────
+    hurst = sym.get("hurst", {}).get("hurst")
+    if hurst is not None and w.get("hurst"):
+        # H 0.40 → 0 pts, 0.65 → full points; random walk lands mid-scale
+        pts = min(max((float(hurst) - 0.40) / 0.25, 0.0), 1.0) * w["hurst"]
+        total += pts
+        notes.append(f"hurst={hurst:.3f} ({sym['hurst'].get('regime','?')}) "
+                     f"→ {pts:.1f}/{w['hurst']}")
+
     # ── PENALTIES ─────────────────────────────────────────────────────────────
 
     n_bars = s.get("n_bars", 999)
@@ -550,6 +628,10 @@ examples:
                              "MC horizon is set automatically by --horizon.")
     parser.add_argument("--detail", action="store_true",
                         help="Show per-metric breakdown for each symbol")
+    parser.add_argument("--fundamentals", action="store_true",
+                        help="Fetch P/E and revenue growth via yfinance "
+                             "(network call per symbol) and apply a ±5 point "
+                             "valuation adjustment to the score")
     parser.add_argument("--json", action="store_true",
                         help="Output full results as JSON")
     args = parser.parse_args()
@@ -570,7 +652,8 @@ examples:
     print(f"Weights:  entry {h_w['rsi_entry']+h_w['pct_b_entry']}pts  "
           f"trend {h_w['r2']+h_w['ann_trend']}pts  "
           f"risk-adj {h_w['sharpe']+h_w['calmar']}pts  "
-          f"MC {h_w['prob_gain']}pts")
+          f"MC {h_w['prob_gain']}pts  "
+          f"momentum {h_w['momentum']}pts  hurst {h_w['hurst']}pts")
     print(f"Scoring:  {len(symbols)} symbol(s)  "
           f"[{args.date_from or 'all'} → {args.date_to or 'now'}, "
           f"MC {args.mc_paths}p × {h_mc}b, gran={h_gran}]")
@@ -610,6 +693,8 @@ examples:
             "drawdown":   step_drawdown(df_r),
             "entry":      step_entry_timing(df_r),
             "montecarlo": step_montecarlo(df_r, args.mc_paths, h_mc),
+            "momentum":   step_momentum(df),   # daily bars, not resampled
+            "hurst":      step_hurst(df),      # daily bars, not resampled
         }
 
         score, notes = score_symbol(raw, weights=h_w, min_bars=h_minb)
@@ -619,6 +704,23 @@ examples:
 
     # clear progress line
     sys.stdout.write(" " * 40 + "\r")
+
+    # ── optional valuation adjustment (network: yfinance) ─────────────────────
+    if args.fundamentals and results:
+        from stock_toolkit.fundamentals import (
+            fetch_fundamentals, valuation_adjustment,
+        )
+        print("Fetching fundamentals via yfinance (P/E, revenue growth)…")
+        funda = fetch_fundamentals([r["symbol"] for r in results])
+        for r in results:
+            row = funda.get(r["symbol"])
+            if not row:
+                continue
+            delta, why = valuation_adjustment(row)
+            r["valuation"] = {**row, "adjustment": delta}
+            r["score"] = round(max(0.0, min(100.0, r["score"] + delta)), 1)
+            r["notes"].append(f"VALUATION: {why} → {delta:+.1f}")
+
     results.sort(key=lambda x: x["score"], reverse=True)
 
     if args.top:

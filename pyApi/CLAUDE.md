@@ -59,7 +59,7 @@ stock-setup
 
 **Phase 2 — Analysis (`stock_toolkit/analysis.py`, `stock_toolkit/score.py`, `stock_toolkit/backtest.py`)**
 - 11 analysis tools: summary, regression, returns, volatility, correlation, SMA, drawdown, RSI, Bollinger Bands, Monte Carlo, Hurst
-- 5-horizon scoring (week/month/quarter/year/life) with dynamic weight profiles; ranks symbols 0–100
+- 5-horizon scoring (week/month/quarter/year/life) with dynamic weight profiles; ranks symbols 0–100 across 9 components (incl. 12-1/3m momentum and returns-based Hurst persistence); optional `--fundamentals` valuation adjustment (±5 pts via yfinance)
 - 4 backtest strategies (RSI, SMA cross, Bollinger Bands, breakout) with commission modeling vs buy-and-hold benchmark
 - Source priority: alphavantage > fmp > yfinance > others; resampling from 1h → daily/weekly/monthly/quarterly
 - Multi-DB support: live `stock_data.db` + historical DBs in `./data/`

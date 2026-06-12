@@ -31,31 +31,9 @@ def get_prices(symbol, date_from, date_to):
 
 @st.cache_data(ttl=3600, show_spinner=False)
 def get_fundamentals(symbols: tuple) -> dict:
-    """Per-symbol valuation snapshot via yfinance (no API key needed).
-
-    Returns {symbol: {trailing_pe, forward_pe, revenue_growth,
-    earnings_growth}} — growth values are fractions (0.166 = +16.6% YoY).
-    Missing fields are None; symbols with no data at all are omitted.
-    """
-    try:
-        import yfinance as yf
-    except ImportError:
-        return {}
-    out = {}
-    for sym in symbols:
-        try:
-            info = yf.Ticker(sym).info or {}
-        except Exception:
-            continue
-        row = {
-            "trailing_pe":     info.get("trailingPE"),
-            "forward_pe":      info.get("forwardPE"),
-            "revenue_growth":  info.get("revenueGrowth"),
-            "earnings_growth": info.get("earningsGrowth"),
-        }
-        if any(v is not None for v in row.values()):
-            out[sym] = row
-    return out
+    """Cached wrapper around stock_toolkit.fundamentals.fetch_fundamentals."""
+    from stock_toolkit.fundamentals import fetch_fundamentals
+    return fetch_fundamentals(symbols)
 
 
 def score_color(score):

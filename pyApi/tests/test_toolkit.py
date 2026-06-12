@@ -600,6 +600,117 @@ class TestScoreSteps(FixtureTestCase):
         self.assertAlmostEqual(score_good - score_bad, 20.0, places=0)
 
 
+class TestScorePredictiveFeatures(FixtureTestCase):
+    """Momentum, Hurst persistence, and the valuation adjustment."""
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        cls.ss = _load_module("score", cls.db, cls.tmp_dir)
+
+    @staticmethod
+    def _df(closes):
+        import pandas as pd
+        return pd.DataFrame({
+            "timestamp": pd.date_range("2024-01-01", periods=len(closes),
+                                       freq="D", tz="UTC"),
+            "close": closes,
+        })
+
+    # ── momentum ──────────────────────────────────────────────────────────────
+
+    def test_momentum_positive_for_rising_series(self):
+        closes = [100 * 1.002 ** i for i in range(300)]
+        mom = self.ss.step_momentum(self._df(closes))
+        self.assertGreater(mom["mom_3m"], 0)
+        self.assertGreater(mom["mom_12_1"], 0)
+        self.assertNotIn("mom_12_1_partial", mom)
+
+    def test_momentum_partial_flag_on_short_history(self):
+        closes = [100 * 1.002 ** i for i in range(150)]
+        mom = self.ss.step_momentum(self._df(closes))
+        self.assertTrue(mom.get("mom_12_1_partial"))
+
+    def test_momentum_empty_when_too_short(self):
+        self.assertEqual(self.ss.step_momentum(self._df([100.0] * 30)), {})
+
+    def test_momentum_excludes_last_month(self):
+        # flat for a year, then a crash in the final 21 days:
+        # 12-1 must NOT see the crash (skips the most recent month)
+        closes = [100.0] * 280 + [50.0] * 21
+        mom = self.ss.step_momentum(self._df(closes))
+        self.assertAlmostEqual(mom["mom_12_1"], 0.0, places=1)
+        self.assertLess(mom["mom_3m"], 0)
+
+    # ── hurst ────────────────────────────────────────────────────────────────
+
+    def test_hurst_high_for_persistent_returns(self):
+        import numpy as np
+        rng = np.random.default_rng(7)
+        # strongly autocorrelated returns → persistent → H > 0.5
+        noise = rng.standard_normal(500)
+        rets  = np.convolve(noise, np.ones(10) / 10, mode="same") * 0.01
+        closes = 100 * np.exp(np.cumsum(rets))
+        out = self.ss.step_hurst(self._df(closes))
+        self.assertGreater(out["hurst"], 0.55)
+        self.assertEqual(out["regime"], "trending")
+
+    def test_hurst_low_for_antipersistent_returns(self):
+        # strictly alternating +1% / −1% returns → mean-reverting
+        closes, p = [], 100.0
+        for i in range(400):
+            p *= 1.01 if i % 2 == 0 else 0.99
+            closes.append(p)
+        out = self.ss.step_hurst(self._df(closes))
+        self.assertLess(out["hurst"], 0.45)
+        self.assertEqual(out["regime"], "mean-reverting")
+
+    def test_hurst_empty_when_too_short(self):
+        self.assertEqual(self.ss.step_hurst(self._df([100.0] * 50)), {})
+
+    # ── weights and scoring integration ──────────────────────────────────────
+
+    def test_all_horizon_weights_sum_to_100(self):
+        for horizon, profile in self.ss.HORIZON_PROFILES.items():
+            self.assertEqual(sum(profile["weights"].values()), 100, horizon)
+
+    def test_momentum_and_hurst_raise_score(self):
+        raw = {
+            "symbol":  "X",
+            "summary": {"sharpe": 1.0, "ann_vol": 20.0, "n_bars": 200},
+            "regression": {}, "drawdown": {}, "entry": {}, "montecarlo": {},
+        }
+        base, _ = self.ss.score_symbol(raw)
+        raw2 = dict(raw)
+        raw2["momentum"] = {"mom_12_1": 40.0, "mom_3m": 15.0}
+        raw2["hurst"]    = {"hurst": 0.62, "regime": "trending"}
+        boosted, notes = self.ss.score_symbol(raw2)
+        self.assertGreater(boosted, base)
+        self.assertTrue(any("momentum" in n for n in notes))
+        self.assertTrue(any("hurst" in n for n in notes))
+
+    # ── valuation adjustment ──────────────────────────────────────────────────
+
+    def test_valuation_rewards_cheap_growth(self):
+        from stock_toolkit.fundamentals import valuation_adjustment
+        delta, why = valuation_adjustment(
+            {"trailing_pe": 20.0, "forward_pe": 12.0, "revenue_growth": 0.15})
+        self.assertEqual(delta, 5.0)   # +2 cheap fwd, +1 fwd<trailing, +2 growth
+        self.assertIn("revenue", why)
+
+    def test_valuation_penalizes_rich_shrinking(self):
+        from stock_toolkit.fundamentals import valuation_adjustment
+        delta, _ = valuation_adjustment(
+            {"trailing_pe": 30.0, "forward_pe": 55.0, "revenue_growth": -0.05})
+        self.assertEqual(delta, -4.0)  # −2 rich fwd, −2 shrinking revenue
+
+    def test_valuation_no_data(self):
+        from stock_toolkit.fundamentals import valuation_adjustment
+        delta, why = valuation_adjustment({})
+        self.assertEqual(delta, 0.0)
+        self.assertEqual(why, "no valuation data")
+
+
 # ─────────────────────────────────────────────────────────────
 #  3. BACKTEST — signals + engine
 # ─────────────────────────────────────────────────────────────

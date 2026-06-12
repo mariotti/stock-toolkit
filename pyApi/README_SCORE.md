@@ -51,7 +51,7 @@ Every symbol is evaluated across seven components, each worth a fixed number
 of points. The total always sums to 100. A penalty system can reduce the
 score below the raw component total.
 
-### The seven components
+### The nine components
 
 | Component | What it measures | Source step |
 |---|---|---|
@@ -62,6 +62,8 @@ score below the raw component total.
 | RSI entry | Is the current RSI a good entry point? | Step 5 RSI |
 | %B entry | Where is price in the Bollinger Band? | Step 5 BBands |
 | Prob(gain) | Monte Carlo probability of finishing above current price | Step 7 Monte Carlo |
+| Momentum | 12-1 month and 3-month price momentum (daily bars) | Step 8 momentum |
+| Hurst persistence | Do this symbol's return trends persist or mean-revert? | Step 9 Hurst |
 
 ### Component scoring logic
 
@@ -103,6 +105,40 @@ precedes a significant move.
 
 **Prob(gain)** — direct: 89% probability of gain earns 89% of the weight.
 
+**Momentum** — the classic cross-sectional predictor. The 12-1 return
+(last ~12 months excluding the most recent month, so short-term reversal
+doesn't pollute it) is scaled linearly from −30% → 0 points to +60% →
+full points and blended 60/40 with the 3-month return (−15% → +30%
+scale). With under ~13 months of history the 12-1 window falls back to
+available-history-minus-last-month and is flagged `partial` in the
+detail output.
+
+**Hurst persistence** — the Hurst exponent of daily *log returns*
+(computed on returns, not prices — price-level R/S saturates near 1 for
+anything uptrending). H=0.5 is a random walk; above it, moves tend to
+continue; below it, they tend to reverse. Scaled linearly from H=0.40
+(0 points) to H=0.65 (full points), so a random-walk symbol earns 40%
+of the weight and a strongly trending one earns all of it. This
+effectively weights the trend components by how trustworthy trends are
+for that particular symbol.
+
+### Optional: valuation adjustment (`--fundamentals`)
+
+`stock-score --fundamentals` fetches a per-symbol valuation snapshot via
+yfinance (network call, no API key) and applies a transparent adjustment
+of at most ±5 points after the 100-point score:
+
+| Signal | Adjustment |
+|---|---|
+| Forward P/E below 15 | +2 |
+| Forward P/E above 40 | −2 |
+| Forward P/E below trailing P/E (earnings expected to grow) | +1 |
+| Revenue growth above +10% YoY | +2 |
+| Revenue shrinking (negative YoY) | −2 |
+
+The adjustment and its reasons appear in the `--detail` notes as a
+`VALUATION:` line. Symbols with no fundamentals data are left untouched.
+
 ### Penalties
 
 Penalties are subtracted from the raw score and can push it below zero
@@ -141,15 +177,15 @@ The key insight: **entry timing dominates for short horizons; trend quality
 and risk dominate for long horizons.**
 
 ```
-                entry timing    trend quality    risk-adjusted    MC prob
-                (RSI + %B)      (R² + trend)     (Sharpe+Calmar)
-──────────────────────────────────────────────────────────────────────────
-week             70 pts           10 pts            10 pts         10 pts
-month            50 pts           15 pts            20 pts         15 pts
-quarter          30 pts           20 pts            40 pts         10 pts
-year             10 pts           35 pts            50 pts          5 pts
-life              5 pts           40 pts            55 pts          0 pts
-──────────────────────────────────────────────────────────────────────────
+            entry timing   trend quality   risk-adjusted   MC prob   momentum   hurst
+            (RSI + %B)     (R² + trend)    (Sharpe+Calmar)
+──────────────────────────────────────────────────────────────────────────────────────
+week           60 pts          8 pts           8 pts         8 pts      8 pts    8 pts
+month          40 pts         12 pts          16 pts        12 pts     12 pts    8 pts
+quarter        24 pts         16 pts          32 pts         8 pts     14 pts    6 pts
+year            8 pts         28 pts          40 pts         4 pts     14 pts    6 pts
+life            4 pts         34 pts          48 pts         0 pts      8 pts    6 pts
+──────────────────────────────────────────────────────────────────────────────────────
 ```
 
 **Why entry timing goes to zero for `life`:**
@@ -163,7 +199,13 @@ bars says almost nothing useful about a decade-long holding.
 **Why entry timing dominates for `week`:**
 Over 5 trading days, trend quality is largely irrelevant. The return is
 dominated by whether you bought at an oversold extreme vs an overbought
-peak. The whole 70 points goes to RSI and %B.
+peak. The bulk of the points (60) goes to RSI and %B.
+
+**Why momentum peaks at quarter/year:**
+The 12-1 momentum effect is documented at 3–12 month holding periods —
+it gets its largest weight (14 pts) for those horizons, less for `week`
+(too short for momentum to play out) and `life` (momentum decays and
+eventually reverses at multi-year horizons).
 
 **Granularity by horizon:**
 

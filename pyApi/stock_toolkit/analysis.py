@@ -993,47 +993,53 @@ def analysis_montecarlo(df: pd.DataFrame, field: str, n_paths: int,
 #  ANALYSIS — Hurst exponent
 # ─────────────────────────────────────────────
 
-def analysis_hurst(df: pd.DataFrame, field: str, plot: bool):
+def hurst_exponent(ts: np.ndarray, min_lag: int = 10) -> tuple[float, np.ndarray, np.ndarray]:
     """
-    Hurst exponent via R/S analysis.
+    Hurst exponent via R/S analysis. Returns (H, lags, R/S values);
+    H is NaN when the series is too short to fit.
       H < 0.5  → mean-reverting (anti-persistent)
       H ≈ 0.5  → random walk (no memory)
       H > 0.5  → trending (persistent)
+    """
+    n      = len(ts)
+    lags   = np.unique(np.logspace(np.log10(min_lag),
+                                    np.log10(n // 2), 20).astype(int))
+    rs_vals = []
+    for lag in lags:
+        segments = n // lag
+        if segments < 2:
+            continue
+        rs_list = []
+        for s in range(segments):
+            seg    = ts[s * lag : (s + 1) * lag].astype(float)
+            mean   = seg.mean()
+            dev    = np.cumsum(seg - mean)
+            r      = dev.max() - dev.min()
+            std_s  = seg.std(ddof=1)
+            if std_s > 0:
+                rs_list.append(r / std_s)
+        if rs_list:
+            rs_vals.append((lag, np.mean(rs_list)))
 
+    if len(rs_vals) < 3:
+        return float("nan"), np.array([]), np.array([])
+
+    lags_fit = np.array([x[0] for x in rs_vals])
+    rs_fit   = np.array([x[1] for x in rs_vals])
+    log_l    = np.log(lags_fit)
+    log_rs   = np.log(rs_fit)
+    h, _     = np.polyfit(log_l, log_rs, 1)
+    return h, lags_fit, rs_fit
+
+
+def analysis_hurst(df: pd.DataFrame, field: str, plot: bool):
+    """
+    Hurst exponent via R/S analysis (see hurst_exponent).
     Uses lags from 10 to N/2 to fit log(R/S) ~ H × log(n).
     """
     _sep("HURST EXPONENT")
 
-    def _hurst(ts: np.ndarray, min_lag: int = 10) -> tuple[float, np.ndarray, np.ndarray]:
-        n      = len(ts)
-        lags   = np.unique(np.logspace(np.log10(min_lag),
-                                        np.log10(n // 2), 20).astype(int))
-        rs_vals = []
-        for lag in lags:
-            segments = n // lag
-            if segments < 2:
-                continue
-            rs_list = []
-            for s in range(segments):
-                seg    = ts[s * lag : (s + 1) * lag].astype(float)
-                mean   = seg.mean()
-                dev    = np.cumsum(seg - mean)
-                r      = dev.max() - dev.min()
-                std_s  = seg.std(ddof=1)
-                if std_s > 0:
-                    rs_list.append(r / std_s)
-            if rs_list:
-                rs_vals.append((lag, np.mean(rs_list)))
-
-        if len(rs_vals) < 3:
-            return float("nan"), np.array([]), np.array([])
-
-        lags_fit = np.array([x[0] for x in rs_vals])
-        rs_fit   = np.array([x[1] for x in rs_vals])
-        log_l    = np.log(lags_fit)
-        log_rs   = np.log(rs_fit)
-        h, _     = np.polyfit(log_l, log_rs, 1)
-        return h, lags_fit, rs_fit
+    _hurst = hurst_exponent
 
     rows = []
     plot_data = {}
