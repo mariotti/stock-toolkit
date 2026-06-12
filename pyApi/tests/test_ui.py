@@ -103,6 +103,98 @@ class TestSidebarInteraction(unittest.TestCase):
         self.assertTrue(at.info, "expected the 'select at least one symbol' hint")
 
 
+def click_button(at, label_part):
+    """Click the first button whose label contains label_part, then rerun."""
+    for btn in at.button:
+        if label_part in btn.label:
+            btn.click()
+            at.run()
+            return at
+    raise AssertionError(
+        f"no button matching {label_part!r}; "
+        f"have: {[b.label for b in at.button]}")
+
+
+class TestScoreInteraction(unittest.TestCase):
+    """Clicking 'Run scoring' computes and renders ranked results."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.at = click_button(run_app(), "Run scoring")
+
+    def test_no_exceptions(self):
+        self.assertEqual([e.value for e in self.at.exception], [])
+
+    def test_results_stored_and_rendered(self):
+        results = self.at.session_state["score_results"]
+        self.assertTrue(results, "expected non-empty score results")
+        scored = {r["symbol"] for r in results}
+        self.assertIn("AAPL", scored)
+
+
+class TestBacktestInteraction(unittest.TestCase):
+    """Clicking 'Run backtest' runs the default strategy on the first symbol."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.at = click_button(run_app(), "Run backtest")
+
+    def test_no_exceptions(self):
+        self.assertEqual([e.value for e in self.at.exception], [])
+
+    def test_backtest_state_populated(self):
+        self.assertIn("bt_df", self.at.session_state)
+        self.assertIn("bt_label", self.at.session_state)
+
+
+class TestAnalysisInteraction(unittest.TestCase):
+    """Changing the analysis symbol/sliders re-renders without errors."""
+
+    def test_slider_change_reruns_clean(self):
+        at = run_app()
+        rsi = [s for s in at.slider if s.label == "RSI window"]
+        self.assertTrue(rsi, "RSI window slider not found")
+        rsi[0].set_value(21)
+        at.run()
+        self.assertEqual([e.value for e in at.exception], [])
+
+
+class TestBriefingCacheBreakpoints(unittest.TestCase):
+    """Prompt-caching markers land on the first and last message only."""
+
+    def test_first_and_last_marked(self):
+        from stock_toolkit.ui.tabs.briefing import _with_cache_breakpoints
+
+        msgs = [
+            {"role": "user", "content": "big market context"},
+            {"role": "assistant", "content": "summary"},
+            {"role": "user", "content": "follow-up question"},
+        ]
+        out = _with_cache_breakpoints(msgs)
+        self.assertEqual(out[0]["content"][0]["cache_control"],
+                         {"type": "ephemeral"})
+        self.assertEqual(out[0]["content"][0]["text"], "big market context")
+        self.assertEqual(out[1]["content"], "summary")        # untouched
+        self.assertEqual(out[2]["content"][0]["cache_control"],
+                         {"type": "ephemeral"})
+        self.assertEqual(msgs[0]["content"], "big market context",
+                         "input list must not be mutated")
+
+    def test_single_message_marked_once(self):
+        from stock_toolkit.ui.tabs.briefing import _with_cache_breakpoints
+
+        out = _with_cache_breakpoints([{"role": "user", "content": "hello"}])
+        self.assertEqual(len(out), 1)
+        self.assertEqual(out[0]["content"][0]["cache_control"],
+                         {"type": "ephemeral"})
+
+    def test_block_content_passes_through(self):
+        from stock_toolkit.ui.tabs.briefing import _with_cache_breakpoints
+
+        msgs = [{"role": "user", "content": [{"type": "text", "text": "x"}]}]
+        self.assertEqual(_with_cache_breakpoints(msgs), msgs)
+
+
 class TestEmptyDatabase(unittest.TestCase):
     """With no DB at all the app warns instead of hanging.
 

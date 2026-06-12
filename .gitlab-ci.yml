@@ -4,6 +4,8 @@ stages:
 lint:
   stage: test
   image: python:3.12-slim
+  rules:
+    - if: $CI_PIPELINE_SOURCE != "schedule"
   before_script:
     - pip install "ruff==0.15.*"
   script:
@@ -12,6 +14,8 @@ lint:
 test:
   stage: test
   image: python:3.12-slim
+  rules:
+    - if: $CI_PIPELINE_SOURCE != "schedule"
   variables:
     PIP_CACHE_DIR: "$CI_PROJECT_DIR/.cache/pip"
     # headless matplotlib for --plot code paths exercised by tests
@@ -29,3 +33,21 @@ test:
     - coverage report
   # surfaces the percentage on the pipeline/MR (parsed from `coverage report`)
   coverage: '/TOTAL.*\s(\d+%)/'
+
+# Weekly scheduled run with NO pip cache: catches breakage from fresh
+# releases of dependencies (yfinance in particular is an unofficial
+# scraper that can break without notice).
+test-latest-deps:
+  stage: test
+  image: python:3.12-slim
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "schedule"
+  variables:
+    MPLBACKEND: Agg
+  before_script:
+    - python -m pip install --upgrade pip
+    - pip install -e pyApi
+  script:
+    - pip list | grep -iE "yfinance|pandas|numpy|scipy|matplotlib|streamlit|plotly|requests"
+    - cd pyApi
+    - python -m unittest discover -s tests -v

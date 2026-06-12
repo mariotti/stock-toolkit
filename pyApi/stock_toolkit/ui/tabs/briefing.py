@@ -11,6 +11,33 @@ from stock_toolkit.ui.helpers import (
 )
 
 
+def _with_cache_breakpoints(messages: list) -> list:
+    """Add prompt-caching breakpoints to a string-content message list.
+
+    Two `cache_control` markers (Anthropic prompt caching, prefix-matched):
+      - first message — the large market-data context, stable for the whole
+        conversation, so system + context are cached once per briefing
+      - last message — each turn extends the cached prefix incrementally
+
+    Marked messages get block-form content; the rest stay as plain strings.
+    """
+    out = []
+    last = len(messages) - 1
+    for i, msg in enumerate(messages):
+        if i in (0, last) and isinstance(msg.get("content"), str):
+            out.append({
+                "role": msg["role"],
+                "content": [{
+                    "type": "text",
+                    "text": msg["content"],
+                    "cache_control": {"type": "ephemeral"},
+                }],
+            })
+        else:
+            out.append(msg)
+    return out
+
+
 def render(selected_symbols, date_from_str, date_to_str):
 
     # ── helpers ───────────────────────────────────────────────────────────────
@@ -95,7 +122,7 @@ def render(selected_symbols, date_from_str, date_to_str):
                     "model":      "claude-sonnet-4-6",
                     "max_tokens": 1500,
                     "system":     system,
-                    "messages":   messages,
+                    "messages":   _with_cache_breakpoints(messages),
                 },
                 timeout=30,
             )
