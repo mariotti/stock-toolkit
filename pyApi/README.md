@@ -219,7 +219,7 @@ MASSIVE_KEY=
 FMP_KEY=
 TWELVEDATA_KEY=
 MARKETSTACK_KEY=
-ANTHROPIC_KEY=           # for the Briefing tab in the UI
+ANTHROPIC_API_KEY=       # for the Briefing tab in the UI
 
 # Paid tier flags
 FINNHUB_PAID=false

@@ -98,16 +98,18 @@ def render(selected_symbols, date_from_str, date_to_str):
     def _call_claude(messages: list, system: str) -> str:
         """Call the Claude API and return the text response."""
         import os
-        # Key resolution: config.env ANTHROPIC_KEY → env var ANTHROPIC_API_KEY
+        # Key resolution: config.env ANTHROPIC_API_KEY (or legacy
+        # ANTHROPIC_KEY) → env var ANTHROPIC_API_KEY
         api_key = (
-            _cfg.get("ANTHROPIC_KEY", "").strip()     # config.env
-            or os.environ.get("ANTHROPIC_API_KEY", "") # environment variable
+            _cfg.get("ANTHROPIC_API_KEY", "").strip()   # config.env
+            or _cfg.get("ANTHROPIC_KEY", "").strip()    # config.env (legacy name)
+            or os.environ.get("ANTHROPIC_API_KEY", "")  # environment variable
         )
         if not api_key:
             return (
                 "⚠️  No Claude API key found.\n\n"
                 "Add one of:\n"
-                "  • `ANTHROPIC_KEY=sk-ant-...` in config.env\n"
+                "  • `ANTHROPIC_API_KEY=sk-ant-...` in config.env\n"
                 "  • `export ANTHROPIC_API_KEY=sk-ant-...` in your shell before starting Streamlit"
             )
         try:

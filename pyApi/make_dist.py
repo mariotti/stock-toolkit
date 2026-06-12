@@ -247,6 +247,7 @@ POLYGON_KEY=                    # https://polygon.io/dashboard/signup
 FMP_KEY=                        # https://financialmodelingprep.com/developer/docs
 TWELVEDATA_KEY=                 # https://twelvedata.com/register
 MARKETSTACK_KEY=                # https://marketstack.com/signup/free
+ANTHROPIC_API_KEY=              # https://console.anthropic.com — Briefing tab (Claude)
 
 
 # ── paid tier flags ───────────────────────────────────────────────────────────

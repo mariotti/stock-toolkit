@@ -190,7 +190,7 @@ def run_wizard(non_interactive: bool = False) -> dict:
         ("MARKETSTACK_KEY",  "Marketstack key",
          "https://marketstack.com/signup",
          "100 calls/month free — EOD bars including EU"),
-        ("ANTHROPIC_KEY",    "Anthropic key (for Briefing tab)",
+        ("ANTHROPIC_API_KEY", "Anthropic key (for Briefing tab)",
          "https://console.anthropic.com/",
          "Pay-as-you-go — ~$0.01 per briefing on Sonnet"),
     ]
