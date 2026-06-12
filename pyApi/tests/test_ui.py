@@ -24,11 +24,28 @@ sys.path.insert(0, str(SCRIPT_DIR))
 # Point the toolkit at a temp data dir BEFORE anything imports stock_toolkit:
 # common.BASE_DIR is resolved from $STOCK_DIR at import time.
 _tmp = tempfile.TemporaryDirectory()
-os.environ["STOCK_DIR"] = _tmp.name
+FIXTURE_DIR = pathlib.Path(_tmp.name)
+os.environ["STOCK_DIR"] = str(FIXTURE_DIR)
 
 from test_toolkit import SYMBOLS, make_fixture_db  # noqa: E402
 
-make_fixture_db(pathlib.Path(_tmp.name))   # writes <tmp>/stock_data.db
+make_fixture_db(FIXTURE_DIR)   # writes <tmp>/stock_data.db
+
+# Under `unittest discover`, sibling test modules import stock_toolkit
+# alphabetically BEFORE this module sets $STOCK_DIR, freezing the path
+# constants to the (possibly DB-less) working directory. Rebind them on the
+# already-imported core modules so the dashboard always reads the fixture.
+import stock_toolkit.alerts as _sal      # noqa: E402
+import stock_toolkit.analysis as _sa     # noqa: E402
+import stock_toolkit.backtest as _sb     # noqa: E402
+import stock_toolkit.common as _common   # noqa: E402
+import stock_toolkit.score as _ss        # noqa: E402
+
+for _mod in (_common, _ss, _sa, _sb, _sal):
+    _mod.LIVE_DB  = FIXTURE_DIR / "stock_data.db"
+    _mod.HIST_DIR = FIXTURE_DIR / "data"
+_common.CONFIG_PATH = FIXTURE_DIR / "config.env"
+_sal.STATE_PATH     = FIXTURE_DIR / ".alerts_state.json"
 
 from streamlit.testing.v1 import AppTest  # noqa: E402
 
@@ -36,7 +53,7 @@ APP_PATH = PKG_ROOT / "stock_toolkit" / "ui" / "app.py"
 
 
 def run_app(**session_state):
-    at = AppTest.from_file(str(APP_PATH), default_timeout=120)
+    at = AppTest.from_file(str(APP_PATH), default_timeout=60)
     for key, val in session_state.items():
         at.session_state[key] = val
     at.run()
