@@ -22,7 +22,10 @@ test:
       - .cache/pip
   before_script:
     - python -m pip install --upgrade pip
-    - pip install -e pyApi
+    - pip install -e pyApi coverage
   script:
     - cd pyApi
-    - python -m unittest discover -s tests -v
+    - coverage run --source=stock_toolkit -m unittest discover -s tests -v
+    - coverage report
+  # surfaces the percentage on the pipeline/MR (parsed from `coverage report`)
+  coverage: '/TOTAL.*\s(\d+%)/'

@@ -103,6 +103,31 @@ class TestSidebarInteraction(unittest.TestCase):
         self.assertTrue(at.info, "expected the 'select at least one symbol' hint")
 
 
+class TestEmptyDatabase(unittest.TestCase):
+    """With no DB at all the app warns instead of hanging.
+
+    Regression test: score.discover_dbs used to call sys.exit, which froze
+    the Streamlit script runner. It now raises NoDataError, which the UI
+    helpers catch, leaving an empty symbol list and a sidebar warning."""
+
+    def test_warning_shown(self):
+        from stock_toolkit.ui import helpers
+
+        empty_dir = FIXTURE_DIR / "empty"
+        empty_dir.mkdir(exist_ok=True)
+        old_live, old_hist = _ss.LIVE_DB, _ss.HIST_DIR
+        _ss.LIVE_DB  = empty_dir / "stock_data.db"
+        _ss.HIST_DIR = empty_dir / "data"
+        helpers.get_all_symbols.clear()
+        try:
+            at = run_app()
+            self.assertEqual([e.value for e in at.exception], [])
+            self.assertTrue(at.sidebar.warning, "expected the 'no data' warning")
+        finally:
+            _ss.LIVE_DB, _ss.HIST_DIR = old_live, old_hist
+            helpers.get_all_symbols.clear()
+
+
 if __name__ == "__main__":
     runner = unittest.main(verbosity=2, exit=False)
     sys.exit(0 if runner.result.wasSuccessful() else 1)

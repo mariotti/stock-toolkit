@@ -27,7 +27,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from stock_toolkit.common import LIVE_DB, HIST_DIR
+from stock_toolkit.common import LIVE_DB, HIST_DIR, NoDataError
 
 SOURCE_PRIORITY = [
     "alphavantage", "fmp", "yfinance",
@@ -45,8 +45,7 @@ def discover_dbs() -> list[Path]:
     if HIST_DIR.exists():
         dbs += sorted(HIST_DIR.glob("*.db"))
     if not dbs:
-        print("[error] No databases found. Run stock_collector.py first.")
-        sys.exit(1)
+        raise NoDataError("No databases found. Run the collector first.")
     return dbs
 
 
@@ -70,8 +69,7 @@ def load_prices(symbol: str, date_from: str | None, date_to: str | None,
             pass
 
     if not frames:
-        print(f"[error] No daily data found for {symbol}.")
-        sys.exit(1)
+        raise NoDataError(f"No daily data found for {symbol}.")
 
     df = pd.concat(frames, ignore_index=True)
     df["timestamp"] = pd.to_datetime(df["timestamp"], format="mixed", utc=True,
@@ -97,8 +95,7 @@ def load_prices(symbol: str, date_from: str | None, date_to: str | None,
         df = df[df["timestamp"] <= pd.Timestamp(date_to, tz="UTC")]
 
     if df.empty:
-        print(f"[error] No data for {symbol} in the requested range.")
-        sys.exit(1)
+        raise NoDataError(f"No data for {symbol} in the requested range.")
 
     return df.reset_index(drop=True)
 
@@ -498,7 +495,7 @@ def plot_results(sym: str, df: pd.DataFrame, result: dict, bh_result: dict,
 #  MAIN
 # ─────────────────────────────────────────────
 
-def main():
+def _main():
     parser = argparse.ArgumentParser(
         description="Backtesting engine for stock_collector.py data",
         formatter_class=argparse.RawTextHelpFormatter,
@@ -640,6 +637,14 @@ examples:
                          indicator_fn=ind_fn)
 
     print()
+
+
+def main():
+    try:
+        _main()
+    except NoDataError as e:
+        print(f"[error] {e}")
+        sys.exit(1)
 
 
 if __name__ == "__main__":

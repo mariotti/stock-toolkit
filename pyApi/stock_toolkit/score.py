@@ -36,7 +36,7 @@ import pandas as pd
 
 warnings.filterwarnings("ignore")
 
-from stock_toolkit.common import LIVE_DB, HIST_DIR
+from stock_toolkit.common import LIVE_DB, HIST_DIR, NoDataError
 
 SOURCE_PRIORITY = [
     "alphavantage", "fmp", "yfinance",
@@ -116,8 +116,7 @@ def discover_dbs() -> list[Path]:
     if HIST_DIR.exists():
         dbs += sorted(HIST_DIR.glob("*.db"))
     if not dbs:
-        print("[error] No databases found. Run stock_collector.py first.")
-        sys.exit(1)
+        raise NoDataError("No databases found. Run the collector first.")
     return dbs
 
 
@@ -511,7 +510,7 @@ def _tbl(rows: list[list], headers: list[str]):
 #  MAIN
 # ─────────────────────────────────────────────
 
-def main():
+def _main():
     parser = argparse.ArgumentParser(
         description="Rank symbols by investment score (all 7 analysis steps)",
         formatter_class=argparse.RawTextHelpFormatter,
@@ -705,6 +704,14 @@ examples:
     print()
     print("  ⚠  Score is a data summary, not investment advice.")
     print("     Always run the full 7-step analysis before investing.\n")
+
+
+def main():
+    try:
+        _main()
+    except NoDataError as e:
+        print(f"[error] {e}")
+        sys.exit(1)
 
 
 if __name__ == "__main__":

@@ -23,6 +23,13 @@ LIVE_DB     = BASE_DIR / "stock_data.db"
 HIST_DIR    = BASE_DIR / "data"
 
 
+class NoDataError(RuntimeError):
+    """No databases or rows match a request (nothing collected yet, unknown
+    symbol, or an empty date range). Library functions raise this instead of
+    exiting so callers like the Streamlit UI can degrade gracefully; the CLI
+    main() functions catch it and exit with an error message."""
+
+
 def load_config(config_path: Path = CONFIG_PATH) -> dict:
     """
     Parse a simple KEY=VALUE config file.

@@ -29,7 +29,7 @@ from pathlib import Path
 import pandas as pd
 import numpy as np
 
-from stock_toolkit.common import LIVE_DB, HIST_DIR
+from stock_toolkit.common import LIVE_DB, HIST_DIR, NoDataError
 
 # ─────────────────────────────────────────────
 #  CONSTANTS
@@ -110,11 +110,12 @@ def discover_dbs() -> list[Path]:
     if HIST_DIR.exists():
         dbs += sorted(HIST_DIR.glob("*.db"))
     if not dbs:
-        print(f"[error] No database files found.\n"
-              f"  Looked for: {LIVE_DB}\n"
-              f"  And:        {HIST_DIR}/*.db\n"
-              f"  Run stock_collector.py first to collect data.")
-        sys.exit(1)
+        raise NoDataError(
+            f"No database files found.\n"
+            f"  Looked for: {LIVE_DB}\n"
+            f"  And:        {HIST_DIR}/*.db\n"
+            f"  Run the collector first to collect data."
+        )
     return dbs
 
 
@@ -147,8 +148,7 @@ def load_raw(dbs: list[Path], symbols: list[str] | None = None) -> pd.DataFrame:
 
     if not frames:
         syms = ", ".join(symbols) if symbols else "any symbol"
-        print(f"[error] No data found for {syms}.")
-        sys.exit(1)
+        raise NoDataError(f"No data found for {syms}.")
 
     raw = pd.concat(frames, ignore_index=True)
     # format="mixed" handles both "2024-03-25" (daily) and
@@ -287,9 +287,10 @@ def load_data(symbols: list[str] | None,
         is_intraday = False
 
     if df.empty:
-        print(f"[error] No {interval} bars found. "
-              f"Available intervals: {sorted(load_raw(discover_dbs(), symbols)['interval'].unique())}")
-        sys.exit(1)
+        raise NoDataError(
+            f"No {interval} bars found. Available intervals: "
+            f"{sorted(load_raw(discover_dbs(), symbols)['interval'].unique())}"
+        )
 
     # ── date range filter ─────────────────────────────────────────────────
     if date_from:
@@ -298,8 +299,7 @@ def load_data(symbols: list[str] | None,
         df = df[df["timestamp"] <= pd.Timestamp(date_to, tz="UTC")]
 
     if df.empty:
-        print("[error] No data in the requested date range.")
-        sys.exit(1)
+        raise NoDataError("No data in the requested date range.")
 
     df = resolve_source(df, source)
 
@@ -1118,7 +1118,7 @@ def list_symbols():
 #  MAIN
 # ─────────────────────────────────────────────
 
-def main():
+def _main():
     parser = argparse.ArgumentParser(
         description="Analysis tool for stock data collected by stock_collector.py",
         formatter_class=argparse.RawTextHelpFormatter,
@@ -1293,6 +1293,14 @@ examples:
             analysis_hurst(df, args.field, args.plot)
 
     print()
+
+
+def main():
+    try:
+        _main()
+    except NoDataError as e:
+        print(f"[error] {e}")
+        sys.exit(1)
 
 
 if __name__ == "__main__":
