@@ -73,14 +73,13 @@ DOC_FILES = [
     "README_ALERTS.md",
 ]
 
-# Personal path patterns to replace.
-# Format: (pattern_to_find, replacement)
-# Sorted longest first to avoid partial matches.
+# Personal path patterns to replace, derived from the local environment.
+# Format: (pattern_to_find, replacement) — longest first to avoid partial matches.
 PATH_SCRUBS = [
-    ("/Users/mariotti/GIT/stock_py_api/pyApi", "/path/to/stock"),
-    ("/Users/mariotti/GIT/stock_py_api",       "/path/to/stock"),
-    ("/Users/mariotti",                         "/home/user"),
-    ("mariotti",                                "user"),
+    (str(SCRIPT_DIR), "/path/to/stock"),
+    (str(SCRIPT_DIR.parent), "/path/to/stock"),
+    (str(Path.home()), "/home/user"),
+    (Path.home().name, "user"),
 ]
 
 # ─────────────────────────────────────────────
