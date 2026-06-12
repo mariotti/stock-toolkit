@@ -235,6 +235,11 @@ CONFIG_TEMPLATE = """\
 
 SYMBOLS=AAPL,MSFT,TSLA
 
+# Per-source symbol aliases — when an API names an instrument differently.
+# Format: source:CANONICAL=ALIAS, comma-separated. Rows are stored under
+# the canonical symbol. Example: Marketstack wants bare Milan tickers:
+# SYMBOL_ALIASES=marketstack:ENEL.MI=ENEL,marketstack:ENI.MI=ENI
+
 
 # ── API keys ──────────────────────────────────────────────────────────────────
 # Leave a key blank ("") or remove the line to skip that source.

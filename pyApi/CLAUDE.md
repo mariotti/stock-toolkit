@@ -87,6 +87,7 @@ config.env (symbols, API keys) → stock_toolkit/collector/ → stock_data.db
 - `stock_toolkit/common.py`: shared `config.env` parser (`load_config`) and path constants (`BASE_DIR`, `CONFIG_PATH`, `LIVE_DB`, `HIST_DIR`) — import from here, don't re-implement
 - `_symbols_from_db()`: filters symbols with <2 daily bars to exclude stale/broken entries
 - `SYMBOLS_IGNORE` in config: blocks bare EU tickers (e.g., `ENI` vs `ENI.MI`)
+- `SYMBOL_ALIASES` in config (`source:CANONICAL=ALIAS`): per-source symbol translation — the source is queried with the alias, rows are stored under the canonical symbol (e.g., Marketstack wants `ENEL`, everything else `ENEL.MI`)
 - `UI_COLLECT_SOURCES` in config: gates which sources can be triggered from the Streamlit UI
 - Quote intervals are merged to `1d` so all tools see same-day data consistently
 - `bin/` contains shell wrappers (`collect`, `analyse`, `score`, `backtest`, `inventory`, `alerts`) for CLI use

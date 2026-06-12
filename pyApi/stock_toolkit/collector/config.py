@@ -38,6 +38,53 @@ SYMBOLS_IGNORE = {s.strip().upper() for s in _ignore_raw.split(",") if s.strip()
 FAILURE_THRESHOLD = int(_cfg.get("FAILURE_THRESHOLD", "5"))
 
 
+# ── per-source symbol aliases ─────────────────────────────────────────────────
+# Some APIs name the same instrument differently (e.g. Marketstack wants the
+# bare Milan ticker ENEL where everything else wants ENEL.MI). Aliases let
+# the watchlist hold ONE canonical symbol while each source is queried with
+# the name it understands; returned rows are stored under the canonical name.
+#
+#   SYMBOL_ALIASES=marketstack:ENEL.MI=ENEL,marketstack:ENI.MI=ENI
+#
+# Format: comma-separated  source:CANONICAL=ALIAS  entries.
+
+def parse_symbol_aliases(raw: str) -> dict:
+    """Parse SYMBOL_ALIASES into {source: {CANONICAL: ALIAS}}."""
+    aliases: dict = {}
+    for entry in raw.split(","):
+        entry = entry.strip()
+        if not entry or ":" not in entry or "=" not in entry:
+            continue
+        source, _, mapping = entry.partition(":")
+        canonical, _, alias = mapping.partition("=")
+        source, canonical, alias = (source.strip().lower(),
+                                    canonical.strip().upper(),
+                                    alias.strip().upper())
+        if source and canonical and alias:
+            aliases.setdefault(source, {})[canonical] = alias
+    return aliases
+
+
+SYMBOL_ALIASES = parse_symbol_aliases(_cfg.get("SYMBOL_ALIASES", ""))
+
+
+def aliased_symbols(source: str, symbols: list) -> list:
+    """Translate canonical symbols to the names this source understands."""
+    amap = SYMBOL_ALIASES.get(source, {})
+    return [amap.get(s, s) for s in symbols]
+
+
+def canonicalize_rows(source: str, rows: list) -> list:
+    """Map row symbols back from source aliases to canonical names."""
+    amap = SYMBOL_ALIASES.get(source, {})
+    if not amap:
+        return rows
+    rev = {alias: canonical for canonical, alias in amap.items()}
+    for row in rows:
+        row["symbol"] = rev.get(row["symbol"], row["symbol"])
+    return rows
+
+
 # ── API keys ──────────────────────────────────────────────────────────────────
 
 API_KEYS = {

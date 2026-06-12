@@ -113,6 +113,45 @@ class TestBudget(unittest.TestCase):
 
 
 # ─────────────────────────────────────────────────────────────
+#  symbol aliases (config.py)
+# ─────────────────────────────────────────────────────────────
+
+class TestSymbolAliases(unittest.TestCase):
+
+    RAW = "marketstack:ENEL.MI=ENEL, marketstack:eni.mi=eni ,twelvedata:SAP.DE=SAP"
+
+    def test_parse(self):
+        out = cfg.parse_symbol_aliases(self.RAW)
+        self.assertEqual(out["marketstack"], {"ENEL.MI": "ENEL",
+                                              "ENI.MI": "ENI"})
+        self.assertEqual(out["twelvedata"], {"SAP.DE": "SAP"})
+
+    def test_parse_ignores_garbage(self):
+        self.assertEqual(cfg.parse_symbol_aliases(""), {})
+        self.assertEqual(cfg.parse_symbol_aliases("nonsense, also:bad"), {})
+
+    def test_round_trip(self):
+        aliases = cfg.parse_symbol_aliases(self.RAW)
+        with mock.patch.object(cfg, "SYMBOL_ALIASES", aliases):
+            syms = cfg.aliased_symbols("marketstack",
+                                       ["AAPL", "ENEL.MI", "ENI.MI"])
+            self.assertEqual(syms, ["AAPL", "ENEL", "ENI"])
+            rows = [{"symbol": "ENEL", "close": 7.0},
+                    {"symbol": "AAPL", "close": 200.0}]
+            back = cfg.canonicalize_rows("marketstack", rows)
+            self.assertEqual(back[0]["symbol"], "ENEL.MI")
+            self.assertEqual(back[1]["symbol"], "AAPL")
+
+    def test_unaliased_source_untouched(self):
+        aliases = cfg.parse_symbol_aliases(self.RAW)
+        with mock.patch.object(cfg, "SYMBOL_ALIASES", aliases):
+            self.assertEqual(cfg.aliased_symbols("yfinance", ["ENEL.MI"]),
+                             ["ENEL.MI"])
+            rows = [{"symbol": "ENEL"}]
+            self.assertEqual(cfg.canonicalize_rows("yfinance", rows), rows)
+
+
+# ─────────────────────────────────────────────────────────────
 #  http.py
 # ─────────────────────────────────────────────────────────────
 
@@ -160,6 +199,21 @@ class TestSafeGet(unittest.TestCase):
 
     def test_network_exception_returns_none(self):
         self.assertIsNone(self._get_with(ConnectionError("unreachable")))
+
+    def test_http_error_log_redacts_credentials(self):
+        boom = http.requests.exceptions.HTTPError(
+            "422 Client Error for url: https://api.example.test/eod"
+            "?access_key=SECRET123&symbols=ENEL&apikey=ALSOSECRET")
+        with self.assertLogs("stock_toolkit.collector.config", "WARNING") as cm:
+            self._get_with(boom)
+        joined = "\n".join(cm.output)
+        self.assertNotIn("SECRET123", joined)
+        self.assertNotIn("ALSOSECRET", joined)
+        self.assertIn("access_key=***", joined)
+
+    def test_redact_helper(self):
+        out = http._redact("x?apiKey=abc123&token=tok9&other=keep")
+        self.assertEqual(out, "x?apiKey=***&token=***&other=keep")
 
     def test_sleep_for_rate_uses_minute_limit(self):
         slept = []

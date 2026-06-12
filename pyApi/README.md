@@ -209,6 +209,12 @@ SYMBOLS=AAPL,MSFT,GOOGL,AMZN,TSLA,ENEL.MI,SAP.DE
 # Symbols to never collect — blocks bare EU tickers that duplicate .MI/.DE versions
 SYMBOLS_IGNORE=ENI,ENEL,CSMIB,SAP
 
+# Per-source symbol aliases — when one API names an instrument differently.
+# Format: source:CANONICAL=ALIAS (comma-separated). The source is queried
+# with the alias; returned rows are stored under the canonical symbol, so
+# the history stays merged. Example: Marketstack wants bare Milan tickers:
+SYMBOL_ALIASES=marketstack:ENEL.MI=ENEL,marketstack:ENI.MI=ENI
+
 # Stop requesting a (symbol, source) pair after this many consecutive failures
 FAILURE_THRESHOLD=5
 

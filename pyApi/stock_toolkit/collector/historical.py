@@ -61,12 +61,16 @@ def run_historical(symbols: list, hist_arg: str, state: dict) -> "Path":
 
     all_rows: list = []
 
-    all_rows += _hist_yfinance(symbols,      db_path, date_from, date_to, state)
-    all_rows += _hist_alphavantage(symbols,  db_path, date_from, date_to, state)
-    all_rows += _hist_finnhub(symbols,       db_path, date_from, date_to, state)
-    all_rows += _hist_polygon(symbols,       db_path, date_from, date_to, state)
-    all_rows += _hist_fmp(symbols,           db_path, date_from, date_to, state)
-    all_rows += _hist_twelvedata(symbols,    db_path, date_from, date_to, state)
+    # SYMBOL_ALIASES: query each source with its own names, store canonical
+    for source, fetch in [("yfinance",     _hist_yfinance),
+                          ("alphavantage", _hist_alphavantage),
+                          ("finnhub",      _hist_finnhub),
+                          ("polygon",      _hist_polygon),
+                          ("fmp",          _hist_fmp),
+                          ("twelvedata",   _hist_twelvedata)]:
+        rows = fetch(cfg.aliased_symbols(source, symbols),
+                     db_path, date_from, date_to, state)
+        all_rows += cfg.canonicalize_rows(source, rows)
     # Marketstack skipped: monthly budget too tight for bulk historical loads
 
     added = db_insert_rows(all_rows, db_path=db_path)

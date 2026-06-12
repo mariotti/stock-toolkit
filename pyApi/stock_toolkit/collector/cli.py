@@ -160,21 +160,29 @@ def main():
     #   - SQLite skip-function reads use WAL mode (readers never block)
     #   - state["calls"] keys are per-source, no two fetchers share one
     #   - rows are collected per-fetcher and merged after all complete
+    #
+    # SYMBOL_ALIASES: each source is queried with its own symbol names
+    # (cfg.aliased_symbols) and the returned rows are stored under the
+    # canonical names (cfg.canonicalize_rows).
+    def _aliased(source, fetch, *fetch_args):
+        return cfg.canonicalize_rows(
+            source, fetch(cfg.aliased_symbols(source, symbols), *fetch_args))
+
     fetchers = [
         ("yfinance",     "── yfinance ─────────────────────────────────────────",
-         lambda: fetch_yfinance(symbols)),
+         lambda: _aliased("yfinance", fetch_yfinance)),
         ("alphavantage", "── Alpha Vantage ────────────────────────────────────",
-         lambda: fetch_alphavantage(symbols, state)),
+         lambda: _aliased("alphavantage", fetch_alphavantage, state)),
         ("finnhub",      "── Finnhub ───────────────────────────────────────────────",
-         lambda: fetch_finnhub(symbols, state)),
+         lambda: _aliased("finnhub", fetch_finnhub, state)),
         ("polygon",      "── Massive (formerly Polygon.io) ────────────────────────",
-         lambda: fetch_polygon(symbols, state)),
+         lambda: _aliased("polygon", fetch_polygon, state)),
         ("fmp",          "── Financial Modeling Prep (FMP) ────────────────",
-         lambda: fetch_fmp(symbols, state)),
+         lambda: _aliased("fmp", fetch_fmp, state)),
         ("twelvedata",   "── Twelve Data ──────────────────────────────────────────",
-         lambda: fetch_twelvedata(symbols, state)),
+         lambda: _aliased("twelvedata", fetch_twelvedata, state)),
         ("marketstack",  "── Marketstack ──────────────────────────────────────────",
-         lambda: fetch_marketstack(symbols, state)),
+         lambda: _aliased("marketstack", fetch_marketstack, state)),
     ]
 
     active = [(name, label, fn)

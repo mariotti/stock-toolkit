@@ -1,11 +1,21 @@
 """Shared HTTP helper with timeout/error handling and per-source pacing."""
 
+import re
 import time
 
 import requests
 
 from . import config as cfg
 from .config import log
+
+# query params that carry credentials — redacted from logged URLs/errors
+_SECRET_PARAMS = re.compile(
+    r"((?:access_key|apikey|apiKey|token|key)=)[^&\s]+", re.IGNORECASE)
+
+
+def _redact(text: str) -> str:
+    """Strip credential query-param values from error/URL strings."""
+    return _SECRET_PARAMS.sub(r"\1***", str(text))
 
 # ─────────────────────────────────────────────
 #  HELPER — safe HTTP get
@@ -32,10 +42,11 @@ def safe_get(url: str, params: dict = None, timeout: int = 10) -> dict | None:
         finally:
             r.close()
     except requests.exceptions.HTTPError as e:
-        log.warning(f"HTTP error: {e}  url={url}")
+        # str(e) contains the full URL incl. query params — redact keys
+        log.warning(f"HTTP error: {_redact(e)}  url={url}")
         return None
     except Exception as e:
-        log.error(f"Request failed: {e}  url={url}")
+        log.error(f"Request failed: {_redact(e)}  url={url}")
         return None
 
 def sleep_for_rate(source: str):
