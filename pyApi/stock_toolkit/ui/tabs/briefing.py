@@ -7,8 +7,31 @@ import streamlit as st
 from stock_toolkit import alerts as sal
 from stock_toolkit import score as ss
 from stock_toolkit.ui.helpers import (
-    _cfg, fmt_pct, fmt_val, get_prices,
+    _cfg, fmt_pct, fmt_val, get_fundamentals, get_prices,
 )
+
+
+def _fundamentals_to_summary(funda: dict) -> str:
+    """Format the yfinance valuation snapshot as a compact text table."""
+    if not funda:
+        return ""
+
+    def _num(v, pct=False):
+        if v is None:
+            return "   n/a"
+        return f"{v * 100:>+5.1f}%" if pct else f"{v:>6.1f}"
+
+    lines = ["Symbol     P/E   Fwd P/E  Rev growth (YoY)  EPS growth (YoY)"]
+    lines.append("─" * 60)
+    for sym, row in funda.items():
+        lines.append(
+            f"{sym:<9}"
+            f"{_num(row.get('trailing_pe'))}  "
+            f"{_num(row.get('forward_pe'))}   "
+            f"{_num(row.get('revenue_growth'), pct=True):>14}  "
+            f"{_num(row.get('earnings_growth'), pct=True):>14}"
+        )
+    return "\n".join(lines)
 
 
 def _with_cache_breakpoints(messages: list) -> list:
@@ -233,6 +256,10 @@ Keep responses concise and conversational."""
             st.stop()
 
         # build the initial briefing prompt
+        with st.spinner("Fetching fundamentals (P/E, growth)…"):
+            funda_table = _fundamentals_to_summary(
+                get_fundamentals(tuple(r["symbol"] for r in scores))
+            )
         score_table   = _scores_to_summary(scores)
         alert_summary = []
         for sym, ctx in alerts_ctx.items():
@@ -252,7 +279,9 @@ Keep responses concise and conversational."""
             f"Budget: {brief_budget} CHF | Broker: {brief_broker}\n"
             f"Date range: {date_from_str} → {date_to_str}\n\n"
             f"SCORES (ranked best→worst):\n{score_table}\n\n"
-            f"CURRENT INDICATORS:\n" + "\n".join(alert_summary) + "\n\n"
+            + (f"FUNDAMENTALS (valuation snapshot, yfinance):\n{funda_table}\n\n"
+               if funda_table else "")
+            + "CURRENT INDICATORS:\n" + "\n".join(alert_summary) + "\n\n"
             "Please give me:\n"
             "1. A 2-3 sentence plain-English summary of what stands out\n"
             "2. The top 2 symbols worth watching and why\n"

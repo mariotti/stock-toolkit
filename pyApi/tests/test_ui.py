@@ -196,6 +196,68 @@ class TestBriefingCacheBreakpoints(unittest.TestCase):
         self.assertEqual(_with_cache_breakpoints(msgs), msgs)
 
 
+class TestFundamentals(unittest.TestCase):
+    """yfinance valuation snapshot: fetch (mocked) and prompt formatting."""
+
+    INFO = {"trailingPE": 35.2, "forwardPE": 30.3,
+            "revenueGrowth": 0.166, "earningsGrowth": 0.218}
+
+    def _install_fake_yf(self, info_by_sym):
+        import types
+        from unittest import mock
+
+        class FakeTicker:
+            def __init__(self, sym):
+                self._sym = sym
+
+            @property
+            def info(self):
+                val = info_by_sym[self._sym]
+                if isinstance(val, Exception):
+                    raise val
+                return val
+
+        fake = types.ModuleType("yfinance")
+        fake.Ticker = FakeTicker
+        patcher = mock.patch.dict(sys.modules, {"yfinance": fake})
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_get_fundamentals_parses_and_skips_failures(self):
+        from stock_toolkit.ui import helpers
+
+        self._install_fake_yf({
+            "AAPL": dict(self.INFO),
+            "EMPTY": {},                          # no fields → omitted
+            "BOOM": RuntimeError("rate limited"),  # error → omitted
+        })
+        helpers.get_fundamentals.clear()
+        try:
+            out = helpers.get_fundamentals(("AAPL", "EMPTY", "BOOM"))
+        finally:
+            helpers.get_fundamentals.clear()
+        self.assertEqual(list(out), ["AAPL"])
+        self.assertEqual(out["AAPL"]["forward_pe"], 30.3)
+        self.assertEqual(out["AAPL"]["revenue_growth"], 0.166)
+
+    def test_summary_formats_values_and_missing(self):
+        from stock_toolkit.ui.tabs.briefing import _fundamentals_to_summary
+
+        table = _fundamentals_to_summary({
+            "AAPL": {"trailing_pe": 35.2, "forward_pe": 30.3,
+                     "revenue_growth": 0.166, "earnings_growth": None},
+        })
+        self.assertIn("AAPL", table)
+        self.assertIn("35.2", table)
+        self.assertIn("+16.6%", table)
+        self.assertIn("n/a", table)
+
+    def test_empty_dict_gives_empty_string(self):
+        from stock_toolkit.ui.tabs.briefing import _fundamentals_to_summary
+
+        self.assertEqual(_fundamentals_to_summary({}), "")
+
+
 class TestEmptyDatabase(unittest.TestCase):
     """With no DB at all the app warns instead of hanging.
 

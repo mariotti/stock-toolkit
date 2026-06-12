@@ -67,7 +67,7 @@ stock-setup
 
 **Phase 3 — UI & Alerts (`stock_toolkit/ui/`, `stock_toolkit/alerts.py`)**
 - Streamlit dashboard with 6 tabs: Score, Analysis, Backtest, Alerts, Briefing, Collect
-- Briefing tab integrates with Claude API (`ANTHROPIC_API_KEY` in config.env) for multi-turn chat
+- Briefing tab integrates with Claude API (`ANTHROPIC_API_KEY` in config.env) for multi-turn chat; the prompt context includes a yfinance fundamentals snapshot (P/E, forward P/E, revenue/EPS growth)
 - Alert system uses edge detection (fires once on False→True transition) with state in `.alerts_state.json`
 - Notification channels: email (SMTP), Pushover, Slack
 
