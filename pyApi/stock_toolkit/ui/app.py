@@ -187,11 +187,6 @@ tab_score, tab_analysis, tab_backtest, tab_alerts, tab_brief, tab_collect = st.t
     "🏆  Score", "📊  Analysis", "🔁  Backtest", "🔔  Alerts", "🤖  Briefing", "📥  Collect"
 ])
 
-
-tab_score, tab_analysis, tab_backtest, tab_alerts, tab_brief, tab_collect = st.tabs([
-    "🏆  Score", "📊  Analysis", "🔁  Backtest", "🔔  Alerts", "🤖  Briefing", "📥  Collect"
-])
-
 with tab_score:
     tabs_score.render(selected_symbols, date_from_str, date_to_str)
 with tab_analysis:

@@ -71,9 +71,10 @@ class TestDashboardRenders(unittest.TestCase):
         errs = [e.value for e in self.at.exception]
         self.assertEqual(errs, [])
 
-    def test_all_six_tabs_render(self):
-        # 6 top-level tabs (some tabs nest their own sub-tabs)
-        self.assertGreaterEqual(len(self.at.tabs), 6)
+    def test_exactly_six_tabs_render(self):
+        # exactly one tab bar — regression test for a duplicated st.tabs()
+        # call that rendered a second, empty tab bar above the real one
+        self.assertEqual(len(self.at.tabs), 6)
 
     def test_sidebar_lists_fixture_symbols(self):
         ms = self.at.sidebar.multiselect
