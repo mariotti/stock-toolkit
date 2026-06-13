@@ -32,13 +32,14 @@ stock-inventory = "stock_toolkit.inventory:main"
 stock-setup     = "stock_toolkit.setup_wizard:main"
 stock-ui        = "stock_toolkit.ui:main"
 
-[tool.setuptools]
-packages = [
-    "stock_toolkit",
-    "stock_toolkit.collector",
-    "stock_toolkit.collector.sources",
-    "stock_toolkit.ui",
-]
+# Auto-discover every stock_toolkit subpackage. The explicit list this
+# replaced silently dropped stock_toolkit.ui.tabs after the UI was split,
+# which broke non-editable installs (the Docker image, dist tarballs,
+# anyone running `pip install .`) — editable installs masked it because
+# they resolve everything from the source tree at import time.
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["stock_toolkit*"]
 
 [tool.setuptools.dynamic]
 version = { file = "VERSION" }

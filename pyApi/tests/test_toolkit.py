@@ -161,6 +161,47 @@ def _load_module(name: str, tmp_db: pathlib.Path, tmp_dir: pathlib.Path):
 #  BASE TEST CLASS — creates fixture DB once per test class
 # ─────────────────────────────────────────────────────────────
 
+class TestPackageDistribution(unittest.TestCase):
+    """Every stock_toolkit subpackage must actually ship.
+
+    Regression test for the pyproject.toml explicit `packages` list that
+    silently dropped stock_toolkit.ui.tabs after the UI was split — the
+    Docker image and dist tarballs imported the dashboard at runtime and
+    crashed with ModuleNotFoundError. Editable installs masked the bug
+    because they resolve modules from the source tree at import time.
+    """
+
+    REQUIRED = {
+        "stock_toolkit",
+        "stock_toolkit.collector",
+        "stock_toolkit.collector.sources",
+        "stock_toolkit.ui",
+        "stock_toolkit.ui.tabs",
+    }
+
+    def test_required_subpackages_importable(self):
+        import importlib
+
+        missing = []
+        for name in self.REQUIRED:
+            try:
+                importlib.import_module(name)
+            except ImportError as e:
+                missing.append(f"{name}: {e}")
+        self.assertEqual(missing, [],
+                         f"Missing packages — fix pyproject.toml: {missing}")
+
+    def test_each_tab_module_importable(self):
+        import importlib
+
+        for tab in ("score", "analysis", "backtest", "alerts",
+                    "briefing", "collect"):
+            with self.subTest(tab=tab):
+                mod = importlib.import_module(f"stock_toolkit.ui.tabs.{tab}")
+                self.assertTrue(hasattr(mod, "render"),
+                                f"{tab} tab missing render()")
+
+
 class FixtureTestCase(unittest.TestCase):
     """Base class: sets up a shared temp dir + fixture DB for the class."""
 
