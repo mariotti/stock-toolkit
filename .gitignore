@@ -1,6 +1,10 @@
 # Docker stack runtime — populated by `docker compose up`
 /data
 /.env
+/collector.log
+
+# Python build artifacts
+pyApi/build/
 
 # OS / editor
 .DS_Store
