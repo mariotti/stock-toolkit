@@ -23,6 +23,24 @@ machine (except the calls to the data providers you configure).
 
 ## Quick start
 
+Pick the install style that fits how you want to run it.
+
+**Docker** — dashboard + scheduled collector in one stack, runs on macOS,
+Linux, ARM NAS, etc. Multi-arch image, no Python on the host.
+
+```bash
+git clone https://gitlab.com/Mariotti/stock-toolkit.git
+cd stock-toolkit
+mkdir -p data && docker compose run --rm ui stock-setup   # creates data/config.env
+docker compose up -d                                       # dashboard + collector
+open http://localhost:8501
+```
+
+→ See [`docker/README.md`](docker/README.md) for operations.
+
+**Native Python** — install on the host, schedule collection with cron or
+launchd. Best for development or when you already have a Python env.
+
 ```bash
 git clone https://gitlab.com/Mariotti/stock-toolkit.git
 cd stock-toolkit/pyApi

@@ -1,0 +1,11 @@
+# Supercronic schedule — runs inside the collector container.
+# Times are UTC (container default); mirrors crontab.demo and the
+# launchd plists so all three deployments behave the same way.
+
+# Weekday collection tiers
+0  8  * * 1-5  stock-collect --sources yfinance
+0  13 * * 1-5  stock-collect --sources yfinance finnhub
+30 23 * * 1-5  stock-collect --sources yfinance alphavantage polygon fmp twelvedata marketstack
+
+# Weekly DB maintenance — Sunday 00:30 UTC
+30 0  * * 0    /app/docker/entrypoints/maintenance.sh

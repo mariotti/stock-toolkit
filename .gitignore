@@ -1,0 +1,6 @@
+# Docker stack runtime — populated by `docker compose up`
+/data
+/.env
+
+# OS / editor
+.DS_Store

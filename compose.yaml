@@ -1,0 +1,35 @@
+# Self-contained stack for the stock-toolkit.
+#
+#   docker compose up -d        # start dashboard + scheduled collector
+#   docker compose logs -f ui   # follow the dashboard log
+#   docker compose down         # stop the stack
+#
+# First-time setup (create config.env with your API keys):
+#   mkdir -p ${HOST_DATA_DIR:-./data}
+#   docker compose run --rm ui stock-setup
+#
+# All state — config.env, stock_data.db, stock_failures.db, alerts state —
+# lives in the host directory mounted at /data, NOT inside the image. The
+# image is throwaway; the host data dir is precious. Back it up.
+
+services:
+  ui:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    image: stock-toolkit:latest
+    container_name: stock-toolkit-ui
+    ports:
+      - "${UI_PORT:-8501}:8501"
+    volumes:
+      - "${HOST_DATA_DIR:-./data}:/data"
+    restart: unless-stopped
+
+  collector:
+    image: stock-toolkit:latest
+    container_name: stock-toolkit-collector
+    depends_on: [ui]            # build the image once via ui
+    entrypoint: ["/usr/bin/tini", "--", "supercronic", "/app/docker/crontab"]
+    volumes:
+      - "${HOST_DATA_DIR:-./data}:/data"
+    restart: unless-stopped

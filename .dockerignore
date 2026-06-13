@@ -1,0 +1,45 @@
+# Speed up image builds — never copy these into the build context.
+
+# VCS / build / IDE
+.git
+.gitignore
+.gitlab-ci.yml
+.ruff.toml
+.idea
+.vscode
+.DS_Store
+
+# Local environments and caches
+**/venv
+**/.venv
+**/__pycache__
+**/*.py[cod]
+**/.pytest_cache
+**/.coverage
+**/*.egg-info
+**/.mypy_cache
+
+# Generated docs / dist / data — keep the image lean
+pyApi/docs
+pyApi/dist
+pyApi/data
+pyApi/old_data
+pyApi/hists
+pyApi/hist.*
+pyApi/*.db
+pyApi/*.db-shm
+pyApi/*.db-wal
+pyApi/*.csv
+pyApi/*.log
+pyApi/.alerts_state.json
+pyApi/.collector_state.json
+pyApi/stock-toolkit-*.tar.gz
+pyApi/stock-toolkit-*.zip
+
+# Local secrets — must never enter the image
+pyApi/config.env
+pyApi/config.env.*
+**/*.bak
+**/*.bak.*
+
+# Tests live in the image (CI parity), nothing to exclude there
