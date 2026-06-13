@@ -8,7 +8,8 @@ because the image is multi-arch.
 ## Quick start
 
 ```bash
-# from the repo root
+# Run from the REPO ROOT (where compose.yaml lives), not from pyApi/
+cd stock_py_api
 mkdir -p data                                  # host directory for everything
 docker compose run --rm ui stock-setup         # creates ./data/config.env interactively
 docker compose up -d                           # dashboard + collector, in background

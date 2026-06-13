@@ -12,24 +12,28 @@
 # lives in the host directory mounted at /data, NOT inside the image. The
 # image is throwaway; the host data dir is precious. Back it up.
 
+# Shared service base — both ui and collector use the same image, the
+# same Dockerfile, and the same volume mount. Declared once via a YAML
+# anchor so a `docker compose up` from a fresh checkout builds cleanly
+# without `--build` and without Compose trying to pull from Docker Hub.
+x-app: &app
+  build:
+    context: .
+    dockerfile: docker/Dockerfile
+  image: stock-toolkit:latest
+  volumes:
+    - "${HOST_DATA_DIR:-./data}:/data"
+  restart: unless-stopped
+
 services:
   ui:
-    build:
-      context: .
-      dockerfile: docker/Dockerfile
-    image: stock-toolkit:latest
+    <<: *app
     container_name: stock-toolkit-ui
     ports:
       - "${UI_PORT:-8501}:8501"
-    volumes:
-      - "${HOST_DATA_DIR:-./data}:/data"
-    restart: unless-stopped
 
   collector:
-    image: stock-toolkit:latest
+    <<: *app
     container_name: stock-toolkit-collector
-    depends_on: [ui]            # build the image once via ui
+    depends_on: [ui]
     entrypoint: ["/usr/bin/tini", "--", "supercronic", "/app/docker/crontab"]
-    volumes:
-      - "${HOST_DATA_DIR:-./data}:/data"
-    restart: unless-stopped
