@@ -46,7 +46,7 @@ git clone https://gitlab.com/Mariotti/stock-toolkit.git
 cd stock-toolkit/pyApi
 pip install -e .          # installs stock-collect, stock-score, stock-ui, …
 stock-setup               # interactive config (yfinance works with no key)
-stock-collect             # fetch today's data
+stock-bootstrap           # seed years of history via yfinance (one command)
 stock-ui                  # open the dashboard
 ```
 
@@ -70,8 +70,8 @@ All documentation lives in [`pyApi/`](pyApi/):
 
 ## Project facts
 
-- Python 3.10+, packaged with `pyproject.toml`, 8 console entry points
-- 214 offline tests (no network, no keys needed) run on every push in CI
+- Python 3.10+, packaged with `pyproject.toml`, 9 console entry points
+- 242 offline tests (no network, no keys needed) run on every push in CI
 - Free-tier friendly: per-source rate limiting and daily/monthly call budgets
 - Not financial advice — this is a data analysis and learning tool
 

@@ -69,13 +69,16 @@ pip install -e .
 #    — easiest via the interactive wizard:
 stock-setup
 
-# 3. Collect today's data (yfinance works without any key)
+# 3. Seed years of historical data via yfinance (one command, no key)
+stock-bootstrap
+
+# 4. Collect today's incremental data
 stock-collect
 
-# 4. See what you have
+# 5. See what you have
 stock-inventory --summary
 
-# 5. Analyse it
+# 6. Analyse it
 stock-analyse -s AAPL --analysis summary regression --plot
 ```
 
@@ -1202,8 +1205,8 @@ python3 -m pytest tests/test_toolkit.py::TestBacktest -v
 
 Expected output:
 ```
-Ran 105 tests in ~9s
-105/105 passed  ✓ all green
+Ran 242 tests in ~3s
+OK
 ```
 
 ---

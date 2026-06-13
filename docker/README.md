@@ -9,9 +9,10 @@ because the image is multi-arch.
 
 ```bash
 # Run from the REPO ROOT (where compose.yaml lives), not from pyApi/
-cd stock_py_api
+cd stock-toolkit                               # or stock_py_api, whichever you cloned
 mkdir -p data                                  # host directory for everything
 docker compose run --rm ui stock-setup         # creates ./data/config.env interactively
+docker compose run --rm ui stock-bootstrap     # one-time historical seed via yfinance
 docker compose up -d                           # dashboard + collector, in background
 open http://localhost:8501                     # dashboard
 ```
