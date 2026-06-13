@@ -14,16 +14,9 @@ stock_toolkit/ui/           — Streamlit dashboard (Score · Analysis · Backte
 
 ## Getting started
 
-**From a distribution package** (recommended for new users):
-```bash
-tar xzf stock-toolkit.tar.gz && cd stock-toolkit/
-bash install.sh       # sets up everything, downloads initial data
-./startUI.sh          # opens the dashboard in your browser
-```
-→ See **`QUICKSTART.md`** for full instructions including the macOS Python note.
-
-**From source / command line:**
-→ See **`QUICKSTART_DEV.md`** for CLI usage without the installer.
+Three install paths (Docker, native Python, distribution package),
+step-by-step setup, a per-tab walkthrough of the dashboard, and how to
+schedule daily collection all live in **[`QUICKSTART.md`](QUICKSTART.md)**.
 
 ---
 
@@ -124,8 +117,7 @@ crontab.demo                ← example crontab (copy and edit)
 config.env                  ← API keys and symbols (keep out of git)
 VERSION                     ← semver version number (edit before release)
 README.md
-QUICKSTART.md               ← 3-step install guide (dist users)
-QUICKSTART_DEV.md           ← CLI usage guide (developers)
+QUICKSTART.md               ← getting started: install / configure / dashboard tour
 ANALYSIS.md
 README_SCORE.md
 README_BACKTEST.md

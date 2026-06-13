@@ -66,7 +66,6 @@ WRAPPER_FILES = [
 DOC_FILES = [
     "README.md",
     "QUICKSTART.md",
-    "QUICKSTART_DEV.md",
     "ANALYSIS.md",
     "README_SCORE.md",
     "README_BACKTEST.md",
