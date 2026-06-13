@@ -61,7 +61,8 @@ def run_historical(symbols: list, hist_arg: str, state: dict) -> "Path":
 
     all_rows: list = []
 
-    # SYMBOL_ALIASES: query each source with its own names, store canonical
+    # SYMBOL_ALIASES (incl. built-in suffix-strip defaults — see config.py):
+    # query each source with its own names, store canonical.
     for source, fetch in [("yfinance",     _hist_yfinance),
                           ("alphavantage", _hist_alphavantage),
                           ("finnhub",      _hist_finnhub),
@@ -70,7 +71,7 @@ def run_historical(symbols: list, hist_arg: str, state: dict) -> "Path":
                           ("twelvedata",   _hist_twelvedata)]:
         rows = fetch(cfg.aliased_symbols(source, symbols),
                      db_path, date_from, date_to, state)
-        all_rows += cfg.canonicalize_rows(source, rows)
+        all_rows += cfg.canonicalize_rows(source, rows, symbols)
     # Marketstack skipped: monthly budget too tight for bulk historical loads
 
     added = db_insert_rows(all_rows, db_path=db_path)

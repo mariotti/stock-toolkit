@@ -130,25 +130,62 @@ class TestSymbolAliases(unittest.TestCase):
         self.assertEqual(cfg.parse_symbol_aliases(""), {})
         self.assertEqual(cfg.parse_symbol_aliases("nonsense, also:bad"), {})
 
-    def test_round_trip(self):
+    def test_round_trip_user_alias(self):
         aliases = cfg.parse_symbol_aliases(self.RAW)
         with mock.patch.object(cfg, "SYMBOL_ALIASES", aliases):
-            syms = cfg.aliased_symbols("marketstack",
-                                       ["AAPL", "ENEL.MI", "ENI.MI"])
+            symbols = ["AAPL", "ENEL.MI", "ENI.MI"]
+            syms = cfg.aliased_symbols("marketstack", symbols)
             self.assertEqual(syms, ["AAPL", "ENEL", "ENI"])
             rows = [{"symbol": "ENEL", "close": 7.0},
                     {"symbol": "AAPL", "close": 200.0}]
-            back = cfg.canonicalize_rows("marketstack", rows)
+            back = cfg.canonicalize_rows("marketstack", rows, symbols)
             self.assertEqual(back[0]["symbol"], "ENEL.MI")
             self.assertEqual(back[1]["symbol"], "AAPL")
 
     def test_unaliased_source_untouched(self):
         aliases = cfg.parse_symbol_aliases(self.RAW)
         with mock.patch.object(cfg, "SYMBOL_ALIASES", aliases):
+            # twelvedata is aliased for SAP.DE but not for yfinance — yfinance
+            # has no defaults either, so ENEL.MI must pass through unchanged.
             self.assertEqual(cfg.aliased_symbols("yfinance", ["ENEL.MI"]),
                              ["ENEL.MI"])
             rows = [{"symbol": "ENEL"}]
-            self.assertEqual(cfg.canonicalize_rows("yfinance", rows), rows)
+            self.assertEqual(
+                cfg.canonicalize_rows("yfinance", rows, ["ENEL.MI"]), rows)
+
+    # ── built-in suffix-strip defaults ───────────────────────────────────────
+
+    def test_default_strips_marketstack_exchange_suffixes(self):
+        with mock.patch.object(cfg, "SYMBOL_ALIASES", {}):
+            symbols = ["AAPL", "DOCM.SW", "ENEL.MI", "SAP.DE"]
+            self.assertEqual(cfg.aliased_symbols("marketstack", symbols),
+                             ["AAPL", "DOCM", "ENEL", "SAP"])
+            rows = [{"symbol": "DOCM"}, {"symbol": "ENEL"}, {"symbol": "AAPL"}]
+            back = cfg.canonicalize_rows("marketstack", rows, symbols)
+            self.assertEqual([r["symbol"] for r in back],
+                             ["DOCM.SW", "ENEL.MI", "AAPL"])
+
+    def test_default_does_not_strip_other_sources(self):
+        with mock.patch.object(cfg, "SYMBOL_ALIASES", {}):
+            self.assertEqual(cfg.aliased_symbols("yfinance", ["DOCM.SW"]),
+                             ["DOCM.SW"])
+
+    def test_user_alias_overrides_default(self):
+        # Marketstack's default strips .SW to DOCM, but the user pins it to
+        # something else — user wins.
+        aliases = {"marketstack": {"DOCM.SW": "DOCM.XSWX"}}
+        with mock.patch.object(cfg, "SYMBOL_ALIASES", aliases):
+            self.assertEqual(
+                cfg.aliased_symbols("marketstack", ["DOCM.SW"]),
+                ["DOCM.XSWX"])
+
+    def test_user_identity_alias_disables_default(self):
+        # Mapping a symbol to itself disables the built-in suffix-strip.
+        aliases = {"marketstack": {"ENEL.MI": "ENEL.MI"}}
+        with mock.patch.object(cfg, "SYMBOL_ALIASES", aliases):
+            self.assertEqual(
+                cfg.aliased_symbols("marketstack", ["ENEL.MI"]),
+                ["ENEL.MI"])
 
 
 # ─────────────────────────────────────────────────────────────

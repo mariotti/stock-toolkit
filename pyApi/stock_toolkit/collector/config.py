@@ -39,14 +39,36 @@ FAILURE_THRESHOLD = int(_cfg.get("FAILURE_THRESHOLD", "5"))
 
 
 # ── per-source symbol aliases ─────────────────────────────────────────────────
-# Some APIs name the same instrument differently (e.g. Marketstack wants the
-# bare Milan ticker ENEL where everything else wants ENEL.MI). Aliases let
-# the watchlist hold ONE canonical symbol while each source is queried with
-# the name it understands; returned rows are stored under the canonical name.
+# Some APIs name the same instrument differently (e.g. Marketstack returns the
+# bare Milan ticker ENEL where everything else uses ENEL.MI). The watchlist
+# holds ONE canonical symbol per instrument; each source is queried with the
+# name it understands and rows are stored under the canonical name.
 #
-#   SYMBOL_ALIASES=marketstack:ENEL.MI=ENEL,marketstack:ENI.MI=ENI
+# Two sources of aliases, merged at translate time (user wins on conflict):
 #
-# Format: comma-separated  source:CANONICAL=ALIAS  entries.
+#   1. Built-in DEFAULT_SUFFIX_STRIPS — per-source rules that strip exchange
+#      suffixes a source doesn't recognize. Covers the common case (e.g.
+#      Marketstack drops `.MI` / `.SW` / `.DE`).
+#   2. User SYMBOL_ALIASES in config.env — explicit overrides for symbols
+#      the defaults can't handle. Format:
+#        SYMBOL_ALIASES=source:CANONICAL=ALIAS,source:OTHER=OTHER_ALIAS
+#      A user entry with ALIAS == CANONICAL effectively disables the default.
+
+# Exchange suffixes that the given source strips before sending the request.
+# Easy to extend: add a suffix, add a source.
+DEFAULT_SUFFIX_STRIPS: dict = {
+    "marketstack": (".MI", ".SW", ".DE", ".PA", ".AS", ".L",
+                    ".MC", ".BR", ".LS", ".ST", ".HE", ".CO", ".OL"),
+}
+
+
+def _auto_alias(source: str, symbol: str) -> str:
+    """Apply the source's default suffix-strip rule, or return unchanged."""
+    for suf in DEFAULT_SUFFIX_STRIPS.get(source, ()):
+        if symbol.endswith(suf):
+            return symbol[: -len(suf)]
+    return symbol
+
 
 def parse_symbol_aliases(raw: str) -> dict:
     """Parse SYMBOL_ALIASES into {source: {CANONICAL: ALIAS}}."""
@@ -68,15 +90,41 @@ def parse_symbol_aliases(raw: str) -> dict:
 SYMBOL_ALIASES = parse_symbol_aliases(_cfg.get("SYMBOL_ALIASES", ""))
 
 
+def effective_aliases(source: str, symbols: list) -> dict:
+    """{canonical: alias} actually applied for this run.
+
+    Combines DEFAULT_SUFFIX_STRIPS and user SYMBOL_ALIASES; user wins.
+    Identity mappings (alias == canonical) are dropped, so they cleanly
+    disable a default rule when the user wants to.
+    """
+    user = SYMBOL_ALIASES.get(source, {})
+    out: dict = {}
+    for sym in symbols:
+        if sym in user:
+            mapped = user[sym]
+        else:
+            mapped = _auto_alias(source, sym)
+        if mapped != sym:
+            out[sym] = mapped
+    return out
+
+
 def aliased_symbols(source: str, symbols: list) -> list:
     """Translate canonical symbols to the names this source understands."""
-    amap = SYMBOL_ALIASES.get(source, {})
+    amap = effective_aliases(source, symbols)
     return [amap.get(s, s) for s in symbols]
 
 
-def canonicalize_rows(source: str, rows: list) -> list:
-    """Map row symbols back from source aliases to canonical names."""
-    amap = SYMBOL_ALIASES.get(source, {})
+def canonicalize_rows(source: str, rows: list, symbols: list = None) -> list:
+    """Map row symbols back from source aliases to canonical names.
+
+    Pass `symbols` (the watchlist) to also reverse the default suffix-strip
+    rules; without it, only explicit user SYMBOL_ALIASES are reversed.
+    """
+    if symbols is not None:
+        amap = effective_aliases(source, symbols)
+    else:
+        amap = SYMBOL_ALIASES.get(source, {})
     if not amap:
         return rows
     rev = {alias: canonical for canonical, alias in amap.items()}

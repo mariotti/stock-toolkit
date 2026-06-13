@@ -161,12 +161,14 @@ def main():
     #   - state["calls"] keys are per-source, no two fetchers share one
     #   - rows are collected per-fetcher and merged after all complete
     #
-    # SYMBOL_ALIASES: each source is queried with its own symbol names
-    # (cfg.aliased_symbols) and the returned rows are stored under the
-    # canonical names (cfg.canonicalize_rows).
+    # SYMBOL_ALIASES (incl. built-in suffix-strip defaults — see config.py):
+    # each source is queried with the names it understands; returned rows
+    # are stored under the canonical names.
     def _aliased(source, fetch, *fetch_args):
         return cfg.canonicalize_rows(
-            source, fetch(cfg.aliased_symbols(source, symbols), *fetch_args))
+            source,
+            fetch(cfg.aliased_symbols(source, symbols), *fetch_args),
+            symbols)
 
     fetchers = [
         ("yfinance",     "── yfinance ─────────────────────────────────────────",
