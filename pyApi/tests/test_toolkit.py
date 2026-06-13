@@ -19,6 +19,7 @@ import sqlite3
 import sys
 import tempfile
 import unittest
+import unittest.mock
 from datetime import date, timedelta
 
 import numpy as np
@@ -200,6 +201,71 @@ class TestPackageDistribution(unittest.TestCase):
                 mod = importlib.import_module(f"stock_toolkit.ui.tabs.{tab}")
                 self.assertTrue(hasattr(mod, "render"),
                                 f"{tab} tab missing render()")
+
+
+class TestBootstrap(unittest.TestCase):
+    """stock-bootstrap is a thin shorthand over stock-collect — verify the
+    argument translation, not the underlying collection itself."""
+
+    def setUp(self):
+        self.argv_seen = []
+        self.collector_called = False
+        # Pretend config.env exists (the friendly setup check)
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.cfg = pathlib.Path(self.tmp.name) / "config.env"
+        self.cfg.write_text("SYMBOLS=AAPL\n")
+
+    def _run(self, args):
+        import sys as _sys
+        old_argv = _sys.argv
+        from stock_toolkit import bootstrap
+        from stock_toolkit import common
+        # Capture what bootstrap forwards to the collector
+        def fake_collect_main():
+            self.argv_seen[:] = _sys.argv
+            self.collector_called = True
+        import stock_toolkit.collector.cli as collector_cli
+        with unittest.mock.patch.object(collector_cli, "main", fake_collect_main), \
+             unittest.mock.patch.object(common, "CONFIG_PATH", self.cfg), \
+             unittest.mock.patch.object(bootstrap, "CONFIG_PATH", self.cfg):
+            _sys.argv = ["stock-bootstrap"] + args
+            try:
+                bootstrap.main()
+            finally:
+                _sys.argv = old_argv
+
+    def test_default_runs_yfinance_historical_all(self):
+        self._run([])
+        self.assertTrue(self.collector_called)
+        self.assertEqual(
+            self.argv_seen,
+            ["stock-collect", "--sources", "yfinance", "--historical", "ALL"])
+
+    def test_custom_range(self):
+        self._run(["--range", "2020-2024"])
+        self.assertIn("2020-2024", self.argv_seen)
+        self.assertIn("--historical", self.argv_seen)
+
+    def test_explicit_symbols_forwarded(self):
+        self._run(["-s", "AAPL", "MSFT"])
+        self.assertIn("-s", self.argv_seen)
+        self.assertIn("AAPL", self.argv_seen)
+        self.assertIn("MSFT", self.argv_seen)
+
+    def test_missing_config_exits_nonzero(self):
+        import sys as _sys
+        import stock_toolkit.bootstrap as bootstrap
+        missing = pathlib.Path(self.tmp.name) / "nope" / "config.env"
+        old_argv = _sys.argv
+        _sys.argv = ["stock-bootstrap"]
+        try:
+            with unittest.mock.patch.object(bootstrap, "CONFIG_PATH", missing):
+                with self.assertRaises(SystemExit) as cm:
+                    bootstrap.main()
+                self.assertEqual(cm.exception.code, 1)
+        finally:
+            _sys.argv = old_argv
 
 
 class FixtureTestCase(unittest.TestCase):

@@ -47,6 +47,12 @@ python3 make_dist.py --package toolkit
 stock-setup
 ```
 
+**Bootstrap historical data (years of OHLCV via yfinance, no key):**
+```bash
+stock-bootstrap                  # all configured symbols, full history → data/stock_data_all.db
+stock-bootstrap -s AAPL --range 2020-2024
+```
+
 ## Architecture
 
 ### Three-Phase Design

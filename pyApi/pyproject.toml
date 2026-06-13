@@ -31,6 +31,7 @@ stock-alerts    = "stock_toolkit.alerts:main"
 stock-inventory = "stock_toolkit.inventory:main"
 stock-setup     = "stock_toolkit.setup_wizard:main"
 stock-ui        = "stock_toolkit.ui:main"
+stock-bootstrap = "stock_toolkit.bootstrap:main"
 
 # Auto-discover every stock_toolkit subpackage. The explicit list this
 # replaced silently dropped stock_toolkit.ui.tabs after the UI was split,
