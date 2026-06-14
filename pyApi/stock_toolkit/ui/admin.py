@@ -208,35 +208,46 @@ def render():
     # ─────────────────────────────────────────────────────────────────────────
     st.markdown("### ⚠️  Suppressed (symbol, source) pairs")
     failures_db = BASE_DIR / "stock_failures.db"
+    threshold = int(cfg.get("FAILURE_THRESHOLD", "5"))
     if not failures_db.exists():
         st.info("No `stock_failures.db` yet — nothing has failed enough "
-                "times to be suppressed.")
+                "times to be tracked.")
     else:
         try:
             con = sqlite3.connect(failures_db)
+            # Schema: (symbol, source, reason, hits, first_seen, last_seen)
+            # Suppression is implicit — hits >= FAILURE_THRESHOLD blocks
+            # the (symbol, source) pair from future fetches.
             rows = con.execute(
-                "SELECT symbol, source, n_failures, reason "
-                "FROM failures WHERE suppressed=1 "
-                "ORDER BY n_failures DESC, symbol"
+                "SELECT symbol, source, hits, reason, last_seen "
+                "FROM failures ORDER BY hits DESC, symbol"
             ).fetchall()
             con.close()
         except Exception as e:
             st.error(f"Could not read failure tracker: {e}")
             rows = []
         if not rows:
-            st.success("No suppressed pairs — the collector hasn't given "
-                       "up on anything.")
+            st.success("No tracked failures — every (symbol, source) pair "
+                       "is healthy.")
         else:
             import pandas as pd
+            df = pd.DataFrame(
+                rows,
+                columns=["Symbol", "Source", "Hits", "Reason", "Last seen"],
+            )
+            df["Suppressed"] = df["Hits"].ge(threshold).map(
+                {True: "🚫", False: ""})
+            n_suppressed = int(df["Hits"].ge(threshold).sum())
             st.dataframe(
-                pd.DataFrame(rows,
-                             columns=["Symbol", "Source", "Failures", "Reason"]),
-                use_container_width=True, hide_index=True,
+                df[["Suppressed", "Symbol", "Source", "Hits",
+                    "Reason", "Last seen"]],
+                width="stretch", hide_index=True,
             )
             st.caption(
-                f"{len(rows)} pair(s) suppressed. Re-enable from the "
-                "command line: `sqlite3 stock_failures.db \"DELETE FROM "
-                "failures WHERE symbol='X' AND source='Y'\"`"
+                f"🚫 = suppressed (hits ≥ FAILURE_THRESHOLD={threshold}). "
+                f"{n_suppressed}/{len(rows)} pair(s) currently suppressed. "
+                "Clear from the command line: `sqlite3 stock_failures.db "
+                "\"DELETE FROM failures WHERE symbol='X' AND source='Y'\"`"
             )
 
     # ─────────────────────────────────────────────────────────────────────────
