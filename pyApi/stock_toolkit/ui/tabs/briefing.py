@@ -34,6 +34,74 @@ def _fundamentals_to_summary(funda: dict) -> str:
     return "\n".join(lines)
 
 
+def _briefing_trade_panel(scores: list) -> None:
+    """Inline 'place a paper trade from this briefing' form, rendered
+    below Claude's response. Pulls the symbols Claude actually saw
+    (from the score table) and routes through stock_toolkit.game into
+    the active strategy. Same code path as the Game page's Buy form."""
+    from stock_toolkit.game import (
+        GameError, buy, get_active_portfolio_id, get_latest_price,
+        mark_to_market,
+    )
+
+    st.markdown("---")
+    st.markdown("### 🎮  Place a paper trade from this briefing")
+
+    if get_active_portfolio_id() is None:
+        st.info(
+            "No active strategy yet. Open the 🎮 Game page in the sidebar "
+            "to create one — then come back here."
+        )
+        return
+
+    mtm = mark_to_market()
+    symbols = [r["symbol"] for r in scores] or []
+    if not symbols:
+        st.caption("No tradeable symbols in this briefing.")
+        return
+
+    a, b, c = st.columns([3, 2, 2])
+    with a:
+        sym = st.selectbox(
+            "Symbol", symbols, key="brief_trade_sym",
+            help="Limited to the symbols Claude saw in this briefing.",
+        )
+    with b:
+        max_cash = float(mtm["cash"])
+        amount   = st.number_input(
+            f"Cash (max {max_cash:,.2f})",
+            min_value=0.0, max_value=max_cash,
+            value=min(500.0, max_cash), step=50.0,
+            key="brief_trade_amt",
+        )
+    with c:
+        st.markdown("**Strategy**")
+        st.markdown(f"`{mtm['name']}` · {mtm['cash']:,.2f} cash")
+
+    price, as_of = get_latest_price(sym)
+    if price is None:
+        st.warning(f"No price for `{sym}` — run `stock-collect` first.")
+        return
+    fill   = price * 1.001
+    shares = amount / fill if fill > 0 else 0.0
+    st.caption(
+        f"Last close `{price:,.2f}` as of {as_of[:10]} · fill `{fill:,.2f}` "
+        f"(+10 bps) → ≈ **{shares:.4f}** shares"
+    )
+
+    if st.button("▶  Buy into active strategy", type="primary",
+                 key="brief_trade_btn", disabled=(amount <= 0)):
+        try:
+            out = buy(sym, amount)
+            st.success(
+                f"Bought **{out['qty']:.4f}** {out['symbol']} into "
+                f"`{mtm['name']}` @ {out['fill_price']:,.2f} for "
+                f"{out['spent']:,.2f}"
+            )
+        except GameError as e:
+            st.error(str(e))
+
+
 def _with_cache_breakpoints(messages: list) -> list:
     """Add prompt-caching breakpoints to a string-content message list.
 
@@ -319,6 +387,13 @@ Keep responses concise and conversational."""
                 elif i > 0:
                     with st.chat_message("user", avatar="👤"):
                         st.markdown(msg["content"])
+
+        # ── Act on it: paper-trade into the active Game strategy ──────────────
+        # Renders only after Claude has actually responded — otherwise the
+        # user has nothing to act on yet.
+        if any(m["role"] == "assistant"
+               for m in st.session_state.brief_messages):
+            _briefing_trade_panel(ctx["scores"])
 
         # ── 7-step analysis results ───────────────────────────────────────────
         with st.expander("📊  7-step analysis — full metrics", expanded=False):

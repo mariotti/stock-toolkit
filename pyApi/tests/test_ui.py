@@ -283,6 +283,47 @@ class TestEmptyDatabase(unittest.TestCase):
             helpers.get_all_symbols.clear()
 
 
+class TestBriefingTradePanel(unittest.TestCase):
+    """The briefing → game inline trade form renders against the same
+    fixture STOCK_DIR the other UI tests use. Verifies the panel shows
+    the symbols Claude saw, the active strategy info, and the Buy button."""
+
+    def test_panel_renders_with_active_portfolio(self):
+        import tempfile as _tf
+        from streamlit.testing.v1 import AppTest
+
+        from stock_toolkit.game import init_portfolio
+        init_portfolio()
+
+        driver = (
+            "import sys\n"
+            f"sys.path.insert(0, {str(PKG_ROOT)!r})\n"
+            "from stock_toolkit.ui.tabs.briefing import _briefing_trade_panel\n"
+            "_briefing_trade_panel([\n"
+            "    {'symbol': 'AAPL'},\n"
+            "    {'symbol': 'MSFT'},\n"
+            "    {'symbol': 'GOOGL'},\n"
+            "])\n"
+        )
+        with _tf.NamedTemporaryFile(mode="w", suffix=".py", delete=False) as f:
+            f.write(driver)
+            driver_path = f.name
+        try:
+            at = AppTest.from_file(driver_path, default_timeout=60)
+            at.run()
+        finally:
+            import os as _os
+            _os.unlink(driver_path)
+
+        self.assertEqual([e.value for e in at.exception], [])
+        symbol_selects = [s for s in at.selectbox if s.key == "brief_trade_sym"]
+        self.assertEqual(len(symbol_selects), 1)
+        self.assertEqual(set(symbol_selects[0].options),
+                         {"AAPL", "MSFT", "GOOGL"})
+        self.assertTrue(any("Buy into active strategy" in b.label
+                            for b in at.button))
+
+
 class TestAdminPageRenders(unittest.TestCase):
     """Admin page (⚙️) renders against the fixture data dir."""
 
