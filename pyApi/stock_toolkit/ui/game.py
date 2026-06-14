@@ -305,8 +305,11 @@ def render():
                 c_df = pd.DataFrame(hist)
                 c_df["date"] = pd.to_datetime(c_df["date"])
                 is_active = (p["id"] == mtm["id"])
+                # Normalise to % return from inception so strategies with
+                # different starting cash are comparable on the same axis.
+                ret_pct = (c_df["total"] / p["starting_cash"] - 1.0) * 100.0
                 cmp_fig.add_trace(go.Scatter(
-                    x=c_df["date"], y=c_df["total"], mode="lines",
+                    x=c_df["date"], y=ret_pct, mode="lines",
                     name=p["name"] + (" (active)" if is_active else ""),
                     line=dict(
                         color=palette[i % len(palette)],
@@ -316,6 +319,12 @@ def render():
             if not any_data:
                 st.caption("No trade history on any strategy yet.")
             else:
+                cmp_fig.add_hline(
+                    y=0.0, line_dash="dot", line_color="#8ba0b4",
+                    annotation_text="Inception baseline (0 %)",
+                    annotation_position="bottom right",
+                    annotation_font_color="#8ba0b4",
+                )
                 cmp_fig.update_layout(
                     paper_bgcolor="#0e1922", plot_bgcolor="#0e1922",
                     font=dict(family="IBM Plex Mono", size=11, color="#8ba0b4"),
@@ -324,12 +333,12 @@ def render():
                                 font=dict(size=10, color="#c8d8e8")),
                     xaxis=dict(gridcolor="#2d4258", linecolor="#2d4258"),
                     yaxis=dict(gridcolor="#2d4258", linecolor="#2d4258",
-                               tickformat=",.0f"),
+                               ticksuffix=" %", tickformat=".1f"),
                 )
                 st.plotly_chart(cmp_fig, width="stretch")
                 st.caption(
-                    "Absolute values — strategies with different starting "
-                    "cash will start at different y-positions."
+                    "Return % from inception — all strategies start at 0 %, "
+                    "so you can compare relative performance directly."
                 )
 
     st.markdown("---")
