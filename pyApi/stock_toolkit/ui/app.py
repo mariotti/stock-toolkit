@@ -111,6 +111,22 @@ html, body, [class*="css"] {
     font-size: 0.82rem !important;
 }
 
+/* Page navigation (auto-generated when there's a pages/ dir): the
+   "Stock Toolkit" page name and the "Admin" entry below it. Streamlit's
+   defaults are too dim against our dark sidebar — force the bright
+   header color so the nav is legible. Covers both legacy and current
+   testid selectors. */
+[data-testid="stSidebarNav"] a,
+[data-testid="stSidebarNav"] span,
+[data-testid="stSidebarNavItems"] a,
+[data-testid="stSidebarNavItems"] span {
+    color: #c8d8e8 !important;
+}
+[data-testid="stSidebarNav"] a:hover,
+[data-testid="stSidebarNavItems"] a:hover {
+    color: #ffffff !important;
+}
+
 /* Tab labels */
 button[data-baseweb="tab"] {
     font-family: 'IBM Plex Mono', monospace;
