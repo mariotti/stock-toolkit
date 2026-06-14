@@ -12,10 +12,10 @@ import streamlit as st
 from stock_toolkit.common import CONFIG_PATH, load_config
 from stock_toolkit.game import (
     GameError, SLIPPAGE_BPS,
-    archive_portfolio, buy, create_portfolio, delete_portfolio,
-    get_latest_price, init_portfolio, list_portfolios, mark_to_market,
-    rename_portfolio, reset_portfolio, sell, set_active_portfolio,
-    value_history,
+    archive_portfolio, benchmark_history, buy, create_portfolio,
+    delete_portfolio, get_latest_price, init_portfolio, list_portfolios,
+    mark_to_market, rename_portfolio, reset_portfolio, sell,
+    set_active_portfolio, value_history,
 )
 
 
@@ -243,8 +243,29 @@ def render():
         fig = go.Figure()
         fig.add_trace(go.Scatter(
             x=h_df["date"], y=h_df["total"], mode="lines",
-            name="Total value", line=dict(color="#38bdf8", width=2),
+            name=mtm["name"], line=dict(color="#38bdf8", width=2),
         ))
+
+        # Equal-weight buy-and-hold benchmark over the same period.
+        # Honest scorecard: if your strategy can't beat just sitting on
+        # the watchlist equally weighted, the strategy isn't adding value.
+        from datetime import date as _date
+        bench_syms = sorted(config_symbols) if config_symbols else watchlist
+        if bench_syms:
+            bench = benchmark_history(
+                bench_syms,
+                starting_cash=mtm["starting_cash"],
+                start_date=_date.fromisoformat(mtm["created_at"][:10]),
+            )
+            if bench:
+                b_df = pd.DataFrame(bench)
+                b_df["date"] = pd.to_datetime(b_df["date"])
+                fig.add_trace(go.Scatter(
+                    x=b_df["date"], y=b_df["value"], mode="lines",
+                    name=f"Buy-and-hold watchlist ({len(bench_syms)} eq-wt)",
+                    line=dict(color="#a78bfa", width=1.5, dash="dot"),
+                ))
+
         fig.add_hline(
             y=mtm["starting_cash"], line_dash="dot", line_color="#8ba0b4",
             annotation_text=f"Starting cash {_money(mtm['starting_cash'])}",

@@ -593,6 +593,81 @@ def mark_to_market(portfolio_id: int = None, db: Path = None) -> dict:
 #  Daily value history (chart)
 # ─────────────────────────────────────────────────────────────────────────────
 
+def benchmark_history(symbols: list, starting_cash: float,
+                      start_date: datetime.date) -> list:
+    """Equal-weight buy-and-hold over the same period as a portfolio.
+
+    Allocates `starting_cash` evenly across `symbols`, buys each at its
+    first available close on/after `start_date`, then marks to each
+    day's close from there to today. Returns [{date, value}, ...].
+    Empty list if no symbols have any data.
+
+    Symbols with no price data on/after start_date are simply skipped —
+    the remaining allocation just sums to less than starting_cash."""
+    import pandas as pd
+
+    symbols = [s.upper() for s in symbols if s and isinstance(s, str)]
+    if not symbols:
+        return []
+
+    closes = {}
+    try:
+        data_dbs = _discover_data_dbs()
+    except Exception:
+        data_dbs = []
+    for sym in symbols:
+        s = pd.Series(dtype=float)
+        for d in data_dbs:
+            try:
+                con = sqlite3.connect(f"file:{d}?mode=ro", uri=True)
+            except sqlite3.OperationalError:
+                con = sqlite3.connect(d)
+            try:
+                rows = con.execute(
+                    "SELECT timestamp, close FROM prices "
+                    "WHERE symbol = ? AND interval = '1d' "
+                    "AND timestamp >= ? ORDER BY timestamp",
+                    (sym, start_date.isoformat()),
+                ).fetchall()
+            except sqlite3.OperationalError:
+                rows = []
+            con.close()
+            if rows:
+                s2 = pd.Series(
+                    [r[1] for r in rows],
+                    index=pd.to_datetime([r[0][:10] for r in rows]).date,
+                )
+                s = pd.concat([s, s2[~s2.index.isin(s.index)]])
+        if not s.empty:
+            closes[sym] = s.sort_index()
+    if not closes:
+        return []
+
+    per_symbol = starting_cash / len(closes)
+    shares: dict = {}
+    for sym, series in closes.items():
+        valid = series[series.index >= start_date]
+        if valid.empty:
+            continue
+        shares[sym] = per_symbol / float(valid.iloc[0])
+    if not shares:
+        return []
+
+    history = []
+    cur   = start_date
+    today = datetime.date.today()
+    while cur <= today:
+        value = 0.0
+        for sym, qty in shares.items():
+            valid = closes[sym][closes[sym].index <= cur]
+            if valid.empty:
+                continue
+            value += qty * float(valid.iloc[-1])
+        history.append({"date": cur.isoformat(), "value": value})
+        cur += datetime.timedelta(days=1)
+    return history
+
+
 def value_history(portfolio_id: int = None, db: Path = None) -> list:
     """Daily total-value series for one portfolio, from inception to today."""
     import pandas as pd

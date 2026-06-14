@@ -365,6 +365,67 @@ class TestMigrationFromV1(unittest.TestCase):
 #  UI page renders
 # ─────────────────────────────────────────────────────────────────────────────
 
+class TestBenchmarkHistory(GameTestCase):
+    """Equal-weight buy-and-hold series for chart overlay."""
+
+    def setUp(self):
+        super().setUp()
+        # Replace the synthetic price DB with a multi-day series we control
+        con = sqlite3.connect(self.price_db)
+        con.execute("DELETE FROM prices")
+        # AAPL: 100 → 120 (+20%)  MSFT: 200 → 200 (flat)
+        dates = ["2026-05-01", "2026-05-02", "2026-05-05"]
+        for ts in dates:
+            con.execute(
+                "INSERT INTO prices (symbol, source, timestamp, interval, "
+                "close) VALUES ('AAPL', 'yfinance', ?, '1d', "
+                f"{100 + (10 if ts > '2026-05-01' else 0) + (10 if ts > '2026-05-02' else 0)})",
+                (ts + "T00:00:00+00:00",),
+            )
+            con.execute(
+                "INSERT INTO prices (symbol, source, timestamp, interval, "
+                "close) VALUES ('MSFT', 'yfinance', ?, '1d', 200.0)",
+                (ts + "T00:00:00+00:00",),
+            )
+        con.commit(); con.close()
+
+    def test_equal_weight_split(self):
+        import datetime
+        hist = game.benchmark_history(
+            ["AAPL", "MSFT"], starting_cash=10_000.0,
+            start_date=datetime.date(2026, 5, 1),
+        )
+        # Start: half in AAPL @100 (50 sh), half in MSFT @200 (25 sh).
+        # Day 1 value = 5000 + 5000 = 10000
+        self.assertGreater(len(hist), 0)
+        self.assertAlmostEqual(hist[0]["value"], 10_000.0, delta=1.0)
+
+    def test_value_tracks_price_changes(self):
+        import datetime
+        hist = game.benchmark_history(
+            ["AAPL", "MSFT"], starting_cash=10_000.0,
+            start_date=datetime.date(2026, 5, 1),
+        )
+        # AAPL went 100 → 120 (+20%), MSFT flat → portfolio +10%
+        final = next(h for h in hist if h["date"] == "2026-05-05")
+        self.assertAlmostEqual(final["value"], 11_000.0, delta=20.0)
+
+    def test_empty_symbols_returns_empty(self):
+        import datetime
+        self.assertEqual(
+            game.benchmark_history([], 10_000.0, datetime.date(2026, 5, 1)),
+            [],
+        )
+
+    def test_no_price_data_returns_empty(self):
+        import datetime
+        self.assertEqual(
+            game.benchmark_history(
+                ["NEVER_SEEN"], 10_000.0, datetime.date(2026, 5, 1)),
+            [],
+        )
+
+
 class TestGamePageRenders(unittest.TestCase):
     """Same pattern as the admin page test — drive the page shim
     through AppTest, expect zero exceptions."""
