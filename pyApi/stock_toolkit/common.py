@@ -62,3 +62,40 @@ def load_config(config_path: Path = CONFIG_PATH) -> dict:
                 val = val[1:-1]
             cfg[key] = val
     return cfg
+
+
+def update_config_value(key: str, value: str,
+                        config_path: Path = CONFIG_PATH) -> None:
+    """Rewrite a single KEY=value line in config.env, preserving everything else.
+
+    - If the file doesn't exist, write a minimal one with just the new line.
+    - If the key exists, replace its value in place (keep an inline comment
+      if present, keep surrounding lines untouched).
+    - If the key doesn't exist, append it at the end.
+
+    Used by the UI admin page to edit SYMBOLS / SYMBOLS_IGNORE without
+    losing user-edited comments, paid-tier flags, API keys, etc.
+    """
+    new_line = f"{key}={value}\n"
+    if not config_path.exists():
+        config_path.write_text(new_line)
+        return
+
+    lines = config_path.read_text().splitlines(keepends=True)
+    for i, line in enumerate(lines):
+        stripped = line.lstrip()
+        if not stripped.startswith(f"{key}="):
+            continue
+        comment = ""
+        if "#" in line and "#" not in stripped[: len(key) + 1]:
+            _, _, comment = line.partition("#")
+            comment = "  # " + comment.lstrip("# ").rstrip("\n")
+        lines[i] = f"{key}={value}{comment}\n"
+        config_path.write_text("".join(lines))
+        return
+
+    # Key not present — append cleanly
+    if lines and not lines[-1].endswith("\n"):
+        lines[-1] += "\n"
+    lines.append(new_line)
+    config_path.write_text("".join(lines))

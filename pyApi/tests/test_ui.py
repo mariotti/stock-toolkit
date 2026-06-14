@@ -283,6 +283,27 @@ class TestEmptyDatabase(unittest.TestCase):
             helpers.get_all_symbols.clear()
 
 
+class TestAdminPageRenders(unittest.TestCase):
+    """Admin page (⚙️) renders against the fixture data dir."""
+
+    def test_renders_without_exceptions(self):
+        from streamlit.testing.v1 import AppTest as _AppTest
+
+        # Drive the actual page shim — same code path Streamlit uses,
+        # exercises the sys.path setup inside the shim, and verifies
+        # the emoji/digit filename doesn't trip the runner.
+        page = PKG_ROOT / "stock_toolkit" / "ui" / "pages" / "01_⚙️_Admin.py"
+        self.assertTrue(page.exists(), f"missing page file: {page}")
+
+        at = _AppTest.from_file(str(page), default_timeout=60)
+        at.run()
+        self.assertEqual([e.value for e in at.exception], [])
+        markdown_text = "\n".join(m.value for m in at.markdown)
+        for heading in ("Watchlist", "Collect", "Inventory", "Suppressed"):
+            self.assertIn(heading, markdown_text,
+                          f"admin page missing '{heading}' section")
+
+
 if __name__ == "__main__":
     runner = unittest.main(verbosity=2, exit=False)
     sys.exit(0 if runner.result.wasSuccessful() else 1)

@@ -23,6 +23,66 @@ sys.path.insert(0, str(SCRIPT_DIR.parent))
 
 from stock_toolkit.collector import config as cfg                # noqa: E402
 from stock_toolkit.collector import historical, http, state      # noqa: E402
+from stock_toolkit import common as toolkit_common               # noqa: E402
+
+
+# ─────────────────────────────────────────────────────────────
+#  common.update_config_value — used by the UI admin page
+# ─────────────────────────────────────────────────────────────
+
+class TestUpdateConfigValue(unittest.TestCase):
+    """Safe in-place edit of one config.env key (admin UI saves)."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.path = pathlib.Path(self.tmp.name) / "config.env"
+
+    def test_creates_minimal_file_when_missing(self):
+        toolkit_common.update_config_value("SYMBOLS", "AAPL,MSFT", self.path)
+        self.assertEqual(self.path.read_text(), "SYMBOLS=AAPL,MSFT\n")
+
+    def test_replaces_existing_value_preserving_other_lines(self):
+        self.path.write_text(
+            "# comment 1\n"
+            "SYMBOLS=OLD,TICKERS\n"
+            "FMP_KEY=secret\n"
+            "# comment 2\n"
+        )
+        toolkit_common.update_config_value("SYMBOLS", "AAPL,MSFT", self.path)
+        out = self.path.read_text()
+        self.assertIn("SYMBOLS=AAPL,MSFT\n", out)
+        self.assertNotIn("OLD,TICKERS", out)
+        self.assertIn("FMP_KEY=secret\n", out)         # untouched
+        self.assertIn("# comment 1\n", out)            # untouched
+        self.assertIn("# comment 2\n", out)            # untouched
+
+    def test_preserves_inline_comment_on_updated_line(self):
+        self.path.write_text("SYMBOLS=OLD  # watchlist\n")
+        toolkit_common.update_config_value("SYMBOLS", "NEW", self.path)
+        self.assertIn("SYMBOLS=NEW  # watchlist\n", self.path.read_text())
+
+    def test_appends_when_key_absent(self):
+        self.path.write_text("FMP_KEY=x\n")
+        toolkit_common.update_config_value("SYMBOLS_IGNORE", "ENI,ENEL", self.path)
+        out = self.path.read_text()
+        self.assertEqual(out.count("SYMBOLS_IGNORE="), 1)
+        self.assertIn("FMP_KEY=x\n", out)
+        self.assertTrue(out.endswith("SYMBOLS_IGNORE=ENI,ENEL\n"))
+
+    def test_roundtrips_through_load_config(self):
+        self.path.write_text("SYMBOLS=OLD\nFMP_KEY=k\n")
+        toolkit_common.update_config_value("SYMBOLS", "AAPL,MSFT,ENEL.MI", self.path)
+        cfg = toolkit_common.load_config(self.path)
+        self.assertEqual(cfg["SYMBOLS"], "AAPL,MSFT,ENEL.MI")
+        self.assertEqual(cfg["FMP_KEY"], "k")
+
+    def test_only_first_match_replaced(self):
+        # Defensive: if the user has accidentally duplicated a key, only
+        # touch the first one (rather than collapsing them silently).
+        self.path.write_text("SYMBOLS=A\nSYMBOLS=B\n")
+        toolkit_common.update_config_value("SYMBOLS", "X", self.path)
+        self.assertEqual(self.path.read_text(), "SYMBOLS=X\nSYMBOLS=B\n")
 
 
 def fresh_state() -> dict:

@@ -103,7 +103,8 @@ skip what's already in the DB.
 
 ### 3. Open the dashboard — `stock-ui`
 
-Browser opens at `http://localhost:8501`. Six tabs along the top:
+Browser opens at `http://localhost:8501`. Six analytical tabs along
+the top, plus an **⚙️ Admin** page in the sidebar nav for operations:
 
 | Tab | What you'll see |
 |---|---|
@@ -112,7 +113,8 @@ Browser opens at `http://localhost:8501`. Six tabs along the top:
 | **🔁 Backtest** | Pick a symbol and a strategy (RSI / SMA cross / Bollinger / breakout), click "Run backtest" → equity curve vs buy-and-hold, drawdown chart, trade log |
 | **🔔 Alerts** | Configure conditions (RSI < 30, drawdown > 20%, …) and notification channel. Edge-triggered: fires once on False→True transition |
 | **🤖 Briefing** | Click "Generate today's briefing" → Claude analyses your scores + fundamentals + indicators and writes a plain-English summary. Then ask follow-up questions in chat — context is prompt-cached so follow-ups are cheap |
-| **📥 Collect** | One-click data refresh and add new symbols without editing config.env |
+| **📥 Collect** | One-click data refresh for the current sidebar selection |
+| **⚙️ Admin** *(sidebar)* | Edit your watchlist (SYMBOLS / SYMBOLS_IGNORE) and save back to `config.env`; trigger a scheduled collection tier or a historical `stock-bootstrap` on demand; view inventory summary and gap-check; see the failure-tracker's suppressed (symbol, source) pairs |
 
 ---
 
