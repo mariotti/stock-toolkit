@@ -115,6 +115,7 @@ the top, plus an **⚙️ Admin** page in the sidebar nav for operations:
 | **🤖 Briefing** | Click "Generate today's briefing" → Claude analyses your scores + fundamentals + indicators and writes a plain-English summary. Then ask follow-up questions in chat — context is prompt-cached so follow-ups are cheap |
 | **📥 Collect** | One-click data refresh for the current sidebar selection |
 | **⚙️ Admin** *(sidebar)* | Edit your watchlist (SYMBOLS / SYMBOLS_IGNORE) and save back to `config.env`; trigger a scheduled collection tier, a historical `stock-bootstrap`, or `stock-gap-fill` to plug missed days; view inventory summary and gap-check; see the failure-tracker's suppressed (symbol, source) pairs |
+| **🎮 Game** *(sidebar)* | Paper-trading portfolio: start with virtual cash, buy fractional shares of any watchlist symbol at the latest close (+0.1% slippage), check back tomorrow / next week / next month to see how it played out. State lives in `portfolio.db`; one Reset button if you want to start over |
 
 ---
 
