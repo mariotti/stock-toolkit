@@ -36,9 +36,24 @@ def render():
         "day, a week, or a month."
     )
 
-    cfg = load_config(CONFIG_PATH)
-    watchlist = [s.strip().upper() for s in cfg.get("SYMBOLS", "").split(",")
-                 if s.strip()]
+    cfg            = load_config(CONFIG_PATH)
+    config_symbols = {s.strip().upper()
+                      for s in cfg.get("SYMBOLS", "").split(",")
+                      if s.strip()}
+    # Tradeable universe = anything with daily bars in any discoverable DB.
+    # That's a superset of config.env SYMBOLS — covers anything you've ever
+    # collected (manually, via bootstrap, or that got added by the live
+    # collector's _symbols_from_db logic).
+    try:
+        from stock_toolkit.score import list_all_symbols
+        db_symbols = set(list_all_symbols())
+    except Exception:
+        db_symbols = set()
+    # Watchlist symbols first, then the rest — so the most-actively-tracked
+    # show at the top of the dropdown.
+    in_watchlist  = sorted(config_symbols & db_symbols)
+    extra_in_db   = sorted(db_symbols - config_symbols)
+    watchlist     = in_watchlist + extra_in_db
 
     # Ensure the portfolio exists (no-op once initialised)
     init_portfolio()
@@ -93,10 +108,14 @@ def render():
     with buy_col:
         st.markdown("### 💰  Buy")
         if not watchlist:
-            st.warning("Add symbols to SYMBOLS in `config.env` (or via the "
-                       "Admin page) before you can trade.")
+            st.warning("No symbols with data yet — run `stock-collect` or "
+                       "`stock-bootstrap` first.")
         else:
-            sym_buy = st.selectbox("Symbol", watchlist, key="game_buy_sym")
+            sym_buy = st.selectbox(
+                "Symbol", watchlist, key="game_buy_sym",
+                help=(f"{len(in_watchlist)} from your watchlist · "
+                      f"{len(extra_in_db)} more with collected data"),
+            )
             price, as_of = get_latest_price(sym_buy)
             if price is None:
                 st.warning(f"No price for `{sym_buy}` — run `stock-collect` "
