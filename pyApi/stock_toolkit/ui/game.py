@@ -284,6 +284,54 @@ def render():
         )
         st.plotly_chart(fig, width="stretch")
 
+    # ─────────────────────────────────────────────────────────────────────
+    #  Strategy comparison (overlay value history of every active portfolio)
+    # ─────────────────────────────────────────────────────────────────────
+    if len(portfolios) > 1:
+        with st.expander(
+            f"📈  Compare strategies ({len(portfolios)})", expanded=False
+        ):
+            palette = [
+                "#38bdf8", "#facc15", "#34d399", "#f472b6",
+                "#fb923c", "#a78bfa", "#22d3ee", "#fde047",
+            ]
+            cmp_fig = go.Figure()
+            any_data = False
+            for i, p in enumerate(portfolios):
+                hist = value_history(portfolio_id=p["id"])
+                if not hist:
+                    continue
+                any_data = True
+                c_df = pd.DataFrame(hist)
+                c_df["date"] = pd.to_datetime(c_df["date"])
+                is_active = (p["id"] == mtm["id"])
+                cmp_fig.add_trace(go.Scatter(
+                    x=c_df["date"], y=c_df["total"], mode="lines",
+                    name=p["name"] + (" (active)" if is_active else ""),
+                    line=dict(
+                        color=palette[i % len(palette)],
+                        width=2.5 if is_active else 1.5,
+                    ),
+                ))
+            if not any_data:
+                st.caption("No trade history on any strategy yet.")
+            else:
+                cmp_fig.update_layout(
+                    paper_bgcolor="#0e1922", plot_bgcolor="#0e1922",
+                    font=dict(family="IBM Plex Mono", size=11, color="#8ba0b4"),
+                    margin=dict(l=48, r=16, t=16, b=36), height=320,
+                    legend=dict(bgcolor="rgba(0,0,0,0)",
+                                font=dict(size=10, color="#c8d8e8")),
+                    xaxis=dict(gridcolor="#2d4258", linecolor="#2d4258"),
+                    yaxis=dict(gridcolor="#2d4258", linecolor="#2d4258",
+                               tickformat=",.0f"),
+                )
+                st.plotly_chart(cmp_fig, width="stretch")
+                st.caption(
+                    "Absolute values — strategies with different starting "
+                    "cash will start at different y-positions."
+                )
+
     st.markdown("---")
 
     # ─────────────────────────────────────────────────────────────────────

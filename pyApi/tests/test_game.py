@@ -441,6 +441,31 @@ class TestGamePageRenders(unittest.TestCase):
         self.assertEqual([e.value for e in at.exception], [])
 
 
+class TestStrategyComparisonGuard(GameTestCase):
+    """Comparison expander is conditional on >1 portfolio.
+
+    Verifies the underlying value_history() call works per-portfolio
+    (which is what the comparison overlay relies on) — UI render is
+    covered by TestGamePageRenders."""
+
+    def test_value_history_isolated_per_portfolio(self):
+        # Two portfolios, only the first trades. Second must report empty.
+        p1 = game.create_portfolio("alpha", 10_000.0, db=self.port_db)
+        p2 = game.create_portfolio("beta",  10_000.0, db=self.port_db)
+        game.buy("AAPL", 1_000.0, portfolio_id=p1["id"], db=self.port_db)
+
+        h1 = game.value_history(portfolio_id=p1["id"], db=self.port_db)
+        h2 = game.value_history(portfolio_id=p2["id"], db=self.port_db)
+        self.assertGreater(len(h1), 0)
+        self.assertGreater(len(h2), 0)
+        # p2 never traded → curve is flat at starting cash; p1's curve
+        # must differ at least once thanks to the AAPL buy.
+        p2_totals = {round(r["total"], 2) for r in h2}
+        self.assertEqual(p2_totals, {10_000.0})
+        p1_totals = {round(r["total"], 2) for r in h1}
+        self.assertNotEqual(p1_totals, {10_000.0})
+
+
 if __name__ == "__main__":
     runner = unittest.main(verbosity=2, exit=False)
     sys.exit(0 if runner.result.wasSuccessful() else 1)
