@@ -18,7 +18,10 @@ CHART_LAYOUT = dict(
     plot_bgcolor="#0e1922",
     font=dict(family="IBM Plex Mono", size=11, color="#8ba0b4"),
     margin=dict(l=48, r=16, t=36, b=36),
-    legend=dict(bgcolor="rgba(0,0,0,0)", font=dict(size=10)),
+    # Legend labels (e.g. "Price", "RSI") need to be brighter than the
+    # general chart font — they're a key UI element users scan first.
+    legend=dict(bgcolor="rgba(0,0,0,0)",
+                font=dict(size=10, color="#c8d8e8")),
     xaxis=dict(gridcolor="#2d4258", linecolor="#2d4258", zeroline=False),
     yaxis=dict(gridcolor="#2d4258", linecolor="#2d4258", zeroline=False),
 )
