@@ -224,7 +224,7 @@ Keep responses concise and conversational."""
 
     with bf2:
         st.markdown(
-            "<span style='color:#4a6075;font-size:0.82rem'>"
+            "<span style='color:#8ba0b4;font-size:0.82rem'>"
             "The briefing will analyse all symbols selected in the sidebar. "
             "It calls the Claude API once per conversation turn — "
             "no data is stored outside this session."
@@ -377,7 +377,7 @@ Keep responses concise and conversational."""
         if prompt:
             with st.expander("🔍  Prompt sent to Claude", expanded=False):
                 st.markdown(
-                    "<span style='color:#4a6075;font-size:0.78rem'>"
+                    "<span style='color:#8ba0b4;font-size:0.78rem'>"
                     "This is the exact text sent to the Claude API."
                     "</span>",
                     unsafe_allow_html=True,

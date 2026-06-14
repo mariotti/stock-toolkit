@@ -168,7 +168,7 @@ with st.sidebar:
 
     st.markdown("---")
     st.markdown(
-        "<span style='font-size:0.72rem;color:#4a6075'>"
+        "<span style='font-size:0.72rem;color:#8ba0b4'>"
         "Data from stock_data.db<br>"
         "Run `stock_collector.py` to refresh"
         "</span>",

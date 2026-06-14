@@ -73,7 +73,7 @@ def render(selected_symbols, date_from_str, date_to_str):
 
         if not alert_results:
             st.markdown(
-                "<div style='padding:2rem;text-align:center;color:#4a6075'>"
+                "<div style='padding:2rem;text-align:center;color:#8ba0b4'>"
                 "Define conditions and click <b>Check alerts</b>."
                 "</div>", unsafe_allow_html=True
             )

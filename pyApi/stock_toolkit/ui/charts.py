@@ -19,8 +19,8 @@ CHART_LAYOUT = dict(
     font=dict(family="IBM Plex Mono", size=11, color="#8ba0b4"),
     margin=dict(l=48, r=16, t=36, b=36),
     legend=dict(bgcolor="rgba(0,0,0,0)", font=dict(size=10)),
-    xaxis=dict(gridcolor="#1e2f40", linecolor="#1e2f40", zeroline=False),
-    yaxis=dict(gridcolor="#1e2f40", linecolor="#1e2f40", zeroline=False),
+    xaxis=dict(gridcolor="#2d4258", linecolor="#2d4258", zeroline=False),
+    yaxis=dict(gridcolor="#2d4258", linecolor="#2d4258", zeroline=False),
 )
 
 
@@ -55,8 +55,8 @@ def score_bar_chart(results: list[dict]) -> go.Figure:
     fig.update_layout(**layout,
                       height=max(260, len(syms) * 38),
                       showlegend=False)
-    fig.update_xaxes(range=[0, 105], gridcolor="#1e2f40")
-    fig.update_yaxes(autorange="reversed", gridcolor="#1e2f40")
+    fig.update_xaxes(range=[0, 105], gridcolor="#2d4258")
+    fig.update_yaxes(autorange="reversed", gridcolor="#2d4258")
     return fig
 
 
@@ -114,8 +114,8 @@ def rsi_chart(df: pd.DataFrame, window: int = 14) -> go.Figure:
     lo = CHART_LAYOUT.copy()
     lo.update(height=420)
     fig.update_layout(**lo)
-    fig.update_xaxes(gridcolor="#1e2f40", linecolor="#1e2f40")
-    fig.update_yaxes(gridcolor="#1e2f40", linecolor="#1e2f40")
+    fig.update_xaxes(gridcolor="#2d4258", linecolor="#2d4258")
+    fig.update_yaxes(gridcolor="#2d4258", linecolor="#2d4258")
     return fig
 
 
@@ -251,7 +251,7 @@ def correlation_heatmap(dfs: dict[str, pd.DataFrame]) -> go.Figure:
 
     fig = go.Figure(go.Heatmap(
         z=z, x=syms, y=syms,
-        colorscale=[[0,"#f87171"],[0.5,"#1e2f40"],[1,"#4ade80"]],
+        colorscale=[[0,"#f87171"],[0.5,"#2d4258"],[1,"#4ade80"]],
         zmin=-1, zmax=1,
         text=[[f"{v:.2f}" for v in row] for row in z],
         texttemplate="%{text}",

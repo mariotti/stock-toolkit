@@ -87,7 +87,7 @@ def render(selected_symbols, date_from_str, date_to_str):
     results = st.session_state.get("score_results", [])
     if not results:
         st.markdown(
-            "<div style='padding:2rem;text-align:center;color:#4a6075'>"
+            "<div style='padding:2rem;text-align:center;color:#8ba0b4'>"
             "Select symbols and horizon, then click <b>Run scoring</b>."
             "</div>", unsafe_allow_html=True
         )

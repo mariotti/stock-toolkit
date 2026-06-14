@@ -56,7 +56,7 @@ def render(selected_symbols, date_from_str, date_to_str):
             )
         else:
             st.markdown(
-                "<span style='color:#4a6075;font-size:0.82rem'>"
+                "<span style='color:#8ba0b4;font-size:0.82rem'>"
                 f"Using all {len(selected_symbols)} sidebar symbol(s)"
                 "</span>",
                 unsafe_allow_html=True

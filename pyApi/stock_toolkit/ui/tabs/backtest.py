@@ -84,7 +84,7 @@ def render(selected_symbols, date_from_str, date_to_str):
     result = st.session_state.get("bt_result")
     if result is None:
         st.markdown(
-            "<div style='padding:2rem;text-align:center;color:#4a6075'>"
+            "<div style='padding:2rem;text-align:center;color:#8ba0b4'>"
             "Configure strategy parameters and click <b>Run backtest</b>."
             "</div>", unsafe_allow_html=True
         )
