@@ -37,6 +37,7 @@ ENTRY_POINTS = [
     "stock-setup",
     "stock-ui",
     "stock-bootstrap",
+    "stock-gap-fill",
 ]
 
 

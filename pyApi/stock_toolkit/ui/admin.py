@@ -184,11 +184,25 @@ def render():
     #  Inventory
     # ─────────────────────────────────────────────────────────────────────────
     st.markdown("### 🗂  Inventory")
-    inv_a, inv_b, _ = st.columns([1, 1, 2])
+    inv_a, inv_b, inv_c, inv_d = st.columns(4)
     with inv_a:
         summary_clicked = st.button("📊  Summary")
     with inv_b:
         check_clicked = st.button("🔍  Check gaps")
+    with inv_c:
+        fill_dry_clicked = st.button(
+            "🧪  Preview gap-fill",
+            help="Show which date ranges would be re-fetched from yfinance, "
+                 "without writing to the DB.",
+        )
+    with inv_d:
+        fill_clicked = st.button(
+            "🩹  Fill gaps",
+            type="primary",
+            help="Re-fetch missing date ranges from yfinance and insert them "
+                 "into the live DB. Holiday-style short gaps are skipped "
+                 "automatically (yfinance returns nothing).",
+        )
 
     if summary_clicked:
         ok, out = _run(
@@ -201,6 +215,21 @@ def render():
             [sys.executable, "-m", "stock_toolkit.inventory", "--check"],
             "inventory --check", timeout=120)
         with st.expander("📋  Consistency check", expanded=True):
+            st.code(out, language=None)
+    if fill_dry_clicked:
+        ok, out = _run(
+            [sys.executable, "-m", "stock_toolkit.gap_fill", "--dry-run"],
+            "gap-fill --dry-run", timeout=60)
+        with st.expander("📋  Gap-fill preview", expanded=True):
+            st.code(out, language=None)
+    if fill_clicked:
+        with st.spinner("Fetching missing date ranges via yfinance…"):
+            ok, out = _run(
+                [sys.executable, "-m", "stock_toolkit.gap_fill"],
+                "gap-fill", timeout=900)
+        (st.success if ok else st.error)(
+            f"{'✅' if ok else '❌'}  Gap-fill {'finished' if ok else 'failed'}.")
+        with st.expander("📋  Gap-fill output", expanded=True):
             st.code(out, language=None)
 
     # ─────────────────────────────────────────────────────────────────────────

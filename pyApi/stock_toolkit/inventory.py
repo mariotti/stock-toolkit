@@ -188,6 +188,69 @@ def cmd_remove(symbol: str, dbs: list[Path]) -> None:
 
 # ── consistency check ─────────────────────────────────────────────────────────
 
+def detect_gaps(dbs: list, symbol_filter: list | None = None,
+                gap_threshold_days: int = 5) -> dict:
+    """Pure (no-print) gap detection. Returns {(db_path, symbol): [(start, end), …]}
+    of multi-day stretches of missing business-day bars within each symbol's
+    active date range.
+
+    Used by both `cmd_check` (CLI display) and `stock_toolkit.gap_fill`
+    (the fill-from-yfinance helper). Mirrors the same heuristics: per-symbol
+    calendar derived from that symbol's own dates, gaps shorter than the
+    threshold are treated as exchange holidays and skipped.
+    """
+    import datetime as _dt
+    from collections import defaultdict
+
+    out: dict = {}
+    for db in dbs:
+        try:
+            con = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+        except sqlite3.OperationalError:
+            con = sqlite3.connect(db)
+
+        where, params = "", []
+        if symbol_filter:
+            placeholders = ",".join("?" * len(symbol_filter))
+            where, params = (f" AND symbol IN ({placeholders})",
+                             [s.upper() for s in symbol_filter])
+        try:
+            rows = con.execute(
+                f"SELECT symbol, timestamp FROM prices "
+                f"WHERE interval='1d'{where} ORDER BY symbol, timestamp",
+                params,
+            ).fetchall()
+        except sqlite3.OperationalError:
+            con.close()
+            continue
+        con.close()
+
+        sym_dates = defaultdict(set)
+        for sym, ts in rows:
+            sym_dates[sym].add(ts[:10])
+
+        for sym, dates in sym_dates.items():
+            ranges = []
+            sorted_dates = sorted(dates)
+            for i in range(1, len(sorted_dates)):
+                p = _dt.date.fromisoformat(sorted_dates[i - 1])
+                c = _dt.date.fromisoformat(sorted_dates[i])
+                if (c - p).days <= gap_threshold_days:
+                    continue
+                # Range of business days missing between p (exclusive) and c (exclusive)
+                start = p + _dt.timedelta(days=1)
+                end   = c - _dt.timedelta(days=1)
+                while start.weekday() >= 5 and start <= end:   # skip Sat/Sun
+                    start += _dt.timedelta(days=1)
+                while end.weekday() >= 5 and start <= end:
+                    end -= _dt.timedelta(days=1)
+                if start <= end:
+                    ranges.append((start, end))
+            if ranges:
+                out[(db, sym)] = ranges
+    return out
+
+
 def cmd_check(dbs: list[Path], symbol_filter: list[str] | None) -> None:
     """
     Data consistency report for daily (1d) bars.

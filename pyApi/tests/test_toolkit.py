@@ -268,6 +268,156 @@ class TestBootstrap(unittest.TestCase):
             _sys.argv = old_argv
 
 
+class TestGapDetection(unittest.TestCase):
+    """detect_gaps returns multi-day stretches of missing business-day bars."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.db = pathlib.Path(self.tmp.name) / "test.db"
+
+        con = sqlite3.connect(self.db)
+        con.execute("""
+            CREATE TABLE prices (
+              fetched_at TEXT, symbol TEXT, source TEXT, timestamp TEXT,
+              interval TEXT, open REAL, high REAL, low REAL, close REAL,
+              volume INTEGER, vwap REAL, change_pct REAL, extra TEXT,
+              UNIQUE(symbol, source, timestamp)
+            )
+        """)
+        rows = []
+        # Symbol with no gaps: 30 consecutive business days
+        for i in range(30):
+            d = date(2026, 4, 1) + timedelta(days=i)
+            if d.weekday() < 5:
+                rows.append(("CLEAN", d.isoformat()))
+        # Symbol with a 10-business-day gap in the middle
+        for i in range(15):
+            d = date(2026, 4, 1) + timedelta(days=i)
+            if d.weekday() < 5:
+                rows.append(("GAPPY", d.isoformat()))
+        for i in range(30, 45):
+            d = date(2026, 4, 1) + timedelta(days=i)
+            if d.weekday() < 5:
+                rows.append(("GAPPY", d.isoformat()))
+        for sym, ts in rows:
+            con.execute(
+                "INSERT INTO prices (symbol, source, timestamp, interval) "
+                "VALUES (?, 'yfinance', ?, '1d')",
+                (sym, ts + "T00:00:00+00:00"),
+            )
+        con.commit(); con.close()
+
+        from stock_toolkit.inventory import detect_gaps
+        self.gaps = detect_gaps([self.db])
+
+    def test_clean_symbol_has_no_gaps(self):
+        self.assertNotIn((self.db, "CLEAN"), self.gaps)
+
+    def test_gappy_symbol_detected(self):
+        self.assertIn((self.db, "GAPPY"), self.gaps)
+        ranges = self.gaps[(self.db, "GAPPY")]
+        self.assertEqual(len(ranges), 1, f"expected 1 gap, got {ranges}")
+        start, end = ranges[0]
+        # Gap is between bar 15 (= 2026-04-15) and bar 30 (= 2026-05-01)
+        self.assertGreaterEqual(start, date(2026, 4, 16))
+        self.assertLessEqual(end, date(2026, 4, 30))
+
+    def test_returned_dates_are_business_days(self):
+        for start, end in self.gaps.get((self.db, "GAPPY"), []):
+            self.assertLess(start.weekday(), 5, f"{start} is weekend")
+            self.assertLess(end.weekday(), 5, f"{end} is weekend")
+
+    def test_symbol_filter_restricts_results(self):
+        from stock_toolkit.inventory import detect_gaps
+        only_gappy = detect_gaps([self.db], symbol_filter=["GAPPY"])
+        self.assertEqual(set(s for _, s in only_gappy), {"GAPPY"})
+
+
+class TestGapFill(unittest.TestCase):
+    """fill_gaps fetches yfinance for the detected ranges and inserts new bars
+    without touching existing ones (UNIQUE constraint dedup).
+
+    Passes a fixture DB directly to avoid touching global module state
+    (the path constants in common.py / collector/config.py are resolved
+    at import time)."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.db = pathlib.Path(self.tmp.name) / "stock_data.db"
+
+        con = sqlite3.connect(self.db)
+        con.execute("""
+            CREATE TABLE prices (
+              fetched_at TEXT, symbol TEXT, source TEXT, timestamp TEXT,
+              interval TEXT, open REAL, high REAL, low REAL, close REAL,
+              volume INTEGER, vwap REAL, change_pct REAL, extra TEXT,
+              UNIQUE(symbol, source, timestamp)
+            )
+        """)
+        # GAPPY: 5 days early-April + 5 days late-May → ~30 business-day gap
+        for d_iso in ("2026-04-01", "2026-04-02", "2026-04-03", "2026-04-06",
+                      "2026-04-07", "2026-05-25", "2026-05-26", "2026-05-27",
+                      "2026-05-28", "2026-05-29"):
+            con.execute(
+                "INSERT INTO prices (symbol, source, timestamp, interval, "
+                "close) VALUES ('GAPPY', 'yfinance', ?, '1d', 100.0)",
+                (d_iso + "T00:00:00+00:00",),
+            )
+        con.commit(); con.close()
+
+    def _patch_yfinance(self, ticker_cls):
+        import types
+        fake = types.ModuleType("yfinance")
+        fake.Ticker = ticker_cls
+        patcher = unittest.mock.patch.dict(sys.modules, {"yfinance": fake})
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_fills_missing_range_with_yfinance(self):
+        import pandas as pd
+        gap_dates = pd.bdate_range("2026-04-08", "2026-05-22", tz="UTC")
+        fake_hist = pd.DataFrame({
+            "Open":   [100.0] * len(gap_dates),
+            "High":   [101.0] * len(gap_dates),
+            "Low":    [ 99.0] * len(gap_dates),
+            "Close":  [100.5] * len(gap_dates),
+            "Volume": [1000]  * len(gap_dates),
+        }, index=gap_dates)
+
+        class FakeTicker:
+            def __init__(self, sym): self.sym = sym
+            def history(self, **kw): return fake_hist
+
+        self._patch_yfinance(FakeTicker)
+        from stock_toolkit.gap_fill import fill_gaps
+        summary = fill_gaps(dbs=[self.db])
+
+        con = sqlite3.connect(self.db)
+        n = con.execute(
+            "SELECT COUNT(*) FROM prices WHERE symbol='GAPPY'"
+        ).fetchone()[0]
+        con.close()
+        self.assertGreater(n, 10, "expected more than the original 10 bars")
+        self.assertTrue(any(v > 0 for v in summary.values()))
+
+    def test_dry_run_does_not_write(self):
+        class FakeTicker:
+            def __init__(self, sym): self.sym = sym
+            def history(self, **kw): raise AssertionError("dry-run hit yfinance")
+
+        self._patch_yfinance(FakeTicker)
+        from stock_toolkit.gap_fill import fill_gaps
+        fill_gaps(dbs=[self.db], dry_run=True)
+
+        con = sqlite3.connect(self.db)
+        n = con.execute("SELECT COUNT(*) FROM prices WHERE symbol='GAPPY'"
+                        ).fetchone()[0]
+        con.close()
+        self.assertEqual(n, 10, "DB should be unchanged after dry run")
+
+
 class FixtureTestCase(unittest.TestCase):
     """Base class: sets up a shared temp dir + fixture DB for the class."""
 

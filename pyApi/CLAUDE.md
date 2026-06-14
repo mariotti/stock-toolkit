@@ -53,6 +53,12 @@ stock-bootstrap                  # all configured symbols, full history → data
 stock-bootstrap -s AAPL --range 2020-2024
 ```
 
+**Fill missed days (targeted backfill, no key):**
+```bash
+stock-gap-fill --dry-run         # show what would be re-fetched
+stock-gap-fill                   # fetch only the missing date ranges via yfinance
+```
+
 ## Architecture
 
 ### Three-Phase Design

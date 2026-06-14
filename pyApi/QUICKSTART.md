@@ -114,7 +114,7 @@ the top, plus an **⚙️ Admin** page in the sidebar nav for operations:
 | **🔔 Alerts** | Configure conditions (RSI < 30, drawdown > 20%, …) and notification channel. Edge-triggered: fires once on False→True transition |
 | **🤖 Briefing** | Click "Generate today's briefing" → Claude analyses your scores + fundamentals + indicators and writes a plain-English summary. Then ask follow-up questions in chat — context is prompt-cached so follow-ups are cheap |
 | **📥 Collect** | One-click data refresh for the current sidebar selection |
-| **⚙️ Admin** *(sidebar)* | Edit your watchlist (SYMBOLS / SYMBOLS_IGNORE) and save back to `config.env`; trigger a scheduled collection tier or a historical `stock-bootstrap` on demand; view inventory summary and gap-check; see the failure-tracker's suppressed (symbol, source) pairs |
+| **⚙️ Admin** *(sidebar)* | Edit your watchlist (SYMBOLS / SYMBOLS_IGNORE) and save back to `config.env`; trigger a scheduled collection tier, a historical `stock-bootstrap`, or `stock-gap-fill` to plug missed days; view inventory summary and gap-check; see the failure-tracker's suppressed (symbol, source) pairs |
 
 ---
 

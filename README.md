@@ -69,8 +69,8 @@ All documentation lives in [`pyApi/`](pyApi/):
 
 ## Project facts
 
-- Python 3.10+, packaged with `pyproject.toml`, 9 console entry points
-- 242 offline tests (no network, no keys needed) run on every push in CI
+- Python 3.10+, packaged with `pyproject.toml`, 10 console entry points
+- 258 offline tests (no network, no keys needed) run on every push in CI
 - Free-tier friendly: per-source rate limiting and daily/monthly call budgets
 - Not financial advice — this is a data analysis and learning tool
 
