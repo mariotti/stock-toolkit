@@ -111,7 +111,7 @@ class TestBuy(GameTestCase):
 
     def test_buy_reduces_cash_by_full_spend(self):
         game.buy("AAPL", 1500.0, db=self.port_db)
-        p = game.get_portfolio(self.port_db)
+        p = game.get_portfolio(db=self.port_db)
         self.assertAlmostEqual(p["cash"], 10_000.0 - 1500.0, places=4)
 
     def test_buy_requires_positive_amount(self):
@@ -137,21 +137,21 @@ class TestSell(GameTestCase):
         game.buy("AAPL", 2000.0, db=self.port_db)
 
     def test_sell_partial(self):
-        positions_before = game.get_positions(self.port_db)
+        positions_before = game.get_positions(db=self.port_db)
         held = positions_before["AAPL"]["qty"]
         out  = game.sell("AAPL", held / 2, db=self.port_db)
         self.assertAlmostEqual(out["qty"], held / 2, places=6)
 
-        positions_after = game.get_positions(self.port_db)
+        positions_after = game.get_positions(db=self.port_db)
         self.assertAlmostEqual(positions_after["AAPL"]["qty"], held / 2,
                                places=6)
 
     def test_sell_all_closes_position(self):
         game.sell("AAPL", db=self.port_db)   # qty=None → full
-        self.assertNotIn("AAPL", game.get_positions(self.port_db))
+        self.assertNotIn("AAPL", game.get_positions(db=self.port_db))
 
     def test_sell_more_than_held_raises(self):
-        held = game.get_positions(self.port_db)["AAPL"]["qty"]
+        held = game.get_positions(db=self.port_db)["AAPL"]["qty"]
         with self.assertRaises(game.GameError):
             game.sell("AAPL", held * 2, db=self.port_db)
 
@@ -180,7 +180,7 @@ class TestPositions(GameTestCase):
         con.commit(); con.close()
         game.buy("AAPL", 1500.0, db=self.port_db)
 
-        pos = game.get_positions(self.port_db)["AAPL"]
+        pos = game.get_positions(db=self.port_db)["AAPL"]
         # qty_1 = 1000/200.2, qty_2 = 1500/300.3
         # avg = (1000 + 1500) / (qty_1 + qty_2)
         q1 = 1000.0 / 200.2
@@ -191,7 +191,7 @@ class TestPositions(GameTestCase):
     def test_mark_to_market_totals(self):
         game.init_portfolio(starting_cash=10_000.0, db=self.port_db)
         game.buy("AAPL", 2002.0, db=self.port_db)   # fill 200.2 → 10 shares
-        mtm = game.mark_to_market(self.port_db)
+        mtm = game.mark_to_market(db=self.port_db)
         # cash = 10000 - 2002 = 7998; equity = 10 shares × 200 = 2000
         self.assertAlmostEqual(mtm["cash"],   7998.0, places=2)
         self.assertAlmostEqual(mtm["equity"], 2000.0, places=2)
@@ -199,6 +199,166 @@ class TestPositions(GameTestCase):
         # Unrealised: 2000 - 2002 = -2 (the slippage premium)
         h = mtm["holdings"][0]
         self.assertAlmostEqual(h["pnl"], -2.0, places=2)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  Multi-portfolio
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestMultiPortfolio(GameTestCase):
+    """Each portfolio has its own trades, cash, and reset state."""
+
+    def test_create_sets_active(self):
+        a = game.create_portfolio("Aggressive", starting_cash=5000.0,
+                                  db=self.port_db)
+        self.assertEqual(a["name"], "Aggressive")
+        self.assertEqual(game.get_active_portfolio_id(db=self.port_db),
+                         a["id"])
+
+    def test_isolation_between_portfolios(self):
+        a = game.create_portfolio("A", starting_cash=10_000.0,
+                                  db=self.port_db)
+        b = game.create_portfolio("B", starting_cash=10_000.0,
+                                  db=self.port_db)
+        game.set_active_portfolio(a["id"], db=self.port_db)
+        game.buy("AAPL", 1000.0, db=self.port_db)
+        game.set_active_portfolio(b["id"], db=self.port_db)
+        game.buy("MSFT", 2000.0, db=self.port_db)
+
+        self.assertEqual(
+            len(game.get_trades(portfolio_id=a["id"], db=self.port_db)), 1)
+        self.assertEqual(
+            len(game.get_trades(portfolio_id=b["id"], db=self.port_db)), 1)
+        self.assertIn("AAPL", game.get_positions(portfolio_id=a["id"],
+                                                 db=self.port_db))
+        self.assertNotIn("AAPL", game.get_positions(portfolio_id=b["id"],
+                                                    db=self.port_db))
+
+    def test_reset_only_active(self):
+        a = game.create_portfolio("A", starting_cash=10_000.0,
+                                  db=self.port_db)
+        b = game.create_portfolio("B", starting_cash=5_000.0,
+                                  db=self.port_db)
+        game.set_active_portfolio(a["id"], db=self.port_db)
+        game.buy("AAPL", 1000.0, db=self.port_db)
+        game.set_active_portfolio(b["id"], db=self.port_db)
+        game.buy("MSFT", 500.0, db=self.port_db)
+
+        game.reset_portfolio(starting_cash=999.0, db=self.port_db)
+        # B was active; A unchanged
+        self.assertEqual(
+            game.get_portfolio(portfolio_id=a["id"],
+                               db=self.port_db)["cash"],
+            10_000.0 - 1000.0)
+        self.assertEqual(
+            game.get_portfolio(portfolio_id=b["id"],
+                               db=self.port_db)["cash"],
+            999.0)
+
+    def test_duplicate_name_rejected(self):
+        game.create_portfolio("X", db=self.port_db)
+        with self.assertRaises(game.GameError):
+            game.create_portfolio("X", db=self.port_db)
+
+    def test_archive_moves_active(self):
+        a = game.create_portfolio("A", db=self.port_db)
+        b = game.create_portfolio("B", db=self.port_db)
+        game.set_active_portfolio(a["id"], db=self.port_db)
+        game.archive_portfolio(a["id"], db=self.port_db)
+        self.assertEqual(game.get_active_portfolio_id(db=self.port_db),
+                         b["id"])
+        self.assertEqual(
+            [p["name"] for p in game.list_portfolios(db=self.port_db)],
+            ["B"])
+        self.assertEqual(
+            {p["name"] for p in
+             game.list_portfolios(include_archived=True, db=self.port_db)},
+            {"A", "B"})
+
+    def test_delete_cascades_trades(self):
+        a = game.create_portfolio("A", db=self.port_db)
+        game.buy("AAPL", 500.0, db=self.port_db)
+        self.assertEqual(
+            len(game.get_trades(portfolio_id=a["id"], db=self.port_db)), 1)
+        game.delete_portfolio(a["id"], db=self.port_db)
+        self.assertEqual(
+            [p["id"] for p in game.list_portfolios(db=self.port_db)], [])
+
+    def test_no_active_raises_helpfully(self):
+        with self.assertRaises(game.GameError):
+            game.buy("AAPL", 500.0, db=self.port_db)
+
+
+class TestMigrationFromV1(unittest.TestCase):
+    """An old single-portfolio DB is migrated transparently to v2."""
+
+    def setUp(self):
+        self.tmp     = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.port_db = pathlib.Path(self.tmp.name) / "portfolio.db"
+        self.price_db = pathlib.Path(self.tmp.name) / "stock_data.db"
+        _make_price_db(self.price_db, {"AAPL": 200.0})
+        patcher = mock.patch(
+            "stock_toolkit.game._discover_data_dbs",
+            return_value=[self.price_db],
+        )
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+        # Hand-built v1 schema with one portfolio and one trade
+        con = sqlite3.connect(self.port_db)
+        con.executescript("""
+            CREATE TABLE portfolio (
+                id INTEGER PRIMARY KEY CHECK (id = 1),
+                starting_cash REAL NOT NULL, cash REAL NOT NULL,
+                created_at TEXT NOT NULL, last_reset_at TEXT NOT NULL
+            );
+            CREATE TABLE trades (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp TEXT NOT NULL, symbol TEXT NOT NULL,
+                side TEXT NOT NULL CHECK (side IN ('buy', 'sell')),
+                qty REAL NOT NULL, price REAL NOT NULL,
+                fill_price REAL NOT NULL, cash_delta REAL NOT NULL
+            );
+            INSERT INTO portfolio VALUES
+                (1, 10000.0, 8500.0, '2026-05-01T00:00:00+00:00',
+                 '2026-05-01T00:00:00+00:00');
+            INSERT INTO trades (timestamp, symbol, side, qty, price,
+                                fill_price, cash_delta) VALUES
+                ('2026-05-02T10:00:00+00:00', 'AAPL', 'buy', 7.4925,
+                 200.0, 200.2, -1500.0);
+        """)
+        con.commit(); con.close()
+
+    def test_migration_preserves_portfolio_state(self):
+        p = game.init_portfolio(db=self.port_db)
+        self.assertEqual(p["name"], "Default")
+        self.assertEqual(p["cash"], 8500.0)
+        self.assertEqual(p["starting_cash"], 10000.0)
+        self.assertEqual(p["created_at"], "2026-05-01T00:00:00+00:00")
+
+    def test_migration_preserves_trades(self):
+        game.init_portfolio(db=self.port_db)
+        trades = game.get_trades(db=self.port_db)
+        self.assertEqual(len(trades), 1)
+        self.assertEqual(trades[0]["symbol"], "AAPL")
+        self.assertAlmostEqual(trades[0]["qty"], 7.4925, places=4)
+
+    def test_migration_drops_old_singular_table(self):
+        game.init_portfolio(db=self.port_db)
+        con = sqlite3.connect(self.port_db)
+        row = con.execute(
+            "SELECT name FROM sqlite_master "
+            "WHERE type='table' AND name='portfolio'"
+        ).fetchone()
+        con.close()
+        self.assertIsNone(row,
+                          "old singular 'portfolio' table should be dropped")
+
+    def test_migration_idempotent_on_v2(self):
+        game.init_portfolio(db=self.port_db)
+        p = game.init_portfolio(db=self.port_db)
+        self.assertEqual(p["name"], "Default")
 
 
 # ─────────────────────────────────────────────────────────────────────────────

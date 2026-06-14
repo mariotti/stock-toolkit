@@ -82,7 +82,7 @@ stock-gap-fill                   # fetch only the missing date ranges via yfinan
 - Briefing tab integrates with Claude API (`ANTHROPIC_API_KEY` in config.env) for multi-turn chat; the prompt context includes a yfinance fundamentals snapshot (P/E, forward P/E, revenue/EPS growth)
 - Alert system uses edge detection (fires once on False→True transition) with state in `.alerts_state.json`
 - Notification channels: email (SMTP), Pushover, Slack
-- Game: virtual cash → fractional-share buy/sell at latest close + 0.1% slippage; persistent state in `portfolio.db`; weighted-average cost basis
+- Game: multiple named paper-trading "strategies" in one `portfolio.db` (v2 schema: portfolios + meta + trades-with-FK); active one persisted in `meta('active_portfolio_id')`; old single-portfolio DBs auto-migrate to a "Default" strategy on first open
 
 ### Data Flow
 

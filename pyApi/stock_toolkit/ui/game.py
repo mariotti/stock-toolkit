@@ -12,8 +12,10 @@ import streamlit as st
 from stock_toolkit.common import CONFIG_PATH, load_config
 from stock_toolkit.game import (
     GameError, SLIPPAGE_BPS,
-    buy, get_latest_price, init_portfolio, mark_to_market,
-    reset_portfolio, sell, value_history,
+    archive_portfolio, buy, create_portfolio, delete_portfolio,
+    get_latest_price, init_portfolio, list_portfolios, mark_to_market,
+    rename_portfolio, reset_portfolio, sell, set_active_portfolio,
+    value_history,
 )
 
 
@@ -55,8 +57,49 @@ def render():
     extra_in_db   = sorted(db_symbols - config_symbols)
     watchlist     = in_watchlist + extra_in_db
 
-    # Ensure the portfolio exists (no-op once initialised)
+    # Ensure at least one portfolio exists (no-op once initialised)
     init_portfolio()
+    portfolios = list_portfolios()
+
+    # ─────────────────────────────────────────────────────────────────────
+    #  Strategy selector + "+ New strategy" expander
+    # ─────────────────────────────────────────────────────────────────────
+    sel_col, new_col = st.columns([3, 2])
+    with sel_col:
+        names      = [p["name"] for p in portfolios]
+        ids        = [p["id"]   for p in portfolios]
+        active_mtm = mark_to_market()
+        try:
+            cur_idx = ids.index(active_mtm["id"])
+        except (ValueError, KeyError):
+            cur_idx = 0
+        chosen = st.selectbox(
+            "Active strategy", names, index=cur_idx, key="game_pf_select",
+            help=("Each strategy has its own cash, positions, and trade "
+                  "history. Switch any time — they all keep running."),
+        )
+        chosen_id = ids[names.index(chosen)]
+        if chosen_id != active_mtm["id"]:
+            set_active_portfolio(chosen_id)
+            st.rerun()
+
+    with new_col:
+        with st.expander("➕  New strategy"):
+            new_name = st.text_input("Name", key="game_new_name",
+                                     placeholder="e.g. Aggressive growth")
+            new_cash = st.number_input(
+                "Starting cash", min_value=100.0, max_value=10_000_000.0,
+                value=10_000.0, step=1000.0, key="game_new_cash",
+            )
+            if st.button("Create & activate", type="primary",
+                         key="game_new_btn", disabled=not new_name.strip()):
+                try:
+                    create_portfolio(new_name, starting_cash=float(new_cash))
+                    st.success(f"Created strategy {new_name!r}.")
+                    st.rerun()
+                except GameError as e:
+                    st.error(str(e))
+
     mtm = mark_to_market()
 
     # ─────────────────────────────────────────────────────────────────────
@@ -249,22 +292,57 @@ def render():
     st.markdown("---")
 
     # ─────────────────────────────────────────────────────────────────────
-    #  Settings — reset
+    #  Settings — current strategy: rename / reset / archive / delete
     # ─────────────────────────────────────────────────────────────────────
-    with st.expander("⚙️  Settings — start over"):
+    with st.expander(f"⚙️  Settings — strategy {mtm['name']!r}"):
+        st.markdown("**Rename**")
+        ren = st.text_input("New name", value=mtm["name"],
+                            key="game_rename_input")
+        if st.button("Rename", key="game_rename_btn",
+                     disabled=(ren.strip() == mtm["name"] or not ren.strip())):
+            try:
+                rename_portfolio(mtm["id"], ren.strip())
+                st.success(f"Renamed to {ren.strip()!r}.")
+                st.rerun()
+            except GameError as e:
+                st.error(str(e))
+
+        st.markdown("---")
+        st.markdown("**Reset (wipe positions, keep the strategy)**")
         new_cash = st.number_input(
             "Starting cash for the reset",
             min_value=100.0, max_value=10_000_000.0,
             value=float(mtm["starting_cash"]), step=1000.0,
             key="game_reset_cash",
         )
-        confirm = st.checkbox(
-            "I understand this wipes ALL positions and trade history.",
+        confirm_reset = st.checkbox(
+            "I understand this wipes ALL positions and trade history "
+            f"for {mtm['name']!r}.",
             key="game_reset_confirm")
-        if st.button("🗑  Reset portfolio", disabled=not confirm,
+        if st.button("🗑  Reset this strategy", disabled=not confirm_reset,
                      key="game_reset_btn"):
             reset_portfolio(starting_cash=float(new_cash))
-            st.success(f"Portfolio reset. Starting cash: {_money(new_cash)}")
+            st.success(f"Reset {mtm['name']!r}. "
+                       f"Starting cash: {_money(new_cash)}")
+            st.rerun()
+
+        st.markdown("---")
+        st.markdown("**Archive (hide from selector, keep history)**")
+        if st.button("📦  Archive this strategy", key="game_arch_btn"):
+            archive_portfolio(mtm["id"])
+            st.success(f"Archived {mtm['name']!r}.")
+            st.rerun()
+
+        st.markdown("---")
+        st.markdown("**Delete (irreversible — wipes the strategy "
+                    "and its trades)**")
+        confirm_del = st.checkbox(
+            f"I want to permanently delete {mtm['name']!r}.",
+            key="game_del_confirm")
+        if st.button("❌  Delete this strategy",
+                     disabled=not confirm_del, key="game_del_btn"):
+            delete_portfolio(mtm["id"])
+            st.success(f"Deleted {mtm['name']!r}.")
             st.rerun()
 
     # Footer
