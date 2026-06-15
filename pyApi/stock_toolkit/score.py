@@ -382,6 +382,41 @@ def step_momentum(df: pd.DataFrame) -> dict:
     return out
 
 
+def step_macd(df: pd.DataFrame, fast: int = 12, slow: int = 26,
+              signal_window: int = 9) -> dict:
+    """Step — MACD snapshot for the latest bar.
+
+    Returns the latest MACD value, signal value, histogram, and a
+    coarse regime label ('bullish' if MACD > signal and histogram
+    growing, 'bearish' if the reverse, 'neutral' otherwise). Used by
+    the Briefing prompt and surfaced in the score table for
+    context — does not enter the weighted score itself.
+    """
+    close = df["close"].dropna()
+    if len(close) < slow + signal_window:
+        return {}
+    ema_fast = close.ewm(span=fast,  adjust=False).mean()
+    ema_slow = close.ewm(span=slow,  adjust=False).mean()
+    macd_line   = ema_fast - ema_slow
+    signal_line = macd_line.ewm(span=signal_window, adjust=False).mean()
+    hist        = macd_line - signal_line
+
+    m_now, s_now, h_now = (float(macd_line.iloc[-1]),
+                           float(signal_line.iloc[-1]),
+                           float(hist.iloc[-1]))
+    h_prev = float(hist.iloc[-2]) if len(hist) >= 2 else h_now
+    if m_now > s_now and h_now > h_prev:
+        regime = "bullish"
+    elif m_now < s_now and h_now < h_prev:
+        regime = "bearish"
+    else:
+        regime = "neutral"
+    return {"macd":   round(m_now, 4),
+            "signal": round(s_now, 4),
+            "hist":   round(h_now, 4),
+            "regime": regime}
+
+
 def step_hurst(df: pd.DataFrame) -> dict:
     """Step 9 — Hurst exponent of DAILY log returns (trend persistence).
 

@@ -779,6 +779,17 @@ class TestScoreSteps(FixtureTestCase):
         self.assertLessEqual(r["prob_gain"], 100)
         self.assertLess(r["p5"], r["p50"])  # P5 < P50 always
 
+    def test_step_macd(self):
+        # v1.10 — MACD snapshot returns macd/signal/hist + regime label.
+        r = self.ss.step_macd(self.df)
+        self.assertIn("macd",   r)
+        self.assertIn("signal", r)
+        self.assertIn("hist",   r)
+        self.assertIn("regime", r)
+        self.assertIn(r["regime"], ("bullish", "bearish", "neutral"))
+        # Histogram should be macd - signal at the latest bar (rounded).
+        self.assertAlmostEqual(r["hist"], r["macd"] - r["signal"], places=3)
+
     def test_score_symbol_range(self):
         raw = {
             "symbol":     "AAPL",
@@ -1017,6 +1028,26 @@ class TestBacktest(FixtureTestCase):
         sigs = self.sb.signals_breakout(self.df, window=20)
         result, _ = self._run_strategy(sigs)
         self.assertIn("win_rate_pct", result["metrics"])
+
+    def test_macd_strategy(self):
+        # v1.10 — MACD-cross strategy returns valid -1/0/1 signals and
+        # plugs into the Backtester the same way the others do.
+        sigs = self.sb.signals_macd(
+            self.df, fast=12, slow=26, signal_window=9,
+        )
+        self.assertEqual(len(sigs), len(self.df))
+        self.assertTrue(sigs.isin([-1, 0, 1]).all())
+        result, _ = self._run_strategy(sigs)
+        self.assertIn("n_trades", result["metrics"])
+
+    def test_macd_helper_outputs(self):
+        # The _macd helper returns three series of equal length.
+        m, s, h = self.sb._macd(self.df["close"], 12, 26, 9)
+        self.assertEqual(len(m), len(s))
+        self.assertEqual(len(m), len(h))
+        # Histogram is macd - signal at every bar.
+        diff = (m - s) - h
+        self.assertLess(diff.abs().max(), 1e-9)
 
     def test_no_lookahead(self):
         """Signal at bar t should not use bar t+1 close."""

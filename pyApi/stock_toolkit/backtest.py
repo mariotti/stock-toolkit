@@ -124,6 +124,18 @@ def _bbands(series: pd.Series, window: int) -> tuple[pd.Series, pd.Series, pd.Se
     return mid - 2 * std, mid, mid + 2 * std
 
 
+def _macd(series: pd.Series, fast: int = 12, slow: int = 26,
+          signal_window: int = 9) -> tuple[pd.Series, pd.Series, pd.Series]:
+    """Standard MACD: EMA(fast) − EMA(slow), with a signal EMA on top.
+    Returns (macd_line, signal_line, histogram)."""
+    ema_fast = series.ewm(span=fast,  adjust=False).mean()
+    ema_slow = series.ewm(span=slow,  adjust=False).mean()
+    macd_line   = ema_fast - ema_slow
+    signal_line = macd_line.ewm(span=signal_window, adjust=False).mean()
+    hist        = macd_line - signal_line
+    return macd_line, signal_line, hist
+
+
 # ─────────────────────────────────────────────
 #  SIGNAL GENERATORS
 #  Each returns a pd.Series of int: +1=BUY, -1=SELL, 0=HOLD
@@ -187,11 +199,29 @@ def signals_breakout(df: pd.DataFrame, window: int) -> pd.Series:
     return sig
 
 
+def signals_macd(df: pd.DataFrame, fast: int = 12, slow: int = 26,
+                 signal_window: int = 9) -> pd.Series:
+    """Classic MACD-cross trend-following strategy.
+
+    Buy when the MACD line crosses above the signal line (bullish cross).
+    Sell when it crosses back below (bearish cross). Slow on noisy
+    sideways markets, decent on persistent trends.
+    """
+    macd_line, signal_line, _ = _macd(df["close"], fast, slow, signal_window)
+    prev_m = macd_line.shift(1)
+    prev_s = signal_line.shift(1)
+    sig    = pd.Series(0, index=df.index)
+    sig[(prev_m <= prev_s) & (macd_line > signal_line)] =  1   # bullish cross
+    sig[(prev_m >= prev_s) & (macd_line < signal_line)] = -1   # bearish cross
+    return sig
+
+
 STRATEGIES = {
     "rsi":       signals_rsi,
     "sma_cross": signals_sma_cross,
     "bbands":    signals_bbands,
     "breakout":  signals_breakout,
+    "macd":      signals_macd,
 }
 
 
@@ -505,6 +535,7 @@ strategies:
   sma_cross  Buy on golden cross (fast SMA > slow SMA), sell on death cross
   bbands     Buy when price crosses below lower Bollinger Band, sell at middle band
   breakout   Buy on N-bar high breakout, sell on N-bar low breakdown
+  macd       Buy on MACD-over-signal bullish cross, sell on bearish cross
 
 examples:
   python3 stock_backtest.py -s AAPL --strategy rsi --window 14 --plot
@@ -537,6 +568,12 @@ examples:
                         help="RSI level to buy at (default: 30)")
     parser.add_argument("--sell-at", dest="sell_at", type=float, default=70.0,
                         help="RSI level to sell at (default: 70)")
+    parser.add_argument("--macd-fast",   dest="macd_fast",   type=int, default=12,
+                        help="MACD fast EMA span (default: 12)")
+    parser.add_argument("--macd-slow",   dest="macd_slow",   type=int, default=26,
+                        help="MACD slow EMA span (default: 26)")
+    parser.add_argument("--macd-signal", dest="macd_signal", type=int, default=9,
+                        help="MACD signal EMA span (default: 9)")
 
     # execution parameters
     parser.add_argument("--capital",    type=float, default=10_000.0,
@@ -612,6 +649,24 @@ examples:
                 ax.plot(dates, hi,  color="#1f77b4", linewidth=0.8, linestyle=":")
                 ax.fill_between(dates, lo, hi, alpha=0.1, color="#1f77b4")
                 ax.set_ylabel("BBands")
+                ax.grid(True, alpha=0.3)
+        elif args.strategy == "macd":
+            signals = strategy_fn(eval_df, args.macd_fast, args.macd_slow,
+                                  args.macd_signal)
+            label   = (f"MACD({args.macd_fast},{args.macd_slow},"
+                       f"{args.macd_signal})")
+            def ind_fn(ax, df, dates):
+                m, s, _h = _macd(
+                    df["close"], args.macd_fast, args.macd_slow,
+                    args.macd_signal,
+                )
+                ax.plot(dates, m, color="#1f77b4", linewidth=1.0,
+                        label="MACD")
+                ax.plot(dates, s, color="#ff7f0e", linewidth=1.0,
+                        label="Signal")
+                ax.axhline(0, color="#888", linewidth=0.6, linestyle="--")
+                ax.set_ylabel("MACD")
+                ax.legend(fontsize=8)
                 ax.grid(True, alpha=0.3)
         else:  # breakout
             signals = strategy_fn(eval_df, args.window)
