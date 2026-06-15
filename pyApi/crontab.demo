@@ -170,9 +170,9 @@ STOCK_DIR=/path/to/stock-toolkit
 #     <key>Minute</key> <integer>0</integer>
 #   </dict>
 #   <key>StandardOutPath</key>
-#   <string>/path/to/stock-toolkit/collector.log</string>
+#   <string>/path/to/stock-toolkit/logs/collector.log</string>
 #   <key>StandardErrorPath</key>
-#   <string>/path/to/stock-toolkit/collector.log</string>
+#   <string>/path/to/stock-toolkit/logs/collector.log</string>
 # </dict>
 # </plist>
 #

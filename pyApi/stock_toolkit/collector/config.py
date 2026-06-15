@@ -157,7 +157,10 @@ OUTPUT_DIR     = Path(_cfg.get("OUTPUT_DIR", str(BASE_DIR)))
 DB_PATH        = OUTPUT_DIR / _cfg.get("DB_FILE",      "stock_data.db")
 CSV_PATH       = OUTPUT_DIR / _cfg.get("CSV_FILE",     "stock_data.csv")
 STATE_PATH     = OUTPUT_DIR / _cfg.get("STATE_FILE",   ".collector_state.json")
-LOG_PATH       = OUTPUT_DIR / _cfg.get("LOG_FILE",     "collector.log")
+# Logs live under their own subdir to keep OUTPUT_DIR uncluttered.
+# Override LOG_DIR (relative or absolute) for a different layout.
+LOG_DIR        = OUTPUT_DIR / _cfg.get("LOG_DIR",      "logs")
+LOG_PATH       = LOG_DIR    / _cfg.get("LOG_FILE",     "collector.log")
 GNUPLOT_DIR    = OUTPUT_DIR / _cfg.get("GNUPLOT_DIR",  "gnuplot-data")
 MATPLOTLIB_DIR = OUTPUT_DIR / _cfg.get("MATPLOT_DIR",  "matplot")
 HIST_DIR       = OUTPUT_DIR / _cfg.get("HIST_DIR",     "data")
@@ -187,6 +190,7 @@ MINUTE_LIMITS = {
 #  LOGGING
 # ─────────────────────────────────────────────
 
+LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s  %(levelname)-8s  %(message)s",

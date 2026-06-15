@@ -5,11 +5,7 @@
 
 # ─── CSV exports and runtime files ────────────
 stock_data.csv
-collector.log
-cron.log
-cron_err.log
-alerts.log
-alerts_err.log
+logs/
 .collector_state.json
 .alerts_state.json
 

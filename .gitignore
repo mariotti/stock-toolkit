@@ -2,6 +2,8 @@
 /data
 /.env
 /collector.log
+/logs/
+pyApi/logs/
 
 # Python build artifacts
 pyApi/build/
