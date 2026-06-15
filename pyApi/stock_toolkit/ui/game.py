@@ -185,6 +185,60 @@ def render():
                         st.rerun()
                     except GameError as e:
                         st.error(str(e))
+
+        # ── Diversification check ────────────────────────────────────────
+        # Two simple "are you over-concentrated?" signals computed from
+        # the holdings table + last 60 days of closes.
+        if len(positions) >= 2:
+            top_w = float(df["weight"].max())
+            try:
+                from datetime import date as _ddt, timedelta as _td
+                from stock_toolkit.ui.helpers import get_prices as _gp
+                end = _ddt.today().isoformat()
+                start = (_ddt.today() - _td(days=90)).isoformat()
+                closes = {}
+                for h in positions:
+                    pdf = _gp(h["symbol"], start, end)
+                    if not pdf.empty:
+                        closes[h["symbol"]] = (
+                            pdf.set_index("timestamp")["close"].astype(float)
+                        )
+                if len(closes) >= 2:
+                    cdf = pd.DataFrame(closes).pct_change().dropna()
+                    corr = cdf.corr()
+                    # Mean of the upper triangle (excluding the diagonal).
+                    import numpy as _np
+                    tri = corr.where(_np.triu(
+                        _np.ones(corr.shape, dtype=bool), k=1
+                    ))
+                    avg_corr = float(tri.stack().mean())
+                else:
+                    avg_corr = None
+            except Exception:
+                avg_corr = None
+
+            warn_lines = []
+            if top_w >= 40.0:
+                warn_lines.append(
+                    f"⚠️  Top position weight **{top_w:.0f}%** of equity "
+                    "— concentrated."
+                )
+            if avg_corr is not None and avg_corr >= 0.7:
+                warn_lines.append(
+                    f"⚠️  Avg pairwise correlation of holdings "
+                    f"**{avg_corr:.2f}** — low diversification "
+                    "(your positions tend to move together)."
+                )
+            ok_lines = []
+            if not warn_lines:
+                ok_lines.append(
+                    f"✅  Top weight {top_w:.0f}%"
+                    + (f" · avg corr {avg_corr:.2f}"
+                       if avg_corr is not None else "")
+                    + " — healthy spread."
+                )
+            for line in warn_lines + ok_lines:
+                st.caption(line)
     else:
         st.info("No open positions yet — use the Buy form below to get started.")
 
@@ -213,12 +267,50 @@ def render():
             else:
                 fill_buy = price * (1 + SLIPPAGE_BPS / 10000.0)
                 max_cash = float(mtm["cash"])
-                amount   = st.number_input(
-                    f"Cash to spend (max {_money(max_cash)})",
-                    min_value=0.0, max_value=max_cash,
-                    value=min(500.0, max_cash), step=50.0,
-                    key="game_buy_amt",
+                # Sizing helper — picks how the cash amount is decided:
+                #   Fixed CHF       → you type a raw amount (legacy default)
+                #   % of cash       → fixed-fractional sizing off available cash
+                #   % of equity     → percent of total portfolio value
+                sizing = st.radio(
+                    "Sizing",
+                    ["Fixed CHF", "% of cash", "% of equity"],
+                    horizontal=True, key="game_buy_sizing",
+                    help=("Fixed-fractional sizing (5% of cash) is the "
+                          "classic introductory rule; % of equity is the "
+                          "'always same share of net worth' variant."),
                 )
+                if sizing == "Fixed CHF":
+                    amount = st.number_input(
+                        f"Cash to spend (max {_money(max_cash)})",
+                        min_value=0.0, max_value=max_cash,
+                        value=min(500.0, max_cash), step=50.0,
+                        key="game_buy_amt",
+                    )
+                elif sizing == "% of cash":
+                    pct = st.slider(
+                        "% of available cash", min_value=1, max_value=100,
+                        value=5, step=1, key="game_buy_pct_cash",
+                    )
+                    amount = round(max_cash * pct / 100.0, 2)
+                    st.caption(
+                        f"= **{_money(amount)}** "
+                        f"({pct}% × {_money(max_cash)} cash)"
+                    )
+                else:   # % of equity
+                    total_val = float(mtm["total"])
+                    pct = st.slider(
+                        "% of equity (total value)",
+                        min_value=1, max_value=100, value=5, step=1,
+                        key="game_buy_pct_eq",
+                    )
+                    amount = round(
+                        min(max_cash, total_val * pct / 100.0), 2
+                    )
+                    st.caption(
+                        f"= **{_money(amount)}** "
+                        f"({pct}% × {_money(total_val)} total, "
+                        f"capped at {_money(max_cash)} available cash)"
+                    )
                 if amount > 0 and fill_buy > 0:
                     shares = amount / fill_buy
                     st.caption(
