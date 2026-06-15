@@ -66,19 +66,26 @@ def render():
     # ─────────────────────────────────────────────────────────────────────
     sel_col, new_col = st.columns([3, 2])
     with sel_col:
-        names      = [p["name"] for p in portfolios]
-        ids        = [p["id"]   for p in portfolios]
+        ids        = [p["id"] for p in portfolios]
         active_mtm = mark_to_market()
+        # Per-strategy return % rendered inline so the user can pick the
+        # winner without opening the compare expander.
+        mtms = {p["id"]: mark_to_market(portfolio_id=p["id"])
+                for p in portfolios}
+        labels = [
+            f"{p['name']} ({mtms[p['id']]['total_return_pct']:+.1f}%)"
+            for p in portfolios
+        ]
         try:
             cur_idx = ids.index(active_mtm["id"])
         except (ValueError, KeyError):
             cur_idx = 0
         chosen = st.selectbox(
-            "Active strategy", names, index=cur_idx, key="game_pf_select",
+            "Active strategy", labels, index=cur_idx, key="game_pf_select",
             help=("Each strategy has its own cash, positions, and trade "
                   "history. Switch any time — they all keep running."),
         )
-        chosen_id = ids[names.index(chosen)]
+        chosen_id = ids[labels.index(chosen)]
         if chosen_id != active_mtm["id"]:
             set_active_portfolio(chosen_id)
             st.rerun()
@@ -138,6 +145,26 @@ def render():
             "As of":      df["as_of"].map(lambda v: v[:10] if v else "—"),
         })
         st.dataframe(df_display, width="stretch", hide_index=True)
+        # One-click "Sell all" per position — faster than picking the
+        # symbol + dialling shares in the Sell form below.
+        st.caption("Close a position in one click:")
+        positions = mtm["holdings"]
+        cols_per_row = 4
+        for chunk_start in range(0, len(positions), cols_per_row):
+            row_positions = positions[chunk_start:chunk_start + cols_per_row]
+            cols = st.columns(cols_per_row)
+            for col, pos in zip(cols, row_positions):
+                btn_label = f"✕ Sell all {pos['symbol']}"
+                if col.button(btn_label, key=f"game_sellall_{pos['symbol']}"):
+                    try:
+                        sell(pos["symbol"])
+                        st.success(
+                            f"Sold {pos['qty']:.4f} {pos['symbol']} "
+                            f"@ ~{_money(pos['price'])}."
+                        )
+                        st.rerun()
+                    except GameError as e:
+                        st.error(str(e))
     else:
         st.info("No open positions yet — use the Buy form below to get started.")
 
@@ -316,6 +343,29 @@ def render():
                         width=2.5 if is_active else 1.5,
                     ),
                 ))
+            # Overlay the same equal-weight buy-and-hold watchlist baseline
+            # used on the single-strategy chart, normalised to % from its
+            # own inception. Start from the earliest portfolio creation
+            # date so the benchmark spans the full chart range.
+            from datetime import date as _date
+            bench_syms = sorted(config_symbols) if config_symbols else watchlist
+            if any_data and bench_syms:
+                earliest = min(
+                    _date.fromisoformat(p["created_at"][:10])
+                    for p in portfolios
+                )
+                bench = benchmark_history(
+                    bench_syms, starting_cash=10_000.0, start_date=earliest,
+                )
+                if bench:
+                    bb_df = pd.DataFrame(bench)
+                    bb_df["date"] = pd.to_datetime(bb_df["date"])
+                    bench_pct = (bb_df["value"] / 10_000.0 - 1.0) * 100.0
+                    cmp_fig.add_trace(go.Scatter(
+                        x=bb_df["date"], y=bench_pct, mode="lines",
+                        name=f"Buy-and-hold watchlist ({len(bench_syms)} eq-wt)",
+                        line=dict(color="#a78bfa", width=1.5, dash="dot"),
+                    ))
             if not any_data:
                 st.caption("No trade history on any strategy yet.")
             else:
