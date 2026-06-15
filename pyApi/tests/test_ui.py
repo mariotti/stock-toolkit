@@ -196,6 +196,59 @@ class TestBriefingCacheBreakpoints(unittest.TestCase):
         self.assertEqual(_with_cache_breakpoints(msgs), msgs)
 
 
+class TestTradeProposalParser(unittest.TestCase):
+    """Parser pulls a fenced TRADE_PROPOSALS_JSON block out of Claude's reply."""
+
+    def test_extracts_proposals_and_strips_block(self):
+        from stock_toolkit.ui.tabs.briefing import _parse_trade_proposals
+
+        reply = (
+            "Here's my read. AAPL looks set up, GOOGL not so much.\n\n"
+            "<<<TRADE_PROPOSALS_JSON\n"
+            '[{"side":"BUY","symbol":"AAPL","amount_chf":200,"reason":"momentum"},'
+            '{"side":"SELL","symbol":"GOOGL","qty_pct":50,"reason":"breakdown"}]\n'
+            ">>>\n\nLet me know if you want detail on any of these."
+        )
+        props, cleaned = _parse_trade_proposals(reply)
+        self.assertEqual(len(props), 2)
+        self.assertEqual(props[0]["side"],   "BUY")
+        self.assertEqual(props[0]["symbol"], "AAPL")
+        self.assertEqual(props[0]["amount_chf"], 200)
+        self.assertEqual(props[1]["side"],   "SELL")
+        self.assertEqual(props[1]["qty_pct"], 50)
+        # Block is gone from the rendered text.
+        self.assertNotIn("<<<", cleaned)
+        self.assertNotIn("TRADE_PROPOSALS_JSON", cleaned)
+        self.assertIn("AAPL looks set up", cleaned)
+        self.assertIn("Let me know if you want detail", cleaned)
+
+    def test_no_block_returns_empty_and_text_unchanged(self):
+        from stock_toolkit.ui.tabs.briefing import _parse_trade_proposals
+
+        reply = "Free-form reply with no proposals."
+        props, cleaned = _parse_trade_proposals(reply)
+        self.assertEqual(props, [])
+        self.assertEqual(cleaned, reply)
+
+    def test_malformed_json_falls_back_safely(self):
+        from stock_toolkit.ui.tabs.briefing import _parse_trade_proposals
+
+        reply = (
+            "thinking...\n<<<TRADE_PROPOSALS_JSON\n[ broken json ]\n>>>\nend."
+        )
+        props, cleaned = _parse_trade_proposals(reply)
+        # Bad JSON → no proposals, original text returned unmodified so the
+        # user at least sees what Claude tried to say.
+        self.assertEqual(props, [])
+        self.assertEqual(cleaned, reply)
+
+    def test_empty_text_is_safe(self):
+        from stock_toolkit.ui.tabs.briefing import _parse_trade_proposals
+
+        self.assertEqual(_parse_trade_proposals(""),   ([], ""))
+        self.assertEqual(_parse_trade_proposals(None), ([], None))
+
+
 class TestFundamentals(unittest.TestCase):
     """yfinance valuation snapshot: fetch (mocked) and prompt formatting."""
 

@@ -1,8 +1,81 @@
 """Briefing (Claude) tab."""
 
 
+import json
+import re
+
 import pandas as pd
 import streamlit as st
+
+# Canonical name of the auto-managed paper-trading strategy that
+# executes Claude's structured trade proposals from the Briefing tab.
+BRIEFING_STRATEGY_NAME = "Briefing strategy"
+
+# Sentinel used to fence the JSON proposal block in Claude replies.
+TRADE_BLOCK_OPEN  = "<<<TRADE_PROPOSALS_JSON"
+TRADE_BLOCK_CLOSE = ">>>"
+_TRADE_BLOCK_RE = re.compile(
+    re.escape(TRADE_BLOCK_OPEN) + r"\s*(\[.*?\])\s*" + re.escape(TRADE_BLOCK_CLOSE),
+    re.DOTALL,
+)
+
+
+def _parse_trade_proposals(text: str):
+    """Pull a TRADE_PROPOSALS_JSON block out of Claude's reply.
+
+    Returns (proposals, cleaned_text). proposals is a list of dicts;
+    cleaned_text has the block stripped so the chat renders cleanly."""
+    if not text:
+        return [], text
+    m = _TRADE_BLOCK_RE.search(text)
+    if not m:
+        return [], text
+    raw = m.group(1)
+    try:
+        proposals = json.loads(raw)
+    except (json.JSONDecodeError, TypeError):
+        return [], text
+    if not isinstance(proposals, list):
+        return [], text
+    cleaned = (text[:m.start()].rstrip() + "\n\n"
+               + text[m.end():].lstrip()).strip()
+    return proposals, cleaned
+
+
+def _briefing_strategy_record():
+    """Lookup the 'Briefing strategy' portfolio (or None if not created yet)."""
+    from stock_toolkit.game import list_portfolios
+    for p in list_portfolios():
+        if p["name"] == BRIEFING_STRATEGY_NAME:
+            return p
+    return None
+
+
+def _briefing_state_summary() -> str:
+    """Compact text snapshot of the Briefing strategy for the proposal prompt."""
+    from stock_toolkit.game import mark_to_market
+    rec = _briefing_strategy_record()
+    if rec is None:
+        return ("The Briefing strategy has not been created yet — it will be "
+                "spun up the first time the user confirms a proposed trade.")
+    mtm = mark_to_market(portfolio_id=rec["id"])
+    lines = [
+        f"Strategy: {mtm['name']}",
+        f"  Cash:          {mtm['cash']:>10,.2f}",
+        f"  Equity:        {mtm['equity']:>10,.2f}",
+        f"  Total value:   {mtm['total']:>10,.2f}",
+        f"  Return:        {mtm['total_return_pct']:+.2f}% from inception",
+    ]
+    if mtm["holdings"]:
+        lines.append("  Open positions:")
+        for h in mtm["holdings"]:
+            lines.append(
+                f"    {h['symbol']:<8} qty={h['qty']:>8.4f}  "
+                f"value={h['value']:>8.2f}  P/L={h['pnl']:+.2f}"
+            )
+    else:
+        lines.append("  Open positions: none")
+    return "\n".join(lines)
 
 from stock_toolkit import alerts as sal
 from stock_toolkit import score as ss
@@ -257,7 +330,10 @@ screen stocks for educational purposes. \
 The investor treats the stock market as a learning game — \
 small positions, studying how markets work, not managing a serious portfolio. \
 Be direct, practical, and honest about uncertainty. \
-Never recommend specific investment amounts. \
+Avoid recommending specific dollar amounts in free-text replies — \
+but when the user explicitly asks for paper-trade proposals, you may \
+include concrete sizes ONLY inside a fenced TRADE_PROPOSALS_JSON block \
+(format provided in that turn's user message). \
 Always remind the user that this is data analysis, not financial advice. \
 Keep responses concise and conversational."""
 
@@ -318,6 +394,8 @@ Keep responses concise and conversational."""
             "alerts_ctx": alerts_ctx,
         }
         st.session_state.brief_messages = []   # reset chat on new briefing
+        st.session_state.brief_skipped_idx = set()
+        st.session_state.brief_executed_idx = set()
 
         if not scores:
             st.warning("No data found. Run stock_collector.py first.")
@@ -382,11 +460,201 @@ Keep responses concise and conversational."""
         if st.session_state.brief_messages:
             for i, msg in enumerate(st.session_state.brief_messages):
                 if msg["role"] == "assistant":
+                    # Hide the fenced TRADE_PROPOSALS_JSON block from the
+                    # rendered chat — it's machine-readable, not for the user.
+                    _, display_text = _parse_trade_proposals(msg["content"])
                     with st.chat_message("assistant", avatar="🤖"):
-                        st.markdown(msg["content"])
+                        st.markdown(display_text)
                 elif i > 0:
                     with st.chat_message("user", avatar="👤"):
                         st.markdown(msg["content"])
+
+        # ── Claude-driven proposals for the Briefing strategy ─────────────────
+        # On-demand: user clicks the button, we hand Claude the current
+        # Briefing-strategy state + scoring data and ask for 0-3 structured
+        # trade proposals. Each proposal renders as a confirm/skip card.
+        if any(m["role"] == "assistant"
+               for m in st.session_state.brief_messages):
+            from stock_toolkit.game import (
+                GameError as _GameError, buy as _buy,
+                create_portfolio as _create_portfolio,
+                sell as _sell,
+            )
+
+            st.markdown("---")
+            st.markdown("### 🤖  Claude-driven Briefing strategy")
+
+            rec = _briefing_strategy_record()
+            if rec is None:
+                st.caption(
+                    f"`{BRIEFING_STRATEGY_NAME}` will be created the first "
+                    "time you confirm a proposed trade."
+                )
+            else:
+                from stock_toolkit.game import mark_to_market as _mtm
+                _bs = _mtm(portfolio_id=rec["id"])
+                st.caption(
+                    f"`{BRIEFING_STRATEGY_NAME}` · "
+                    f"cash {_bs['cash']:,.2f} · "
+                    f"equity {_bs['equity']:,.2f} · "
+                    f"return {_bs['total_return_pct']:+.2f}%"
+                )
+
+            symbols_for_prompt = [r["symbol"] for r in ctx["scores"]]
+
+            if st.button(
+                "🤖  Ask Claude to propose trades",
+                key="brief_propose_btn",
+                help=("Sends a hidden turn with the current Briefing-strategy "
+                      "state and asks Claude for 0-3 paper-trade proposals. "
+                      "Nothing executes until you confirm each one."),
+            ):
+                state_blob = _briefing_state_summary()
+                propose_msg = (
+                    "Please propose 0-3 specific paper-trade actions for the "
+                    f"`{BRIEFING_STRATEGY_NAME}` paper-trading strategy based "
+                    "on the watchlist analysis already in this conversation.\n\n"
+                    "Current strategy state:\n"
+                    f"{state_blob}\n\n"
+                    f"Watchlist (must pick from these symbols only): "
+                    f"{', '.join(symbols_for_prompt)}\n\n"
+                    "End your reply with a fenced block in this EXACT format "
+                    "(omit the block entirely if you don't see a good trade):\n"
+                    f"{TRADE_BLOCK_OPEN}\n"
+                    "[\n"
+                    "  {\"side\":\"BUY\",\"symbol\":\"AAPL\",\"amount_chf\":200,"
+                    "\"reason\":\"...\"},\n"
+                    "  {\"side\":\"SELL\",\"symbol\":\"GOOGL\","
+                    "\"qty_pct\":100,\"reason\":\"...\"}\n"
+                    "]\n"
+                    f"{TRADE_BLOCK_CLOSE}\n\n"
+                    "Rules:\n"
+                    "- BUY uses `amount_chf` (cash to deploy). SELL uses "
+                    "`qty_pct` (percent of position to close, 1-100).\n"
+                    "- Only SELL symbols actually present in Open positions "
+                    "above; never short.\n"
+                    "- Keep individual BUY amounts ≤ available cash.\n"
+                    "- Each proposal must include a one-sentence `reason`."
+                )
+                # Fresh proposal turn → forget any prior skip/execute state.
+                st.session_state.brief_skipped_idx = set()
+                st.session_state.brief_executed_idx = set()
+                st.session_state.brief_messages.append(
+                    {"role": "user", "content": propose_msg}
+                )
+                with st.spinner("Claude is drafting proposals…"):
+                    reply = _call_claude(
+                        st.session_state.brief_messages, SYSTEM_PROMPT
+                    )
+                st.session_state.brief_messages.append(
+                    {"role": "assistant", "content": reply}
+                )
+                st.rerun()
+
+            # If the most recent assistant message contains a proposal block,
+            # render each item as its own confirm/skip card.
+            last_assistant = next(
+                (m for m in reversed(st.session_state.brief_messages)
+                 if m["role"] == "assistant"),
+                None,
+            )
+            proposals = []
+            if last_assistant is not None:
+                proposals, _ = _parse_trade_proposals(last_assistant["content"])
+
+            skipped = st.session_state.get("brief_skipped_idx", set())
+            executed = st.session_state.get("brief_executed_idx", set())
+            pending = [
+                (i, p) for i, p in enumerate(proposals)
+                if i not in skipped and i not in executed
+            ]
+
+            if proposals and not pending:
+                st.caption("All proposals handled. Click the button again "
+                           "to ask Claude for fresh ones.")
+
+            for i, p in pending:
+                side   = str(p.get("side", "")).upper()
+                symbol = str(p.get("symbol", "")).upper()
+                reason = str(p.get("reason", "")).strip()
+                if side == "BUY":
+                    amt = float(p.get("amount_chf", 0) or 0)
+                    descr = f"**BUY** `{symbol}` for **{amt:,.2f} CHF**"
+                elif side == "SELL":
+                    pct = float(p.get("qty_pct", 0) or 0)
+                    descr = f"**SELL** {pct:.0f}% of `{symbol}`"
+                else:
+                    continue
+
+                with st.container(border=True):
+                    st.markdown(f"{descr}  \n_{reason}_" if reason else descr)
+                    confirm_col, skip_col = st.columns([1, 1])
+
+                    if confirm_col.button(
+                        "✅  Add to Briefing strategy",
+                        key=f"brief_prop_confirm_{i}",
+                        type="primary",
+                    ):
+                        rec_now = _briefing_strategy_record()
+                        if rec_now is None:
+                            # First confirmation creates the strategy. Use
+                            # the "Available budget (CHF)" field above as
+                            # a sane default starting cash (×20 so there's
+                            # room for several trades).
+                            start_cash = max(1000.0,
+                                             float(brief_budget) * 20)
+                            try:
+                                rec_now = _create_portfolio(
+                                    BRIEFING_STRATEGY_NAME,
+                                    starting_cash=start_cash,
+                                    activate=False,
+                                )
+                            except _GameError as e:
+                                st.error(f"Couldn't create strategy: {e}")
+                                continue
+                        try:
+                            if side == "BUY":
+                                _buy(symbol, amt, portfolio_id=rec_now["id"])
+                                st.success(
+                                    f"Bought {symbol} for {amt:,.2f} CHF "
+                                    f"into `{BRIEFING_STRATEGY_NAME}`."
+                                )
+                            else:
+                                from stock_toolkit.game import (
+                                    get_positions as _gp,
+                                )
+                                pos = _gp(portfolio_id=rec_now["id"]).get(symbol)
+                                if not pos:
+                                    raise _GameError(
+                                        f"No open {symbol} position to sell."
+                                    )
+                                qty = pos["qty"] * (pct / 100.0)
+                                _sell(symbol, qty, portfolio_id=rec_now["id"])
+                                st.success(
+                                    f"Sold {qty:.4f} {symbol} "
+                                    f"({pct:.0f}% of position) from "
+                                    f"`{BRIEFING_STRATEGY_NAME}`."
+                                )
+                            executed_set = set(
+                                st.session_state.get("brief_executed_idx",
+                                                     set())
+                            )
+                            executed_set.add(i)
+                            st.session_state.brief_executed_idx = executed_set
+                            st.rerun()
+                        except _GameError as e:
+                            st.error(str(e))
+
+                    if skip_col.button(
+                        "✕  Skip",
+                        key=f"brief_prop_skip_{i}",
+                    ):
+                        skipped_set = set(
+                            st.session_state.get("brief_skipped_idx", set())
+                        )
+                        skipped_set.add(i)
+                        st.session_state.brief_skipped_idx = skipped_set
+                        st.rerun()
 
         # ── Act on it: paper-trade into the active Game strategy ──────────────
         # Renders only after Claude has actually responded — otherwise the
@@ -486,6 +754,8 @@ Keep responses concise and conversational."""
                 st.session_state.brief_messages = []
                 st.session_state.brief_context  = None
                 st.session_state.brief_prompt   = None
+                st.session_state.brief_skipped_idx  = set()
+                st.session_state.brief_executed_idx = set()
                 st.rerun()
         with col_cap:
             st.caption(
