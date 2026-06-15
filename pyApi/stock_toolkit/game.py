@@ -805,3 +805,70 @@ def value_history(portfolio_id: int = None, db: Path = None) -> list:
                         "total": cash + equity})
         cur_date += datetime.timedelta(days=1)
     return history
+
+
+def risk_stats(portfolio_id: int = None, db: Path = None) -> dict:
+    """Risk-adjusted return metrics for one strategy.
+
+    Computed from the daily ``value_history`` curve so they reflect
+    actual day-by-day mark-to-market, not just open/close totals.
+
+    Returns CAGR, Sharpe, Sortino (both annualised at 252 trading
+    days, risk-free=0), and max drawdown. Empty/insufficient history
+    returns zeros (chart won't be drawn anyway).
+    """
+    import math
+    hist = value_history(portfolio_id=portfolio_id, db=db)
+    n = len(hist)
+    if n < 2:
+        return {"cagr": 0.0, "sharpe": 0.0, "sortino": 0.0, "max_dd": 0.0,
+                "n_days": n}
+
+    totals = [h["total"] for h in hist]
+    start, end = totals[0], totals[-1]
+    days = (datetime.date.fromisoformat(hist[-1]["date"])
+            - datetime.date.fromisoformat(hist[0]["date"])).days or 1
+
+    cagr = (end / start) ** (365.25 / days) - 1 if start > 0 else 0.0
+
+    # Daily simple returns from the mark-to-market curve.
+    rets = []
+    for i in range(1, n):
+        prev = totals[i - 1]
+        if prev > 0:
+            rets.append(totals[i] / prev - 1)
+    if not rets:
+        return {"cagr": cagr, "sharpe": 0.0, "sortino": 0.0,
+                "max_dd": 0.0, "n_days": n}
+
+    mean = sum(rets) / len(rets)
+    var  = sum((r - mean) ** 2 for r in rets) / len(rets)
+    std  = math.sqrt(var)
+    sharpe = (mean / std) * math.sqrt(252) if std > 0 else 0.0
+
+    # Sortino: only count negative deviations (downside-only).
+    neg = [r for r in rets if r < 0]
+    if neg:
+        down_var = sum(r ** 2 for r in neg) / len(rets)
+        down_std = math.sqrt(down_var)
+        sortino  = (mean / down_std) * math.sqrt(252) if down_std > 0 else 0.0
+    else:
+        # No down days: Sortino is technically infinite. Cap at the
+        # Sharpe value so the UI doesn't render ∞.
+        sortino = sharpe
+
+    # Max drawdown: largest peak-to-trough decline of the running max.
+    peak  = totals[0]
+    max_dd = 0.0
+    for t in totals:
+        peak = max(peak, t)
+        if peak > 0:
+            dd = (t / peak) - 1   # negative
+            max_dd = min(max_dd, dd)
+    return {
+        "cagr":    cagr * 100,           # %
+        "sharpe":  sharpe,
+        "sortino": sortino,
+        "max_dd":  max_dd * 100,         # % (negative)
+        "n_days":  n,
+    }

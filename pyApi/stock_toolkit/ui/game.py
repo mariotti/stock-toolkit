@@ -119,6 +119,26 @@ def render():
     c3.metric("Equity", _money(mtm["equity"]))
     c4.metric("Starting cash", _money(mtm["starting_cash"]))
 
+    # Risk-adjusted return row — meaningful even before any close, since
+    # mark-to-market moves daily on the open positions.
+    from stock_toolkit.game import risk_stats
+    rs = risk_stats()
+    if rs.get("n_days", 0) >= 2:
+        r1, r2, r3, r4 = st.columns(4)
+        r1.metric("CAGR",    f"{rs['cagr']:+.2f}%",
+                  help="Compound annual growth rate, annualised from the "
+                       "daily mark-to-market curve.")
+        r2.metric("Sharpe",  f"{rs['sharpe']:.2f}",
+                  help="Annualised Sharpe (risk-free=0). "
+                       ">1 decent, >2 good, >3 exceptional.")
+        r3.metric("Sortino", f"{rs['sortino']:.2f}",
+                  help="Annualised Sortino — like Sharpe but only "
+                       "penalises downside volatility. Usually higher "
+                       "than Sharpe when up-days are bigger than down-days.")
+        r4.metric("Max DD",  f"{rs['max_dd']:.2f}%",
+                  help="Largest peak-to-trough decline of total value, "
+                       "ever. Risk-of-ruin proxy.")
+
     st.caption(
         f"Started {mtm['created_at'][:10]} · "
         f"Last reset {mtm['last_reset_at'][:10]} · "

@@ -482,6 +482,51 @@ class TestTradeNotesAndStats(GameTestCase):
         self.assertAlmostEqual(s["realized_pnl"], 300.0)
 
 
+class TestRiskStats(GameTestCase):
+    """v1.8 — CAGR / Sharpe / Sortino / max DD from the value_history curve."""
+
+    def test_zeros_for_empty_history(self):
+        game.init_portfolio(starting_cash=10_000.0, db=self.port_db)
+        rs = game.risk_stats(db=self.port_db)
+        # No trades and only one day on the curve → all zero.
+        self.assertEqual(rs["sharpe"],  0.0)
+        self.assertEqual(rs["sortino"], 0.0)
+        self.assertEqual(rs["max_dd"],  0.0)
+
+    def test_max_dd_negative_when_drawdown(self):
+        # Build a synthetic 4-day curve by inserting trades whose
+        # marks-to-market move down then up. Easier: monkeypatch
+        # value_history to return a known curve.
+        fake = [
+            {"date": "2026-01-01", "cash": 0, "equity": 0, "total": 1000.0},
+            {"date": "2026-01-02", "cash": 0, "equity": 0, "total": 1200.0},
+            {"date": "2026-01-03", "cash": 0, "equity": 0, "total":  900.0},
+            {"date": "2026-01-04", "cash": 0, "equity": 0, "total": 1100.0},
+        ]
+        with mock.patch("stock_toolkit.game.value_history",
+                        return_value=fake):
+            rs = game.risk_stats()
+        # Peak 1200, trough 900 → DD ≈ -25%.
+        self.assertAlmostEqual(rs["max_dd"], -25.0, places=2)
+        # CAGR is heavily annualised over 3 days so we just sanity-check sign.
+        self.assertGreater(rs["cagr"], 0.0)
+        # Sortino ≥ 0 here (one down day, ends up).
+        self.assertGreaterEqual(rs["sortino"], 0.0)
+
+    def test_sortino_caps_at_sharpe_when_no_down_days(self):
+        fake = [
+            {"date": "2026-01-01", "cash": 0, "equity": 0, "total": 1000.0},
+            {"date": "2026-01-02", "cash": 0, "equity": 0, "total": 1010.0},
+            {"date": "2026-01-03", "cash": 0, "equity": 0, "total": 1020.0},
+        ]
+        with mock.patch("stock_toolkit.game.value_history",
+                        return_value=fake):
+            rs = game.risk_stats()
+        # Only up days → sortino guarded against ∞ by mirroring sharpe.
+        self.assertEqual(rs["sortino"], rs["sharpe"])
+        self.assertEqual(rs["max_dd"], 0.0)
+
+
 class TestGamePageRenders(unittest.TestCase):
     """Same pattern as the admin page test — drive the page shim
     through AppTest, expect zero exceptions."""
