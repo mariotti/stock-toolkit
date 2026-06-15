@@ -162,10 +162,15 @@ def _briefing_trade_panel(scores: list) -> None:
         f"(+10 bps) → ≈ **{shares:.4f}** shares"
     )
 
+    brief_note = st.text_input(
+        "Why? (optional note — your thesis for this trade)",
+        key="brief_trade_note",
+        placeholder="e.g. based on Claude's read of today's briefing",
+    )
     if st.button("▶  Buy into active strategy", type="primary",
                  key="brief_trade_btn", disabled=(amount <= 0)):
         try:
-            out = buy(sym, amount)
+            out = buy(sym, amount, note=brief_note or None)
             st.success(
                 f"Bought **{out['qty']:.4f}** {out['symbol']} into "
                 f"`{mtm['name']}` @ {out['fill_price']:,.2f} for "
@@ -613,8 +618,12 @@ Keep responses concise and conversational."""
                                 st.error(f"Couldn't create strategy: {e}")
                                 continue
                         try:
+                            # Archive Claude's reason as the trade note so
+                            # future-you can read why this trade was made.
+                            note = f"[Claude] {reason}" if reason else None
                             if side == "BUY":
-                                _buy(symbol, amt, portfolio_id=rec_now["id"])
+                                _buy(symbol, amt,
+                                     portfolio_id=rec_now["id"], note=note)
                                 st.success(
                                     f"Bought {symbol} for {amt:,.2f} CHF "
                                     f"into `{BRIEFING_STRATEGY_NAME}`."
@@ -629,7 +638,8 @@ Keep responses concise and conversational."""
                                         f"No open {symbol} position to sell."
                                     )
                                 qty = pos["qty"] * (pct / 100.0)
-                                _sell(symbol, qty, portfolio_id=rec_now["id"])
+                                _sell(symbol, qty,
+                                      portfolio_id=rec_now["id"], note=note)
                                 st.success(
                                     f"Sold {qty:.4f} {symbol} "
                                     f"({pct:.0f}% of position) from "

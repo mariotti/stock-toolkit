@@ -71,7 +71,8 @@ CREATE TABLE IF NOT EXISTS trades (
     qty          REAL    NOT NULL,
     price        REAL    NOT NULL,
     fill_price   REAL    NOT NULL,
-    cash_delta   REAL    NOT NULL
+    cash_delta   REAL    NOT NULL,
+    note         TEXT
 );
 
 CREATE TABLE IF NOT EXISTS meta (
@@ -165,6 +166,11 @@ def _connect(db: Path) -> sqlite3.Connection:
     con.execute("PRAGMA foreign_keys = ON")
     _migrate_to_v2(con)
     con.executescript(_NEW_SCHEMA)
+    # v1.7 schema bump: add `note` column to trades if missing. SQLite
+    # has no ALTER ... ADD COLUMN IF NOT EXISTS, so do it conditionally.
+    cols = {r[1] for r in con.execute("PRAGMA table_info(trades)").fetchall()}
+    if "note" not in cols:
+        con.execute("ALTER TABLE trades ADD COLUMN note TEXT")
     return con
 
 
@@ -385,16 +391,70 @@ def get_trades(portfolio_id: int = None, db: Path = None) -> list:
     con = _connect(db)
     pid = _resolve_pid(con, portfolio_id)
     rows = con.execute(
-        "SELECT timestamp, symbol, side, qty, price, fill_price, cash_delta "
-        "FROM trades WHERE portfolio_id = ? ORDER BY id",
+        "SELECT timestamp, symbol, side, qty, price, fill_price, cash_delta, "
+        "note FROM trades WHERE portfolio_id = ? ORDER BY id",
         (pid,),
     ).fetchall()
     con.close()
     return [
         {"timestamp": r[0], "symbol": r[1], "side": r[2], "qty": r[3],
-         "price": r[4], "fill_price": r[5], "cash_delta": r[6]}
+         "price": r[4], "fill_price": r[5], "cash_delta": r[6],
+         "note": r[7] or ""}
         for r in rows
     ]
+
+
+def trade_stats(portfolio_id: int = None, db: Path = None) -> dict:
+    """Outcome stats for the closed (buy→sell) round-trips of one portfolio.
+
+    Walks the trade log with FIFO matching: every sell consumes shares
+    against the running avg cost from prior buys, producing one realized
+    P&L event per sell. Open positions don't count.
+
+    Returns: total_trades (rows), n_buys, n_sells, closed_count, wins,
+    losses, win_rate (0-1), avg_win, avg_loss (signed), expectancy,
+    realized_pnl (sum of realized events).
+    """
+    trades = get_trades(portfolio_id=portfolio_id, db=db)
+    pos = defaultdict(lambda: {"qty": 0.0, "avg_cost": 0.0})
+    realized = []
+    for t in trades:
+        sym, side, qty, fill = (
+            t["symbol"], t["side"], t["qty"], t["fill_price"]
+        )
+        p = pos[sym]
+        if side == "buy":
+            new_qty   = p["qty"] + qty
+            new_total = p["qty"] * p["avg_cost"] + qty * fill
+            p["qty"]      = new_qty
+            p["avg_cost"] = new_total / new_qty if new_qty > 0 else 0.0
+        else:
+            sold = min(qty, p["qty"])
+            if sold > 0:
+                realized.append((fill - p["avg_cost"]) * sold)
+                p["qty"] -= sold
+                if p["qty"] <= 1e-9:
+                    p["qty"], p["avg_cost"] = 0.0, 0.0
+
+    wins   = [r for r in realized if r > 0]
+    losses = [r for r in realized if r < 0]
+    win_rate  = (len(wins) / len(realized)) if realized else 0.0
+    avg_win   = (sum(wins)   / len(wins))   if wins   else 0.0
+    avg_loss  = (sum(losses) / len(losses)) if losses else 0.0
+    expectancy = win_rate * avg_win + (1 - win_rate) * avg_loss
+    return {
+        "total_trades":  len(trades),
+        "n_buys":        sum(1 for t in trades if t["side"] == "buy"),
+        "n_sells":       sum(1 for t in trades if t["side"] == "sell"),
+        "closed_count":  len(realized),
+        "wins":          len(wins),
+        "losses":        len(losses),
+        "win_rate":      win_rate,
+        "avg_win":       avg_win,
+        "avg_loss":      avg_loss,
+        "expectancy":    expectancy,
+        "realized_pnl":  sum(realized),
+    }
 
 
 def get_positions(portfolio_id: int = None, db: Path = None) -> dict:
@@ -458,19 +518,21 @@ def get_latest_price(symbol: str) -> tuple:
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _record_trade(con, pid, *, symbol, side, qty, price, fill_price,
-                  cash_delta):
+                  cash_delta, note=None):
     con.execute(
         "INSERT INTO trades (portfolio_id, timestamp, symbol, side, qty, "
-        "price, fill_price, cash_delta) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        "price, fill_price, cash_delta, note) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (pid, _now(), symbol.upper(), side, float(qty), float(price),
-         float(fill_price), float(cash_delta)),
+         float(fill_price), float(cash_delta),
+         (note or "").strip() or None),
     )
     con.execute("UPDATE portfolios SET cash = cash + ? WHERE id = ?",
                 (cash_delta, pid))
 
 
 def buy(symbol: str, cash_amount: float,
-        portfolio_id: int = None, db: Path = None) -> dict:
+        portfolio_id: int = None, db: Path = None,
+        note: str = None) -> dict:
     if cash_amount <= 0:
         raise GameError("Buy amount must be positive.")
     price, as_of = get_latest_price(symbol)
@@ -493,14 +555,15 @@ def buy(symbol: str, cash_amount: float,
             f"Insufficient cash: have {cash:.2f}, need {cash_amount:.2f}.")
     _record_trade(con, pid, symbol=symbol, side="buy", qty=qty,
                   price=price, fill_price=fill_price,
-                  cash_delta=-cash_amount)
+                  cash_delta=-cash_amount, note=note)
     con.commit(); con.close()
     return {"symbol": symbol.upper(), "qty": qty, "price": price,
             "fill_price": fill_price, "as_of": as_of, "spent": cash_amount}
 
 
 def sell(symbol: str, qty: float = None,
-         portfolio_id: int = None, db: Path = None) -> dict:
+         portfolio_id: int = None, db: Path = None,
+         note: str = None) -> dict:
     pos = get_positions(portfolio_id=portfolio_id, db=db).get(symbol.upper())
     if not pos:
         raise GameError(f"No open position in {symbol.upper()}.")
@@ -522,7 +585,8 @@ def sell(symbol: str, qty: float = None,
     con = _connect(db)
     pid = _resolve_pid(con, portfolio_id)
     _record_trade(con, pid, symbol=symbol, side="sell", qty=qty,
-                  price=price, fill_price=fill_price, cash_delta=+proceeds)
+                  price=price, fill_price=fill_price,
+                  cash_delta=+proceeds, note=note)
     con.commit(); con.close()
     return {"symbol": symbol.upper(), "qty": qty, "price": price,
             "fill_price": fill_price, "as_of": as_of, "proceeds": proceeds}

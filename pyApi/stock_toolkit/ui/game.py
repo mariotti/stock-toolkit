@@ -206,10 +206,15 @@ def render():
                         f"fill `{_money(fill_buy)}` (+{SLIPPAGE_BPS} bps) → "
                         f"≈ **{shares:.4f}** shares"
                     )
+                buy_note = st.text_input(
+                    "Why? (optional note — your thesis for this trade)",
+                    key="game_buy_note",
+                    placeholder="e.g. RSI oversold + earnings beat",
+                )
                 if st.button("▶  Buy", type="primary", key="game_buy_btn",
                              disabled=(amount <= 0)):
                     try:
-                        out = buy(sym_buy, amount)
+                        out = buy(sym_buy, amount, note=buy_note or None)
                         st.success(
                             f"Bought **{out['qty']:.4f}** {out['symbol']} "
                             f"@ {_money(out['fill_price'])} for "
@@ -243,10 +248,15 @@ def render():
                     f"`{_money(fill_sell)}` (−{SLIPPAGE_BPS} bps) → "
                     f"proceeds **{_money(proceeds)}**"
                 )
+            sell_note = st.text_input(
+                "Why? (optional note — your reason for closing/trimming)",
+                key="game_sell_note",
+                placeholder="e.g. broke 200d SMA, taking profits",
+            )
             if st.button("▶  Sell", type="primary", key="game_sell_btn",
                          disabled=(qty_sell <= 0)):
                 try:
-                    out = sell(sym_sell, qty_sell)
+                    out = sell(sym_sell, qty_sell, note=sell_note or None)
                     st.success(
                         f"Sold **{out['qty']:.4f}** {out['symbol']} "
                         f"@ {_money(out['fill_price'])} for "
@@ -397,12 +407,14 @@ def render():
     #  Trade history
     # ─────────────────────────────────────────────────────────────────────
     st.markdown("### 📜  Trade history")
-    from stock_toolkit.game import get_trades
+    from stock_toolkit.game import get_trades, trade_stats
     trades = get_trades()
     if not trades:
         st.info("No trades yet.")
     else:
         t_df = pd.DataFrame(trades)
+        if "note" not in t_df.columns:
+            t_df["note"] = ""
         t_display = pd.DataFrame({
             "When":       t_df["timestamp"].map(lambda v: v[:19].replace("T", " ")),
             "Side":       t_df["side"].map(str.upper),
@@ -411,10 +423,48 @@ def render():
             "Close":      t_df["price"].map(_money),
             "Fill":       t_df["fill_price"].map(_money),
             "Cash Δ":     t_df["cash_delta"].map(_money),
+            "Note":       t_df["note"].fillna(""),
         })
         st.dataframe(
             t_display.iloc[::-1].reset_index(drop=True),   # newest first
             width="stretch", hide_index=True,
+        )
+        # CSV export — newest-first to match the display, includes notes.
+        csv_blob = t_display.iloc[::-1].to_csv(index=False).encode("utf-8")
+        st.download_button(
+            "⬇️  Download trade history (CSV)",
+            data=csv_blob,
+            file_name=f"trades_{mtm['name'].replace(' ', '_')}.csv",
+            mime="text/csv",
+            key="game_trades_csv",
+        )
+
+    # ─────────────────────────────────────────────────────────────────────
+    #  Outcome stats — win rate, average win/loss, expectancy
+    # ─────────────────────────────────────────────────────────────────────
+    stats = trade_stats()
+    if stats["closed_count"] > 0:
+        st.markdown("### 🎯  Outcome stats (closed round-trips)")
+        s1, s2, s3, s4, s5 = st.columns(5)
+        s1.metric("Closed trades", f"{stats['closed_count']}")
+        s2.metric("Win rate",      f"{stats['win_rate'] * 100:.0f}%",
+                  delta=f"{stats['wins']} / {stats['losses']} W/L")
+        s3.metric("Avg win",       _money(stats["avg_win"]))
+        s4.metric("Avg loss",      _money(stats["avg_loss"]))
+        s5.metric("Expectancy",    _money(stats["expectancy"]),
+                  delta=("positive edge" if stats["expectancy"] > 0
+                         else "negative edge"
+                         if stats["expectancy"] < 0 else "flat"))
+        st.caption(
+            f"Realized P/L across all closed round-trips: "
+            f"**{_money(stats['realized_pnl'])}**. Expectancy = "
+            f"win_rate × avg_win + loss_rate × avg_loss; the expected "
+            f"$ outcome of an average trade in this strategy."
+        )
+    elif trades:
+        st.caption(
+            "Open the **🎯 Outcome stats** by closing at least one position "
+            "(win rate / expectancy require closed round-trips)."
         )
 
     st.markdown("---")

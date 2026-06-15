@@ -426,6 +426,62 @@ class TestBenchmarkHistory(GameTestCase):
         )
 
 
+class TestTradeNotesAndStats(GameTestCase):
+    """v1.7 — per-trade notes round-trip + outcome stats math (FIFO matching)."""
+
+    def setUp(self):
+        super().setUp()
+        game.init_portfolio(starting_cash=10_000.0, db=self.port_db)
+
+    def test_note_round_trip(self):
+        game.buy("AAPL", 1_000.0, db=self.port_db,
+                 note="RSI oversold, betting on bounce")
+        rows = game.get_trades(db=self.port_db)
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["note"], "RSI oversold, betting on bounce")
+
+    def test_note_defaults_to_empty(self):
+        game.buy("AAPL", 1_000.0, db=self.port_db)
+        rows = game.get_trades(db=self.port_db)
+        self.assertEqual(rows[0]["note"], "")
+
+    def test_stats_zero_with_no_closes(self):
+        game.buy("AAPL", 1_000.0, db=self.port_db)
+        s = game.trade_stats(db=self.port_db)
+        self.assertEqual(s["total_trades"], 1)
+        self.assertEqual(s["closed_count"], 0)
+        self.assertEqual(s["wins"],   0)
+        self.assertEqual(s["losses"], 0)
+        self.assertEqual(s["realized_pnl"], 0.0)
+
+    def test_stats_win_and_loss_fifo(self):
+        # AAPL: buy 1 @ 200 cost, then a sale at 200 fill ≈ flat slippage hits
+        # → not enough to be a win. Force a win via direct trade insert with
+        # known fill prices instead.
+        import sqlite3
+        con = sqlite3.connect(self.port_db)
+        # Bypass slippage to set up clean numbers: 2 buys of 10sh @ 100, then
+        # sell 10sh @ 150 (win +500), and 10sh @ 80 (loss -200).
+        con.execute(
+            "INSERT INTO trades (portfolio_id, timestamp, symbol, side, qty, "
+            "price, fill_price, cash_delta, note) VALUES "
+            "(1, '2026-01-01', 'AAPL', 'buy',  10, 100, 100, -1000, NULL),"
+            "(1, '2026-01-02', 'AAPL', 'buy',  10, 100, 100, -1000, NULL),"
+            "(1, '2026-01-03', 'AAPL', 'sell', 10, 150, 150,  1500, NULL),"
+            "(1, '2026-01-04', 'AAPL', 'sell', 10,  80,  80,   800, NULL)"
+        )
+        con.commit(); con.close()
+        s = game.trade_stats(db=self.port_db)
+        self.assertEqual(s["closed_count"], 2)
+        self.assertEqual(s["wins"],   1)
+        self.assertEqual(s["losses"], 1)
+        self.assertAlmostEqual(s["win_rate"], 0.5)
+        self.assertAlmostEqual(s["avg_win"],   500.0)
+        self.assertAlmostEqual(s["avg_loss"], -200.0)
+        self.assertAlmostEqual(s["expectancy"], 150.0)   # 0.5*500 + 0.5*-200
+        self.assertAlmostEqual(s["realized_pnl"], 300.0)
+
+
 class TestGamePageRenders(unittest.TestCase):
     """Same pattern as the admin page test — drive the page shim
     through AppTest, expect zero exceptions."""
