@@ -91,10 +91,15 @@ def main() -> None:
         from stock_toolkit import ui
         app_script = Path(ui.__file__).parent / "app.py"
 
+    # Force production mode — Streamlit treats explicit --server.port as
+    # incompatible with global.developmentMode=true, which is the default
+    # when no source-watcher detects a script. Setting it false here lets
+    # both flags coexist in the frozen build.
     sys.argv = [
         "streamlit", "run", str(app_script),
-        "--server.port",            str(port),
-        "--server.headless",        "true",
+        "--server.port",              str(port),
+        "--server.headless",          "true",
+        "--global.developmentMode",   "false",
         "--browser.gatherUsageStats", "false",
     ]
     from streamlit.web import cli
