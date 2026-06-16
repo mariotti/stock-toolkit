@@ -396,6 +396,75 @@ class TestAdminPageRenders(unittest.TestCase):
         for heading in ("Watchlist", "Collect", "Inventory", "Suppressed"):
             self.assertIn(heading, markdown_text,
                           f"admin page missing '{heading}' section")
+        # v1.13: API Keys expander is present (renders as a caption).
+        captions = "\n".join(c.value for c in at.caption)
+        self.assertIn("Add free API keys here", captions,
+                      "admin page missing API Keys section caption")
+
+
+class TestApiKeySave(unittest.TestCase):
+    """Saving keys via update_config_value round-trips through config.env.
+
+    This is a unit test on the writer that the Admin page calls; it
+    doesn't go through the Streamlit form (covered by the render
+    test) but it does verify the persistence contract."""
+
+    def test_saved_key_round_trips_and_reload_picks_it_up(self):
+        import tempfile
+        from pathlib import Path
+        from stock_toolkit.common import (
+            load_config, update_config_value,
+        )
+
+        with tempfile.TemporaryDirectory() as td:
+            cfg_path = Path(td) / "config.env"
+            cfg_path.write_text(
+                "SYMBOLS=AAPL,MSFT\n"
+                "ALPHAVANTAGE_KEY=existing_av_key\n"
+                "# comment line\n"
+            )
+
+            # Add a brand-new key (Anthropic wasn't in the file).
+            update_config_value(
+                "ANTHROPIC_API_KEY", "sk-ant-fake", cfg_path,
+            )
+            # Replace an existing key.
+            update_config_value(
+                "ALPHAVANTAGE_KEY", "new_av_key", cfg_path,
+            )
+
+            cfg = load_config(cfg_path)
+            self.assertEqual(cfg["ANTHROPIC_API_KEY"], "sk-ant-fake")
+            self.assertEqual(cfg["ALPHAVANTAGE_KEY"],  "new_av_key")
+            self.assertEqual(cfg["SYMBOLS"],           "AAPL,MSFT")
+            # Comment line preserved.
+            self.assertIn("# comment line", cfg_path.read_text())
+
+    def test_reload_config_mutates_in_place(self):
+        """reload_config() must mutate the dict, not rebind it, so
+        importers that captured the reference still see new values."""
+        from unittest import mock
+        from stock_toolkit.ui import helpers
+
+        captured = helpers._cfg
+        original_state = dict(captured)
+        try:
+            # Pretend config.env now contains a different mapping.
+            with mock.patch(
+                "stock_toolkit.ui.helpers.load_config",
+                return_value={"FOO": "from_disk", "BAR": "also_disk"},
+            ):
+                helpers.reload_config()
+
+            self.assertIs(captured, helpers._cfg,
+                          "_cfg was rebound — importers that captured a "
+                          "reference will not see updated values")
+            self.assertEqual(captured["FOO"], "from_disk")
+            self.assertEqual(captured["BAR"], "also_disk")
+        finally:
+            # Restore the real cfg so later tests aren't polluted.
+            captured.clear()
+            captured.update(original_state)
 
 
 class TestHelpPageRenders(unittest.TestCase):

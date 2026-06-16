@@ -126,6 +126,86 @@ def render():
                 )
 
     # ─────────────────────────────────────────────────────────────────────────
+    #  API keys — let click-to-run users add their own keys without a shell
+    # ─────────────────────────────────────────────────────────────────────────
+    _KEY_DEFS = [
+        ("ALPHAVANTAGE_KEY",  "Alpha Vantage",
+         "https://www.alphavantage.co/support/#api-key",
+         "25 calls/day free — good EU+US daily bars"),
+        ("FINNHUB_KEY",       "Finnhub",
+         "https://finnhub.io/register",
+         "60 calls/min free — US real-time quotes"),
+        ("MASSIVE_KEY",       "Massive (Polygon.io)",
+         "https://massive.com/dashboard",
+         "5 calls/min free — US EOD bars"),
+        ("FMP_KEY",           "Financial Modeling Prep",
+         "https://site.financialmodelingprep.com/developer/docs/dashboard",
+         "250 calls/day free — US large-caps"),
+        ("TWELVEDATA_KEY",    "Twelve Data",
+         "https://twelvedata.com/register",
+         "8 credits/min free — US daily + hourly"),
+        ("MARKETSTACK_KEY",   "Marketstack",
+         "https://marketstack.com/signup",
+         "100 calls/month free — EOD bars incl. EU"),
+        ("ANTHROPIC_API_KEY", "Anthropic (Briefing tab)",
+         "https://console.anthropic.com/",
+         "Pay-as-you-go — ~$0.01 per briefing on Sonnet"),
+    ]
+    with st.expander("🔑  API Keys", expanded=False):
+        st.caption(
+            "Add free API keys here without dropping to a shell. "
+            "yfinance works with no key — only configure the others "
+            "if you want their extra data. **Leave a field blank to "
+            "keep the existing key unchanged.**"
+        )
+        st.warning(
+            "🔒  **Recommended for free keys only.** For paid keys — "
+            "including the Anthropic key, which is billable per call — "
+            "edit `config.env` directly on the host machine. Web forms "
+            "leak the key into your browser history and (if the "
+            "dashboard isn't behind HTTPS) into network traffic."
+        )
+
+        new_values = {}
+        for key_name, label, url, hint in _KEY_DEFS:
+            current = (cfg.get(key_name) or "").strip()
+            state   = "✅ set" if current else "—  unset"
+            new_values[key_name] = st.text_input(
+                f"{label}  ·  *{hint}*  ·  [{state}]",
+                value="",
+                type="password",
+                key=f"adm_key_{key_name}",
+                help=f"Register a free key at {url}",
+                placeholder=("Leave blank to keep current key"
+                             if current else "Paste your key here"),
+            )
+
+        if st.button("💾  Save keys", type="primary", key="adm_save_keys"):
+            saved = []
+            for key_name, *_ in _KEY_DEFS:
+                v = new_values[key_name].strip()
+                if v:
+                    update_config_value(key_name, v, CONFIG_PATH)
+                    saved.append(key_name)
+            if saved:
+                # Re-read config.env into the live _cfg dict so the
+                # new keys take effect immediately — no restart needed.
+                from stock_toolkit.ui.helpers import reload_config
+                reload_config()
+                st.success(
+                    f"✅  Saved {len(saved)} key"
+                    f"{'s' if len(saved) != 1 else ''} "
+                    f"({', '.join(saved)}). The dashboard will use "
+                    "them on the next request."
+                )
+            else:
+                st.info(
+                    "Nothing to save — every field was empty. Leave "
+                    "fields blank only if you want to keep the "
+                    "existing keys."
+                )
+
+    # ─────────────────────────────────────────────────────────────────────────
     #  Collect & bootstrap
     # ─────────────────────────────────────────────────────────────────────────
     st.markdown("### 📥  Collect & bootstrap")

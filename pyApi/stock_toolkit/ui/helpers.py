@@ -9,6 +9,17 @@ from stock_toolkit.common import CONFIG_PATH, load_config
 
 _cfg = load_config(CONFIG_PATH)
 
+
+def reload_config() -> None:
+    """Re-read config.env into the module-level ``_cfg`` dict in place.
+
+    Other modules import _cfg as a dict object, so we mutate it
+    rather than rebinding — that way the new values reach every
+    consumer (briefing.py, etc.) without a Streamlit restart.
+    """
+    _cfg.clear()
+    _cfg.update(load_config(CONFIG_PATH))
+
 # ─────────────────────────────────────────────
 #  SHARED STATE & HELPERS
 # ─────────────────────────────────────────────
