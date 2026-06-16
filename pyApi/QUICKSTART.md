@@ -181,6 +181,7 @@ the top, plus an **⚙️ Admin** page in the sidebar nav for operations:
 | **📥 Collect** | One-click data refresh for the current sidebar selection |
 | **⚙️ Admin** *(sidebar)* | Edit your watchlist (SYMBOLS / SYMBOLS_IGNORE) and save back to `config.env`; trigger a scheduled collection tier, a historical `stock-bootstrap`, or `stock-gap-fill` to plug missed days; view inventory summary and gap-check; see the failure-tracker's suppressed (symbol, source) pairs |
 | **🎮 Game** *(sidebar)* | Paper-trading portfolios (multiple "strategies" in parallel): start with virtual cash, buy fractional shares of any symbol with collected data at the latest close (+0.1% slippage), check back tomorrow / next week / next month to see how it played out. Switch between strategies in the top-of-page selector (each one's current return % is shown inline so you can pick the winner at a glance); create new ones via the "+ New strategy" expander; per-strategy rename / reset / archive / delete in Settings. The value chart overlays a dotted **equal-weight buy-and-hold of your watchlist** so you can tell whether the strategy actually beats sitting still. With two or more strategies an additional **📈 Compare strategies** expander overlays every portfolio's value curve on one chart for side-by-side comparison. State lives in `portfolio.db` |
+| **❓ Help** *(sidebar)* | In-app orientation for new users: what each tab does, where to start, concepts worth knowing (horizon, source priority, slippage, edge-triggered alerts), and links to the deeper README files |
 
 ---
 

@@ -398,6 +398,30 @@ class TestAdminPageRenders(unittest.TestCase):
                           f"admin page missing '{heading}' section")
 
 
+class TestHelpPageRenders(unittest.TestCase):
+    """Help page (❓) renders and contains the orientation sections.
+
+    The Help page is static markdown, so the assertion just confirms
+    the key headings are present — that's the contract a returning
+    user expects."""
+
+    def test_renders_without_exceptions(self):
+        from streamlit.testing.v1 import AppTest as _AppTest
+
+        page = PKG_ROOT / "stock_toolkit" / "ui" / "pages" / "03_❓_Help.py"
+        self.assertTrue(page.exists(), f"missing page file: {page}")
+
+        at = _AppTest.from_file(str(page), default_timeout=60)
+        at.run()
+        self.assertEqual([e.value for e in at.exception], [])
+        markdown_text = "\n".join(m.value for m in at.markdown)
+        for section in ("Where to start", "Main page tabs",
+                        "Sidebar pages", "Concepts worth knowing",
+                        "Need more?"):
+            self.assertIn(section, markdown_text,
+                          f"help page missing '{section}' section")
+
+
 if __name__ == "__main__":
     runner = unittest.main(verbosity=2, exit=False)
     sys.exit(0 if runner.result.wasSuccessful() else 1)

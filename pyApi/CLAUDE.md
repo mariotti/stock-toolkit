@@ -80,7 +80,7 @@ stock-gap-fill                   # fetch only the missing date ranges via yfinan
 - `stock_toolkit/inventory.py`: lists what's on disk per symbol (sources, intervals, date ranges); `--check` consistency report (missing trading days, thin coverage); `--remove` deletes a symbol from all DBs
 
 **Phase 3 — UI, Alerts & Game (`stock_toolkit/ui/`, `stock_toolkit/alerts.py`, `stock_toolkit/game.py`)**
-- Streamlit dashboard with 6 analytical tabs (Score, Analysis, Backtest, Alerts, Briefing, Collect) plus 2 sidebar pages: ⚙️ Admin (edit watchlist, trigger collects, inspect DB) and 🎮 Game (paper-trading portfolio)
+- Streamlit dashboard with 6 analytical tabs (Score, Analysis, Backtest, Alerts, Briefing, Collect) plus 3 sidebar pages: ⚙️ Admin (edit watchlist, trigger collects, inspect DB), 🎮 Game (paper-trading portfolio), and ❓ Help (in-app orientation for new users)
 - Briefing tab integrates with Claude API (`ANTHROPIC_API_KEY` in config.env) for multi-turn chat; the prompt context includes a yfinance fundamentals snapshot (P/E, forward P/E, revenue/EPS growth)
 - Alert system uses edge detection (fires once on False→True transition) with state in `.alerts_state.json`
 - Notification channels: email (SMTP), Pushover, Slack
