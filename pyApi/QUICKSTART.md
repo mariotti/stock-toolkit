@@ -1,6 +1,6 @@
 # Getting started
 
-From zero to a running dashboard in 5–10 minutes. Four install paths,
+From zero to a running dashboard in 5–10 minutes. Five install paths,
 same toolkit — pick whichever fits.
 
 ---
@@ -13,6 +13,7 @@ same toolkit — pick whichever fits.
 | [**B. Docker (manual)**](#path-b--docker-manual) | NAS / server deploys, explicit control, headless | Docker Desktop or Engine |
 | [**C. Native Python**](#path-c--native-python) | Development, scripting, you already have Python | Python 3.10+ |
 | [**D. Source-dist tarball**](#path-d--source-dist-tarball) | A pre-bundled tarball with one install script | Python 3.10+ on host |
+| [**E. Windows standalone .exe**](#path-e--windows-standalone-exe) | Windows users who don't want Docker or Python | Nothing |
 
 ---
 
@@ -98,6 +99,36 @@ bash install.sh                                  # venv + setup wizard + bootstr
 
 The installer handles everything — venv, deps, the `bin/` wrappers,
 config, and an initial historical seed. About 2 minutes end-to-end.
+
+---
+
+### Path E — Windows standalone .exe
+
+For Windows users who don't want Docker, WSL, or Python installed —
+just a regular Windows program.
+
+1.  Download `StockToolkit-windows-x64-X.Y.Z.zip` from the
+    [Releases page](https://gitlab.com/Mariotti/stock-toolkit/-/releases).
+2.  Unzip → you get a `StockToolkit/` folder. Move it anywhere
+    writable (`Desktop\`, `Documents\`, etc.).
+3.  Double-click `StockToolkit.exe`.
+
+A console window opens, Streamlit starts on the first free port
+(8501 by default), and your default browser opens at
+http://localhost:8501. Close the console window to stop the server.
+
+Your data lives in `data\` next to the .exe (or `%APPDATA%\stock-toolkit\`
+if the install location is read-only — e.g. when run from `Program Files`).
+
+> **First run gotchas.**
+> - **SmartScreen warning** (*"Windows protected your PC"*) on first
+>   launch — click *More info* → *Run anyway*. The binary isn't
+>   code-signed yet.
+> - **~200 MB** unpacked. The bundle includes a vendored Python,
+>   Streamlit, NumPy/Pandas/Plotly — everything needed to run
+>   offline.
+> - **5–10 s** between double-click and dashboard. PyInstaller
+>   extracts to a temp directory first.
 
 ---
 

@@ -1,0 +1,80 @@
+name: Build Windows executable
+
+# GitLab.com currently doesn't offer free shared Windows runners, so the
+# PyInstaller build lives on GitHub Actions. Trigger manually via
+# Actions → Run workflow, or on every pushed tag.
+
+on:
+  workflow_dispatch:
+  push:
+    tags: [ "v*" ]
+
+jobs:
+  build-windows-exe:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+          cache-dependency-path: pyApi/pyproject.toml
+
+      - name: Install package + pyinstaller
+        working-directory: pyApi
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .
+          pip install pyinstaller
+
+      - name: Read version
+        id: version
+        shell: pwsh
+        working-directory: pyApi
+        run: |
+          $v = (Get-Content VERSION).Trim()
+          "version=$v" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+
+      - name: Run PyInstaller
+        working-directory: pyApi/pyinstaller
+        run: pyinstaller --noconfirm StockToolkit.spec
+
+      - name: Smoke test — does the .exe start?
+        working-directory: pyApi/pyinstaller
+        shell: pwsh
+        run: |
+          # Launch the .exe, give it 25 s to bind a port, then probe
+          # http://localhost:8501 and kill it. Any non-zero exit fails CI.
+          $p = Start-Process -FilePath ".\dist\StockToolkit\StockToolkit.exe" `
+                             -PassThru -RedirectStandardOutput stdout.log `
+                             -RedirectStandardError  stderr.log
+          Start-Sleep -Seconds 25
+          try {
+              $r = Invoke-WebRequest -Uri http://localhost:8501 -UseBasicParsing -TimeoutSec 10
+              if ($r.StatusCode -ne 200) { throw "HTTP $($r.StatusCode)" }
+              Write-Host "OK — Streamlit responded HTTP 200"
+          } finally {
+              Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
+              Get-Content stdout.log -Tail 50
+              Get-Content stderr.log -Tail 50
+          }
+
+      - name: Zip the dist
+        working-directory: pyApi/pyinstaller
+        shell: pwsh
+        run: |
+          $v = "${{ steps.version.outputs.version }}"
+          $name = "StockToolkit-windows-x64-$v"
+          Rename-Item dist/StockToolkit $name
+          Compress-Archive -Path "dist/$name" -DestinationPath "dist/$name.zip"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: StockToolkit-windows-x64
+          path: pyApi/pyinstaller/dist/*.zip
+          if-no-files-found: error
