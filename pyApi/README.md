@@ -1118,7 +1118,7 @@ con2.close()
 
 # CSV exports and logs
 stock_data.csv
-collector.log
+logs/
 .collector_state.json
 .alerts_state.json
 

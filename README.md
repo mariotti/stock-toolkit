@@ -25,8 +25,22 @@ machine (except the calls to the data providers you configure).
 
 Pick the install style that fits how you want to run it.
 
-**Docker** — dashboard + scheduled collector in one stack, runs on macOS,
-Linux, ARM NAS, etc. Multi-arch image, no Python on the host.
+**Click-to-run app bundle (easiest)** — for users who just want the
+dashboard without touching a terminal. Needs only Docker Desktop.
+
+1. Grab `stock-app-X.Y.Z.zip` from the
+   [Releases page](https://gitlab.com/Mariotti/stock-toolkit/-/releases).
+2. Unzip → double-click `Stock Toolkit.command` (Mac) or
+   `./Stock\ Toolkit.sh` (Linux).
+3. First run launches a 1-minute wizard for your watchlist + API keys
+   (yfinance works with no key). Subsequent runs go straight to the
+   dashboard at http://localhost:8501.
+
+All state persists in `./data/` next to the launcher — surviving
+`docker compose down` and re-launches.
+
+**Docker (manual)** — same stack, no launcher. Use if you prefer
+explicit commands or are deploying on a NAS/server.
 
 ```bash
 git clone https://gitlab.com/Mariotti/stock-toolkit.git
@@ -50,9 +64,8 @@ stock-bootstrap           # seed years of history via yfinance (one command)
 stock-ui                  # open the dashboard
 ```
 
-Or grab a packaged release from the
-[Releases page](https://gitlab.com/Mariotti/stock-toolkit/-/releases) and run
-`bash install.sh`.
+Or grab `stock-toolkit-X.Y.Z.tar.gz` from the Releases page and run
+`bash install.sh` — pre-bundled tarball with a one-shot installer.
 
 ## Documentation
 
@@ -70,7 +83,7 @@ All documentation lives in [`pyApi/`](pyApi/):
 ## Project facts
 
 - Python 3.10+, packaged with `pyproject.toml`, 10 console entry points
-- 284 offline tests (no network, no keys needed) run on every push in CI
+- 304 offline tests (no network, no keys needed) run on every push in CI
 - Free-tier friendly: per-source rate limiting and daily/monthly call budgets
 - Not financial advice — this is a data analysis and learning tool
 

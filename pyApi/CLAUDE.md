@@ -39,7 +39,9 @@ python3 make_docs.py
 
 **Build distribution package:**
 ```bash
-python3 make_dist.py --package toolkit
+python3 make_dist.py --package toolkit   # Python source dist → stock-toolkit-X.Y.Z.{tar.gz,zip}
+python3 make_dist.py --package app       # Double-click Docker bundle → stock-app-X.Y.Z.{tar.gz,zip}
+                                         #   writes to ./dist-app/ (separate from --package toolkit's ./dist/)
 ```
 
 **Interactive config setup:**

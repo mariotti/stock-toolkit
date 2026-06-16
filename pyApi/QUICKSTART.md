@@ -1,6 +1,6 @@
 # Getting started
 
-From zero to a running dashboard in 5–10 minutes. Three install paths,
+From zero to a running dashboard in 5–10 minutes. Four install paths,
 same toolkit — pick whichever fits.
 
 ---
@@ -9,15 +9,43 @@ same toolkit — pick whichever fits.
 
 | Path | Best for | Needs |
 |---|---|---|
-| [**A. Docker**](#path-a--docker) | Production-style use, NAS, "just give me a stack" | Docker Desktop |
-| [**B. Native Python**](#path-b--native-python) | Development, scripting, you already have Python | Python 3.10+ |
-| [**C. Distribution package**](#path-c--distribution-package) | A pre-bundled tarball with one install script | Python 3.10+ on host |
+| [**A. Click-to-run app bundle**](#path-a--click-to-run-app-bundle) | "Just give me the dashboard" — zero terminal use after setup | Docker Desktop |
+| [**B. Docker (manual)**](#path-b--docker-manual) | NAS / server deploys, explicit control, headless | Docker Desktop or Engine |
+| [**C. Native Python**](#path-c--native-python) | Development, scripting, you already have Python | Python 3.10+ |
+| [**D. Source-dist tarball**](#path-d--source-dist-tarball) | A pre-bundled tarball with one install script | Python 3.10+ on host |
 
 ---
 
-### Path A — Docker
+### Path A — Click-to-run app bundle
 
-Dashboard + scheduled collector in one self-contained stack.
+The easiest option for non-developers. Wraps the Docker stack behind a
+double-clickable launcher.
+
+1. Download `stock-app-X.Y.Z.zip` from the
+   [Releases page](https://gitlab.com/Mariotti/stock-toolkit/-/releases).
+2. Unzip — you get a folder containing the launcher, README, and the
+   Docker stack source.
+3. **Mac:** double-click `Stock Toolkit.command` in Finder.
+   **Linux:** from a terminal in that folder, run `./Stock\ Toolkit.sh`.
+4. First run only: a short wizard asks for your watchlist + API keys
+   (yfinance works without a key — you can start there). The image
+   builds once (~5 min). Subsequent launches take a few seconds and
+   skip the wizard.
+5. Browser opens at http://localhost:8501.
+
+To stop: double-click `Stop Stock Toolkit.command` (Mac) or run
+`./Stop\ Toolkit.sh` (Linux) — or `docker compose down` from
+inside the bundle folder.
+
+Your state lives in `./data/` next to the launcher. It survives stops,
+re-launches, and machine reboots. Back it up.
+
+---
+
+### Path B — Docker (manual)
+
+Same stack as Path A, without the launcher — for explicit deploys,
+NASes, or remote servers.
 
 ```bash
 git clone https://gitlab.com/Mariotti/stock-toolkit.git
@@ -35,7 +63,7 @@ Your `config.env`, the SQLite database, and the logs all live in
 
 ---
 
-### Path B — Native Python
+### Path C — Native Python
 
 ```bash
 git clone https://gitlab.com/Mariotti/stock-toolkit.git
@@ -53,11 +81,11 @@ stock-ui                                         # dashboard opens in browser
 
 ---
 
-### Path C — Distribution package
+### Path D — Source-dist tarball
 
 ```bash
 # Grab stock-toolkit-X.Y.Z.tar.gz from the Releases page
-tar xzf stock-toolkit-0.3.2.tar.gz && cd toolkit
+tar xzf stock-toolkit-1.10.2.tar.gz && cd toolkit
 bash install.sh                                  # venv + setup wizard + bootstrap
 ./startUI.sh                                     # dashboard opens in browser
 ```
