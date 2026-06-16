@@ -344,15 +344,37 @@ examples:
                         metavar="NAME",
                         help='Author name for license header (default: blank)')
     parser.add_argument("--package", metavar="NAME",
-                        help="After building, create stock-NAME.tar.gz and stock-NAME.zip "
-                             "with the dist dir renamed to NAME inside the archive. "
-                             "Example: --package toolkit  → stock-toolkit.tar.gz")
+                        help="After building, create stock-NAME-VERSION.tar.gz and .zip. "
+                             "Example: --package toolkit  → stock-toolkit-X.Y.Z.tar.gz "
+                             "(Python source dist).  --package app  → "
+                             "stock-app-X.Y.Z.zip (double-clickable Docker launcher; "
+                             "writes to ./dist-app/ instead of --out).")
     parser.add_argument("--docs", action="store_true",
                         help="Generate API docs and diagrams into docs/ before packaging "
                              "(requires: pip install pdoc pylint && brew install graphviz)")
     parser.add_argument("--dry-run", action="store_true",
                         help="Show what would be created without writing files")
     args = parser.parse_args()
+
+    # ── app-launcher mode short-circuits the toolkit dist build ──────────────
+    # The app bundle is a different shape (docker stack + launcher scripts,
+    # no LICENSE / config.env.template) so we build it directly and bail.
+    if args.package == "app":
+        app_out = Path("dist-app")
+        if app_out.exists() and not args.dry_run:
+            ans = input(
+                f"  '{app_out}' already exists. Overwrite? [y/N] "
+            ).strip().lower()
+            if ans != "y":
+                print("  Aborted.")
+                sys.exit(0)
+            shutil.rmtree(app_out)
+        if not args.dry_run:
+            app_out.mkdir(parents=True, exist_ok=True)
+        _build_app_dist(app_out, args.dry_run)
+        if not args.dry_run:
+            _create_packages(app_out, "app")
+        return
 
     out_dir  = Path(args.out)
     dry_run  = args.dry_run
@@ -501,6 +523,230 @@ examples:
             print("    git remote add origin <your-repo-url>")
             print("    git push -u origin main")
     print(f"{'─'*60}\n")
+
+
+# ─────────────────────────────────────────────
+#  APP-LAUNCHER BUNDLE  (--package app)
+# ─────────────────────────────────────────────
+#
+# Layout produced under dist-app/:
+#
+#   dist-app/
+#     Stock Toolkit.command         ← Mac: double-click to start
+#     Stop Stock Toolkit.command    ← Mac: double-click to stop
+#     Stock Toolkit.sh              ← Linux: ./Stock\ Toolkit.sh
+#     Stop Stock Toolkit.sh
+#     README.txt                    ← 3-step quick start
+#     compose.yaml                  ← docker compose config
+#     docker/                       ← Dockerfile + crontab + entrypoints
+#     pyApi/                        ← source code (Dockerfile builds from here)
+#
+# User experience: download stock-app-X.Y.Z.zip, unzip, double-click.
+# First run runs `stock-setup` inside the container; subsequent runs go
+# straight to the dashboard. All state lives in ./data/ next to the
+# launcher and persists across `docker compose down`.
+
+_APP_LAUNCHER_SCRIPT = """\
+#!/usr/bin/env bash
+# Stock Toolkit — double-click launcher
+# Works on macOS (Finder runs .command files in Terminal) and Linux
+# (run from a terminal: ./Stock\\ Toolkit.sh).
+set -e
+
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+cd "$SCRIPT_DIR"
+
+echo
+echo "  Stock Toolkit"
+echo "  =============="
+echo
+
+# ── Docker installed? ───────────────────────────────────────────────
+if ! command -v docker >/dev/null 2>&1; then
+    echo "  ERROR: Docker is not installed."
+    echo
+    echo "  Install Docker Desktop first:"
+    echo "    https://www.docker.com/products/docker-desktop/"
+    echo
+    read -p "  Press Enter to close this window..." _
+    exit 1
+fi
+
+# ── Docker daemon running? ──────────────────────────────────────────
+if ! docker info >/dev/null 2>&1; then
+    echo "  Starting Docker..."
+    if [[ "$(uname)" == "Darwin" ]] && [ -d "/Applications/Docker.app" ]; then
+        open -a Docker
+    fi
+    # Wait up to 90s for the daemon to come up.
+    for _i in $(seq 1 90); do
+        sleep 1
+        if docker info >/dev/null 2>&1; then break; fi
+    done
+    if ! docker info >/dev/null 2>&1; then
+        echo "  ERROR: Docker did not start."
+        echo "  Open Docker Desktop manually and run me again."
+        read -p "  Press Enter..." _
+        exit 1
+    fi
+fi
+
+# ── First-run config wizard ─────────────────────────────────────────
+mkdir -p data
+if [ ! -f data/config.env ]; then
+    echo
+    echo "  First-time setup — let's create your config (API keys, watchlist)."
+    echo "  Press Enter at any prompt to accept the default."
+    echo
+    docker compose run --rm ui stock-setup
+    echo
+fi
+
+# ── Bring up the stack ──────────────────────────────────────────────
+echo "  Starting Stock Toolkit..."
+docker compose up -d
+
+# ── Wait for the UI to respond ──────────────────────────────────────
+URL="http://localhost:${UI_PORT:-8501}"
+echo "  Waiting for the dashboard at $URL ..."
+for _i in $(seq 1 60); do
+    sleep 1
+    if curl -sf -o /dev/null "$URL"; then break; fi
+done
+
+# ── Open the browser ────────────────────────────────────────────────
+echo "  Opening $URL"
+if command -v open >/dev/null 2>&1; then
+    open "$URL"
+elif command -v xdg-open >/dev/null 2>&1; then
+    xdg-open "$URL" >/dev/null 2>&1 &
+fi
+
+echo
+echo "  Stock Toolkit is running in the background."
+echo
+echo "  Your data lives in:"
+echo "    $SCRIPT_DIR/data/"
+echo "  It persists across restarts. Back it up."
+echo
+echo "  To stop:"
+echo "    double-click  'Stop Stock Toolkit.command'  (Mac)"
+echo "    or run        ./'Stop Stock Toolkit.sh'      (Linux)"
+echo "    or run        docker compose down"
+echo
+read -p "  Press Enter to close this window..." _
+"""
+
+_APP_STOP_SCRIPT = """\
+#!/usr/bin/env bash
+# Stop the Stock Toolkit stack. Your data in ./data/ is preserved.
+set -e
+
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+cd "$SCRIPT_DIR"
+
+echo "  Stopping Stock Toolkit..."
+docker compose down
+echo
+echo "  Stack stopped. Your data in $SCRIPT_DIR/data/ is preserved —"
+echo "  re-launch any time to pick up where you left off."
+echo
+read -p "  Press Enter to close this window..." _
+"""
+
+_APP_README = """\
+Stock Toolkit — Quick Start
+===========================
+
+1.  Make sure Docker Desktop is installed and running.
+    https://www.docker.com/products/docker-desktop/
+
+2.  Mac:   double-click  "Stock Toolkit.command"
+    Linux: from a terminal in this folder:  ./"Stock Toolkit.sh"
+
+    First run: a short wizard asks for your API keys and watchlist
+    (Yahoo Finance works without a key — you can start there).
+    Subsequent runs go straight to the dashboard at http://localhost:8501
+
+3.  Your data lives in   ./data/   next to this README.
+    It survives "docker compose down" and re-running the launcher.
+    Back this folder up if it matters to you.
+
+4.  Stop the stack:
+    Mac:   double-click  "Stop Stock Toolkit.command"
+    Linux: ./"Stop Stock Toolkit.sh"
+    Or anywhere:  docker compose down
+
+Notes
+-----
+- The first launch builds the Docker image (~5 min). Later launches
+  take a few seconds.
+- The dashboard listens on port 8501 by default. Override with the
+  UI_PORT env var or by editing compose.yaml.
+- Full source + docs: https://gitlab.com/Mariotti/stock-toolkit
+"""
+
+
+def _build_app_dist(out_dir: Path, dry_run: bool) -> None:
+    """Assemble the double-clickable Docker-launcher bundle.
+
+    Layout: compose.yaml + docker/ from repo root, pyApi/ source, plus
+    .command / .sh launchers and a 3-step README.txt.
+    """
+    repo_root = SCRIPT_DIR.parent
+
+    # ── 1. Repo-root pieces: compose.yaml + docker/ ────────────────
+    for top in ("compose.yaml", "docker"):
+        src = repo_root / top
+        if not src.exists():
+            print(f"  MISSING repo-root: {top}")
+            continue
+        dst = out_dir / top
+        print(f"  + {top}")
+        if dry_run:
+            continue
+        if src.is_dir():
+            shutil.copytree(src, dst,
+                            ignore=shutil.ignore_patterns("__pycache__"))
+        else:
+            shutil.copy2(src, dst)
+
+    # ── 2. pyApi/ source subset (what the Dockerfile reads) ────────
+    pyapi_dst = out_dir / "pyApi"
+    print("  + pyApi/  (pyproject.toml + VERSION + stock_toolkit/ + tests/)")
+    if not dry_run:
+        pyapi_dst.mkdir(parents=True, exist_ok=True)
+        for name in ("pyproject.toml", "VERSION"):
+            shutil.copy2(SCRIPT_DIR / name, pyapi_dst / name)
+        for tree in ("stock_toolkit", "tests"):
+            shutil.copytree(
+                SCRIPT_DIR / tree, pyapi_dst / tree,
+                ignore=shutil.ignore_patterns(
+                    "__pycache__", "*.pyc", "*.egg-info", "build", "dist"
+                ),
+            )
+
+    # ── 3. Double-clickable launcher / stopper scripts ─────────────
+    launchers = [
+        ("Stock Toolkit.command",      _APP_LAUNCHER_SCRIPT),
+        ("Stock Toolkit.sh",           _APP_LAUNCHER_SCRIPT),
+        ("Stop Stock Toolkit.command", _APP_STOP_SCRIPT),
+        ("Stop Stock Toolkit.sh",      _APP_STOP_SCRIPT),
+    ]
+    for fname, body in launchers:
+        print(f"  + {fname}")
+        if dry_run:
+            continue
+        path = out_dir / fname
+        path.write_text(body)
+        path.chmod(0o755)
+
+    # ── 4. README ──────────────────────────────────────────────────
+    print("  + README.txt")
+    if not dry_run:
+        (out_dir / "README.txt").write_text(_APP_README)
+
+    print()
 
 
 def _create_packages(out_dir: Path, name: str) -> None:
