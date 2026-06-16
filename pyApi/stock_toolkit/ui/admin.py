@@ -128,82 +128,122 @@ def render():
     # ─────────────────────────────────────────────────────────────────────────
     #  API keys — let click-to-run users add their own keys without a shell
     # ─────────────────────────────────────────────────────────────────────────
+    # (env_key, label, url, hint, expose_current)
+    #   expose_current=True  → pre-fill the field with the saved value
+    #     so Streamlit's eye toggle can reveal it. Rate-limit-only
+    #     blast radius — safe over localhost or HTTPS.
+    #   expose_current=False → field always empty; saving requires
+    #     re-entering the key. Use for billable keys (Anthropic).
     _KEY_DEFS = [
         ("ALPHAVANTAGE_KEY",  "Alpha Vantage",
          "https://www.alphavantage.co/support/#api-key",
-         "25 calls/day free — good EU+US daily bars"),
+         "25 calls/day free — good EU+US daily bars", True),
         ("FINNHUB_KEY",       "Finnhub",
          "https://finnhub.io/register",
-         "60 calls/min free — US real-time quotes"),
+         "60 calls/min free — US real-time quotes", True),
         ("MASSIVE_KEY",       "Massive (Polygon.io)",
          "https://massive.com/dashboard",
-         "5 calls/min free — US EOD bars"),
+         "5 calls/min free — US EOD bars", True),
         ("FMP_KEY",           "Financial Modeling Prep",
          "https://site.financialmodelingprep.com/developer/docs/dashboard",
-         "250 calls/day free — US large-caps"),
+         "250 calls/day free — US large-caps", True),
         ("TWELVEDATA_KEY",    "Twelve Data",
          "https://twelvedata.com/register",
-         "8 credits/min free — US daily + hourly"),
+         "8 credits/min free — US daily + hourly", True),
         ("MARKETSTACK_KEY",   "Marketstack",
          "https://marketstack.com/signup",
-         "100 calls/month free — EOD bars incl. EU"),
+         "100 calls/month free — EOD bars incl. EU", True),
         ("ANTHROPIC_API_KEY", "Anthropic (Briefing tab)",
          "https://console.anthropic.com/",
-         "Pay-as-you-go — ~$0.01 per briefing on Sonnet"),
+         "Pay-as-you-go — ~$0.01 per briefing on Sonnet", False),
     ]
     with st.expander("🔑  API Keys", expanded=False):
         st.caption(
             "Add free API keys here without dropping to a shell. "
             "yfinance works with no key — only configure the others "
-            "if you want their extra data. **Leave a field blank to "
-            "keep the existing key unchanged.**"
+            "if you want their extra data."
+        )
+        st.caption(
+            "Free-tier keys are pre-filled so Streamlit's 👁  toggle "
+            "can reveal them. Billable keys (Anthropic) stay blank — "
+            "type a new value to set, leave blank to keep the existing "
+            "one."
         )
         st.warning(
-            "🔒  **Recommended for free keys only.** For paid keys — "
-            "including the Anthropic key, which is billable per call — "
-            "edit `config.env` directly on the host machine. Web forms "
-            "leak the key into your browser history and (if the "
+            "🔒  For paid keys (Anthropic, paid tiers of other "
+            "services), **edit `config.env` directly on the host** "
+            "rather than typing them into a web form — it avoids "
+            "leaking the key into browser history and (if the "
             "dashboard isn't behind HTTPS) into network traffic."
         )
 
         new_values = {}
-        for key_name, label, url, hint in _KEY_DEFS:
+        for key_name, label, url, hint, expose in _KEY_DEFS:
             current = (cfg.get(key_name) or "").strip()
             state   = "✅ set" if current else "—  unset"
+            if expose:
+                placeholder = "Paste your key here" if not current else ""
+                tip = (f"Register a key at {url}. Click 👁 to reveal "
+                       "the current value. Erase the field and save "
+                       "to delete the key.")
+            else:
+                placeholder = ("Leave blank to keep the current key"
+                               if current else "Paste your key here")
+                tip = (f"Register a key at {url}. Paid/billable key — "
+                       "kept hidden. Leave blank to keep the existing "
+                       "value.")
             new_values[key_name] = st.text_input(
                 f"{label}  ·  *{hint}*  ·  [{state}]",
-                value="",
+                value=current if expose else "",
                 type="password",
                 key=f"adm_key_{key_name}",
-                help=f"Register a free key at {url}",
-                placeholder=("Leave blank to keep current key"
-                             if current else "Paste your key here"),
+                help=tip,
+                placeholder=placeholder,
             )
 
         if st.button("💾  Save keys", type="primary", key="adm_save_keys"):
-            saved = []
-            for key_name, *_ in _KEY_DEFS:
-                v = new_values[key_name].strip()
-                if v:
+            saved   = []
+            cleared = []
+            for key_name, _label, _url, _hint, expose in _KEY_DEFS:
+                v       = new_values[key_name].strip()
+                current = (cfg.get(key_name) or "").strip()
+                if expose:
+                    # Field showed current; any change (including
+                    # erasure) is intentional.
+                    if v == current:
+                        continue                # no-op
                     update_config_value(key_name, v, CONFIG_PATH)
-                    saved.append(key_name)
-            if saved:
+                    (saved if v else cleared).append(key_name)
+                else:
+                    # Field always empty; only save what the user
+                    # actually typed, blank = keep current.
+                    if v:
+                        update_config_value(key_name, v, CONFIG_PATH)
+                        saved.append(key_name)
+            if saved or cleared:
                 # Re-read config.env into the live _cfg dict so the
                 # new keys take effect immediately — no restart needed.
                 from stock_toolkit.ui.helpers import reload_config
                 reload_config()
+                parts = []
+                if saved:
+                    parts.append(
+                        f"saved {len(saved)} key"
+                        f"{'s' if len(saved) != 1 else ''} "
+                        f"({', '.join(saved)})"
+                    )
+                if cleared:
+                    parts.append(
+                        f"cleared {len(cleared)} key"
+                        f"{'s' if len(cleared) != 1 else ''} "
+                        f"({', '.join(cleared)})"
+                    )
                 st.success(
-                    f"✅  Saved {len(saved)} key"
-                    f"{'s' if len(saved) != 1 else ''} "
-                    f"({', '.join(saved)}). The dashboard will use "
-                    "them on the next request."
+                    "✅  " + " · ".join(parts).capitalize()
+                    + ". The dashboard will use them on the next request."
                 )
             else:
-                st.info(
-                    "Nothing to save — every field was empty. Leave "
-                    "fields blank only if you want to keep the "
-                    "existing keys."
-                )
+                st.info("No changes detected.")
 
     # ─────────────────────────────────────────────────────────────────────────
     #  Collect & bootstrap
