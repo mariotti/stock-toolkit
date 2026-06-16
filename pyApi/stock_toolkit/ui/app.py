@@ -199,8 +199,15 @@ if not selected_symbols:
 #  TABS
 # ─────────────────────────────────────────────
 
+from stock_toolkit.ui.icons import tab_label as _tab
+
 tab_score, tab_analysis, tab_backtest, tab_alerts, tab_brief, tab_collect = st.tabs([
-    "◉  Score", "◆  Analysis", "▶  Backtest", "▲  Alerts", "✦  Briefing", "↓  Collect"
+    _tab("tab.score",    "Score"),
+    _tab("tab.analysis", "Analysis"),
+    _tab("tab.backtest", "Backtest"),
+    _tab("tab.alerts",   "Alerts"),
+    _tab("tab.briefing", "Briefing"),
+    _tab("tab.collect",  "Collect"),
 ])
 
 with tab_score:

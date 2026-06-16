@@ -7,6 +7,8 @@ import re
 import pandas as pd
 import streamlit as st
 
+from stock_toolkit.ui.icons import heading, icon
+
 # Canonical name of the auto-managed paper-trading strategy that
 # executes Claude's structured trade proposals from the Briefing tab.
 BRIEFING_STRATEGY_NAME = "Briefing strategy"
@@ -118,7 +120,7 @@ def _briefing_trade_panel(scores: list) -> None:
     )
 
     st.markdown("---")
-    st.markdown("### 🎮  Place a paper trade from this briefing")
+    st.markdown(heading("paper_trade", "Place a paper trade from this briefing"))
 
     if get_active_portfolio_id() is None:
         st.info(
@@ -167,7 +169,7 @@ def _briefing_trade_panel(scores: list) -> None:
         key="brief_trade_note",
         placeholder="e.g. based on Claude's read of today's briefing",
     )
-    if st.button("▶  Buy into active strategy", type="primary",
+    if st.button(f"{icon('buy')}  Buy into active strategy", type="primary",
                  key="brief_trade_btn", disabled=(amount <= 0)):
         try:
             out = buy(sym, amount, note=brief_note or None)
@@ -468,7 +470,8 @@ Keep responses concise and conversational."""
                     # Hide the fenced TRADE_PROPOSALS_JSON block from the
                     # rendered chat — it's machine-readable, not for the user.
                     _, display_text = _parse_trade_proposals(msg["content"])
-                    with st.chat_message("assistant", avatar="🤖"):
+                    with st.chat_message("assistant",
+                                         avatar=icon("chat_avatar")):
                         st.markdown(display_text)
                 elif i > 0:
                     with st.chat_message("user", avatar="👤"):
@@ -487,7 +490,8 @@ Keep responses concise and conversational."""
             )
 
             st.markdown("---")
-            st.markdown("### ✦  Claude-driven Briefing strategy")
+            st.markdown(heading("claude_strategy",
+                                "Claude-driven Briefing strategy"))
 
             rec = _briefing_strategy_record()
             if rec is None:
@@ -508,7 +512,7 @@ Keep responses concise and conversational."""
             symbols_for_prompt = [r["symbol"] for r in ctx["scores"]]
 
             if st.button(
-                "✦  Ask Claude to propose trades",
+                f"{icon('claude_propose')}  Ask Claude to propose trades",
                 key="brief_propose_btn",
                 help=("Sends a hidden turn with the current Briefing-strategy "
                       "state and asks Claude for 0-3 paper-trade proposals. "
@@ -674,7 +678,8 @@ Keep responses concise and conversational."""
             _briefing_trade_panel(ctx["scores"])
 
         # ── 7-step analysis results ───────────────────────────────────────────
-        with st.expander("◆  7-step analysis — full metrics", expanded=False):
+        with st.expander(f"{icon('seven_step')}  7-step analysis — full metrics",
+                         expanded=False):
             scores = ctx["scores"]
             rows = []
             for r in scores:

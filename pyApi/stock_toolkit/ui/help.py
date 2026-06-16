@@ -7,9 +7,11 @@ as ``admin.py`` and ``game.py`` and is exercised by AppTest in CI.
 
 import streamlit as st
 
+from stock_toolkit.ui.icons import icon
+
 
 def render() -> None:
-    st.title("❓  Help — using Stock Toolkit")
+    st.title(f"{icon('page.help')}  Help — using Stock Toolkit")
     st.caption(
         "First time here? Read top-to-bottom. Already comfortable? "
         "Jump to the section that matches what you want to do."
@@ -25,7 +27,8 @@ def render() -> None:
         "your watchlist symbols with a **5-horizon score**, lets you "
         "**backtest strategies**, **alerts you** on conditions you care "
         "about, and offers a **paper-trading Game** so you can practise "
-        "ideas without risking real money. The ✦ **Briefing** tab brings "
+        f"ideas without risking real money. The {icon('tab.briefing')} "
+        "**Briefing** tab brings "
         "Claude into the loop to interpret the numbers and propose trades."
     )
     st.info(
@@ -39,21 +42,21 @@ def render() -> None:
     st.markdown("---")
     st.markdown("### Where to start")
     st.markdown(
-        """
-1. **Pick your symbols.** Open **⚙️ Admin** (sidebar) → *Watchlist* and
-   add tickers. Use exchange suffixes for non-US: `ENEL.MI` (Milan),
-   `BMW.DE` (Frankfurt), `DOCM.SW` (Swiss).
-2. **Collect some data.** From **⚙️ Admin** → *Collect now* run
-   `yfinance` (no key required). For years of history, run the CLI
-   command `stock-bootstrap` on the host.
-3. **Run a briefing.** Open the **✦ Briefing** tab on the main page,
-   click *Generate today's briefing*. Claude reads your scores and
-   indicators and writes a plain-English summary. Add an
-   `ANTHROPIC_API_KEY` in `config.env` first.
-4. **Try the Game.** Open **🎮 Game** (sidebar), buy a position, watch
-   it across the next few sessions. The strategy comparison expander
-   shows how every strategy is doing relative to a do-nothing
-   watchlist baseline.
+        f"""
+1. **Pick your symbols.** Open **{icon("page.admin")} Admin** (sidebar)
+   → *Watchlist* and add tickers. Use exchange suffixes for non-US:
+   `ENEL.MI` (Milan), `BMW.DE` (Frankfurt), `DOCM.SW` (Swiss).
+2. **Collect some data.** From **{icon("page.admin")} Admin** →
+   *Collect now* run `yfinance` (no key required). For years of
+   history, run the CLI command `stock-bootstrap` on the host.
+3. **Run a briefing.** Open the **{icon("tab.briefing")} Briefing**
+   tab on the main page, click *Generate today's briefing*. Claude
+   reads your scores and indicators and writes a plain-English
+   summary. Add an `ANTHROPIC_API_KEY` in `config.env` first.
+4. **Try the Game.** Open **{icon("page.game")} Game** (sidebar), buy
+   a position, watch it across the next few sessions. The strategy
+   comparison expander shows how every strategy is doing relative to
+   a do-nothing watchlist baseline.
         """
     )
 
@@ -61,26 +64,26 @@ def render() -> None:
     st.markdown("---")
     st.markdown("### Main page tabs")
     st.markdown(
-        """
+        f"""
 | Tab | What it does |
 |---|---|
-| **◉ Score** | Ranks watchlist 0–100 across nine components (Sharpe, Calmar, momentum, drawdown, RSI, Bollinger Bands, Monte Carlo, Hurst persistence). Pick the **horizon** (week / month / quarter / year / life) to reweight the components for that timeframe. |
-| **◆ Analysis** | The eleven statistical tools, one chart per tool: returns histogram, regression, rolling volatility, correlation matrix, SMA crossovers, drawdown, RSI, Bollinger Bands, Monte Carlo paths, Hurst exponent. Useful for *understanding* a symbol, not picking one. |
-| **▶ Backtest** | Run RSI, SMA-cross, Bollinger Bands, breakout, or MACD on any symbol with commission + slippage. Compares against buy-and-hold so you can see whether the strategy actually adds value. |
-| **▲ Alerts** | Edge-triggered conditions (fires once on False → True): RSI cross, Bollinger squeeze, 52-week high/low, MACD cross, etc. Channels: email (SMTP), Pushover, Slack — configured in `config.env`. |
-| **✦ Briefing** | Claude reads your scores + fundamentals + indicators and writes a plain-English summary you can chat with. The "Ask Claude to propose trades" button drops 0–3 confirmable trade cards into a dedicated *Briefing strategy* paper portfolio. |
-| **↓ Collect** | Trigger on-demand collection from any enabled source. Faster than dropping to the CLI. |
+| **{icon("tab.score")} Score** | Ranks watchlist 0–100 across nine components (Sharpe, Calmar, momentum, drawdown, RSI, Bollinger Bands, Monte Carlo, Hurst persistence). Pick the **horizon** (week / month / quarter / year / life) to reweight the components for that timeframe. |
+| **{icon("tab.analysis")} Analysis** | The eleven statistical tools, one chart per tool: returns histogram, regression, rolling volatility, correlation matrix, SMA crossovers, drawdown, RSI, Bollinger Bands, Monte Carlo paths, Hurst exponent. Useful for *understanding* a symbol, not picking one. |
+| **{icon("tab.backtest")} Backtest** | Run RSI, SMA-cross, Bollinger Bands, breakout, or MACD on any symbol with commission + slippage. Compares against buy-and-hold so you can see whether the strategy actually adds value. |
+| **{icon("tab.alerts")} Alerts** | Edge-triggered conditions (fires once on False → True): RSI cross, Bollinger squeeze, 52-week high/low, MACD cross, etc. Channels: email (SMTP), Pushover, Slack — configured in `config.env`. |
+| **{icon("tab.briefing")} Briefing** | Claude reads your scores + fundamentals + indicators and writes a plain-English summary you can chat with. The "Ask Claude to propose trades" button drops 0–3 confirmable trade cards into a dedicated *Briefing strategy* paper portfolio. |
+| **{icon("tab.collect")} Collect** | Trigger on-demand collection from any enabled source. Faster than dropping to the CLI. |
         """
     )
 
     st.markdown("### Sidebar pages")
     st.markdown(
-        """
+        f"""
 | Page | What it does |
 |---|---|
-| **⚙️ Admin** | Edit your watchlist, kick off collections, inspect the DB (sources, intervals, rows per symbol), see which `(symbol, source)` pairs are suppressed by the failure tracker. |
-| **🎮 Game** | Paper-trading portfolios. Multiple named "strategies" in parallel: each has its own cash, positions, return curve. Compare them side-by-side; track win rate, expectancy, CAGR, Sharpe, Sortino, max drawdown per strategy. The Briefing tab can feed trades here. |
-| **❓ Help** | This page. |
+| **{icon("page.admin")} Admin** | Edit your watchlist, kick off collections, inspect the DB (sources, intervals, rows per symbol), see which `(symbol, source)` pairs are suppressed by the failure tracker. |
+| **{icon("page.game")} Game** | Paper-trading portfolios. Multiple named "strategies" in parallel: each has its own cash, positions, return curve. Compare them side-by-side; track win rate, expectancy, CAGR, Sharpe, Sortino, max drawdown per strategy. The Briefing tab can feed trades here. |
+| **{icon("page.help")} Help** | This page. |
         """
     )
 

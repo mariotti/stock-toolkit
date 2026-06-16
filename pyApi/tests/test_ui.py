@@ -467,6 +467,55 @@ class TestApiKeySave(unittest.TestCase):
             captured.update(original_state)
 
 
+class TestIconRegistry(unittest.TestCase):
+    """Central icon mapping is well-formed and used by the UI."""
+
+    def test_every_semantic_maps_to_a_known_concept(self):
+        from stock_toolkit.ui import icons
+        for sem, token in icons.SEMANTIC.items():
+            self.assertIn(token, icons.GLYPHS,
+                          f"semantic '{sem}' points at unknown concept "
+                          f"'{token}'")
+
+    def test_icon_returns_glyph_for_known_name(self):
+        from stock_toolkit.ui.icons import icon
+        self.assertEqual(icon("tab.score"),    "◉")
+        self.assertEqual(icon("tab.briefing"), "✦")
+        self.assertEqual(icon("page.admin"),   "⚙️")
+        self.assertEqual(icon("page.game"),    "🎮")
+        self.assertEqual(icon("page.help"),    "❓")
+
+    def test_icon_falls_back_for_unknown_name(self):
+        from stock_toolkit.ui.icons import icon
+        self.assertEqual(icon("nonexistent.thing"), "?")
+
+    def test_tab_label_format(self):
+        from stock_toolkit.ui.icons import tab_label
+        self.assertEqual(tab_label("tab.score", "Score"), "◉  Score")
+
+    def test_heading_format(self):
+        from stock_toolkit.ui.icons import heading
+        self.assertEqual(
+            heading("watchlist", "Watchlist"), "### ▪  Watchlist",
+        )
+        self.assertEqual(
+            heading("watchlist", "Watchlist", level=2),
+            "## ▪  Watchlist",
+        )
+
+    def test_concept_change_propagates_everywhere(self):
+        """Restyling = one GLYPHS edit. Verify by patching."""
+        from unittest import mock
+        from stock_toolkit.ui import icons
+
+        with mock.patch.dict(icons.GLYPHS, {"achievement": "★"}):
+            # Every element mapped to "achievement" now uses ★.
+            self.assertEqual(icons.icon("tab.score"),     "★")
+            self.assertEqual(icons.icon("outcome_stats"), "★")
+            # Other concepts unaffected.
+            self.assertEqual(icons.icon("tab.analysis"),  "◆")
+
+
 class TestHelpPageRenders(unittest.TestCase):
     """Help page (❓) renders and contains the orientation sections.
 
