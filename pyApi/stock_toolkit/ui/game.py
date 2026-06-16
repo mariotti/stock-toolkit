@@ -149,7 +149,7 @@ def render():
     # ─────────────────────────────────────────────────────────────────────
     #  Open positions
     # ─────────────────────────────────────────────────────────────────────
-    st.markdown("### 📈  Open positions")
+    st.markdown("### ◆  Open positions")
     if mtm["holdings"]:
         df = pd.DataFrame(mtm["holdings"])
         df["weight"] = df["value"] / mtm["total"] * 100
@@ -250,7 +250,7 @@ def render():
     buy_col, sell_col = st.columns(2)
 
     with buy_col:
-        st.markdown("### 💰  Buy")
+        st.markdown("### ▶  Buy")
         if not watchlist:
             st.warning("No symbols with data yet — run `stock-collect` or "
                        "`stock-bootstrap` first.")
@@ -336,7 +336,7 @@ def render():
                         st.error(str(e))
 
     with sell_col:
-        st.markdown("### 💸  Sell")
+        st.markdown("### ◀  Sell")
         open_syms = [h["symbol"] for h in mtm["holdings"]]
         if not open_syms:
             st.info("No open positions to sell.")
@@ -382,7 +382,7 @@ def render():
     # ─────────────────────────────────────────────────────────────────────
     #  Portfolio value over time
     # ─────────────────────────────────────────────────────────────────────
-    st.markdown("### 📊  Portfolio value over time")
+    st.markdown("### ◆  Portfolio value over time")
     history = value_history()
     if not history:
         st.info("No history yet — trade something to start the curve.")
@@ -438,7 +438,7 @@ def render():
     # ─────────────────────────────────────────────────────────────────────
     if len(portfolios) > 1:
         with st.expander(
-            f"📈  Compare strategies ({len(portfolios)})", expanded=False
+            f"◆  Compare strategies ({len(portfolios)})", expanded=False
         ):
             palette = [
                 "#38bdf8", "#facc15", "#34d399", "#f472b6",
@@ -518,7 +518,7 @@ def render():
     # ─────────────────────────────────────────────────────────────────────
     #  Trade history
     # ─────────────────────────────────────────────────────────────────────
-    st.markdown("### 📜  Trade history")
+    st.markdown("### ▪  Trade history")
     from stock_toolkit.game import get_trades, trade_stats
     trades = get_trades()
     if not trades:
@@ -544,7 +544,7 @@ def render():
         # CSV export — newest-first to match the display, includes notes.
         csv_blob = t_display.iloc[::-1].to_csv(index=False).encode("utf-8")
         st.download_button(
-            "⬇️  Download trade history (CSV)",
+            "↓  Download trade history (CSV)",
             data=csv_blob,
             file_name=f"trades_{mtm['name'].replace(' ', '_')}.csv",
             mime="text/csv",
@@ -556,7 +556,7 @@ def render():
     # ─────────────────────────────────────────────────────────────────────
     stats = trade_stats()
     if stats["closed_count"] > 0:
-        st.markdown("### 🎯  Outcome stats (closed round-trips)")
+        st.markdown("### ◉  Outcome stats (closed round-trips)")
         s1, s2, s3, s4, s5 = st.columns(5)
         s1.metric("Closed trades", f"{stats['closed_count']}")
         s2.metric("Win rate",      f"{stats['win_rate'] * 100:.0f}%",

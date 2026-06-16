@@ -200,7 +200,7 @@ if not selected_symbols:
 # ─────────────────────────────────────────────
 
 tab_score, tab_analysis, tab_backtest, tab_alerts, tab_brief, tab_collect = st.tabs([
-    "🏆  Score", "📊  Analysis", "🔁  Backtest", "🔔  Alerts", "🤖  Briefing", "📥  Collect"
+    "◉  Score", "◆  Analysis", "▶  Backtest", "▲  Alerts", "✦  Briefing", "↓  Collect"
 ])
 
 with tab_score:

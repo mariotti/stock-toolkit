@@ -71,7 +71,7 @@ def render():
     # ─────────────────────────────────────────────────────────────────────────
     #  Watchlist
     # ─────────────────────────────────────────────────────────────────────────
-    st.markdown("### 📋  Watchlist")
+    st.markdown("### ▪  Watchlist")
     if not CONFIG_PATH.exists():
         st.warning(
             f"`config.env` not found at `{CONFIG_PATH}`. Run "
@@ -106,7 +106,7 @@ def render():
 
         save_col, info_col = st.columns([1, 3])
         with save_col:
-            save_clicked = st.button("💾  Save watchlist", type="primary")
+            save_clicked = st.button("✓  Save watchlist", type="primary")
         with info_col:
             if added:
                 st.info(f"Will add: `{', '.join(added)}`")
@@ -201,7 +201,7 @@ def render():
                 placeholder=placeholder,
             )
 
-        if st.button("💾  Save keys", type="primary", key="adm_save_keys"):
+        if st.button("✓  Save keys", type="primary", key="adm_save_keys"):
             saved   = []
             cleared = []
             for key_name, _label, _url, _hint, expose in _KEY_DEFS:
@@ -248,7 +248,7 @@ def render():
     # ─────────────────────────────────────────────────────────────────────────
     #  Collect & bootstrap
     # ─────────────────────────────────────────────────────────────────────────
-    st.markdown("### 📥  Collect & bootstrap")
+    st.markdown("### ↓  Collect & bootstrap")
 
     tier_col, sym_col = st.columns([2, 2])
     with tier_col:
@@ -303,10 +303,10 @@ def render():
     # ─────────────────────────────────────────────────────────────────────────
     #  Inventory
     # ─────────────────────────────────────────────────────────────────────────
-    st.markdown("### 🗂  Inventory")
+    st.markdown("### ▪  Inventory")
     inv_a, inv_b, inv_c, inv_d = st.columns(4)
     with inv_a:
-        summary_clicked = st.button("📊  Summary")
+        summary_clicked = st.button("◆  Summary")
     with inv_b:
         check_clicked = st.button("🔍  Check gaps")
     with inv_c:
@@ -355,7 +355,7 @@ def render():
     # ─────────────────────────────────────────────────────────────────────────
     #  Failure tracker
     # ─────────────────────────────────────────────────────────────────────────
-    st.markdown("### ⚠️  Suppressed (symbol, source) pairs")
+    st.markdown("### ▲  Suppressed (symbol, source) pairs")
     failures_db = BASE_DIR / "stock_failures.db"
     threshold = int(cfg.get("FAILURE_THRESHOLD", "5"))
     if not failures_db.exists():

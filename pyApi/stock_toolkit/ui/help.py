@@ -25,7 +25,7 @@ def render() -> None:
         "your watchlist symbols with a **5-horizon score**, lets you "
         "**backtest strategies**, **alerts you** on conditions you care "
         "about, and offers a **paper-trading Game** so you can practise "
-        "ideas without risking real money. The 🤖 **Briefing** tab brings "
+        "ideas without risking real money. The ✦ **Briefing** tab brings "
         "Claude into the loop to interpret the numbers and propose trades."
     )
     st.info(
@@ -46,7 +46,7 @@ def render() -> None:
 2. **Collect some data.** From **⚙️ Admin** → *Collect now* run
    `yfinance` (no key required). For years of history, run the CLI
    command `stock-bootstrap` on the host.
-3. **Run a briefing.** Open the **🤖 Briefing** tab on the main page,
+3. **Run a briefing.** Open the **✦ Briefing** tab on the main page,
    click *Generate today's briefing*. Claude reads your scores and
    indicators and writes a plain-English summary. Add an
    `ANTHROPIC_API_KEY` in `config.env` first.
@@ -64,12 +64,12 @@ def render() -> None:
         """
 | Tab | What it does |
 |---|---|
-| **🏆 Score** | Ranks watchlist 0–100 across nine components (Sharpe, Calmar, momentum, drawdown, RSI, Bollinger Bands, Monte Carlo, Hurst persistence). Pick the **horizon** (week / month / quarter / year / life) to reweight the components for that timeframe. |
-| **📈 Analysis** | The eleven statistical tools, one chart per tool: returns histogram, regression, rolling volatility, correlation matrix, SMA crossovers, drawdown, RSI, Bollinger Bands, Monte Carlo paths, Hurst exponent. Useful for *understanding* a symbol, not picking one. |
-| **🧪 Backtest** | Run RSI, SMA-cross, Bollinger Bands, breakout, or MACD on any symbol with commission + slippage. Compares against buy-and-hold so you can see whether the strategy actually adds value. |
-| **🔔 Alerts** | Edge-triggered conditions (fires once on False → True): RSI cross, Bollinger squeeze, 52-week high/low, MACD cross, etc. Channels: email (SMTP), Pushover, Slack — configured in `config.env`. |
-| **🤖 Briefing** | Claude reads your scores + fundamentals + indicators and writes a plain-English summary you can chat with. The "Ask Claude to propose trades" button drops 0–3 confirmable trade cards into a dedicated *Briefing strategy* paper portfolio. |
-| **📥 Collect** | Trigger on-demand collection from any enabled source. Faster than dropping to the CLI. |
+| **◉ Score** | Ranks watchlist 0–100 across nine components (Sharpe, Calmar, momentum, drawdown, RSI, Bollinger Bands, Monte Carlo, Hurst persistence). Pick the **horizon** (week / month / quarter / year / life) to reweight the components for that timeframe. |
+| **◆ Analysis** | The eleven statistical tools, one chart per tool: returns histogram, regression, rolling volatility, correlation matrix, SMA crossovers, drawdown, RSI, Bollinger Bands, Monte Carlo paths, Hurst exponent. Useful for *understanding* a symbol, not picking one. |
+| **▶ Backtest** | Run RSI, SMA-cross, Bollinger Bands, breakout, or MACD on any symbol with commission + slippage. Compares against buy-and-hold so you can see whether the strategy actually adds value. |
+| **▲ Alerts** | Edge-triggered conditions (fires once on False → True): RSI cross, Bollinger squeeze, 52-week high/low, MACD cross, etc. Channels: email (SMTP), Pushover, Slack — configured in `config.env`. |
+| **✦ Briefing** | Claude reads your scores + fundamentals + indicators and writes a plain-English summary you can chat with. The "Ask Claude to propose trades" button drops 0–3 confirmable trade cards into a dedicated *Briefing strategy* paper portfolio. |
+| **↓ Collect** | Trigger on-demand collection from any enabled source. Faster than dropping to the CLI. |
         """
     )
 

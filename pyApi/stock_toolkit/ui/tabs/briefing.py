@@ -487,7 +487,7 @@ Keep responses concise and conversational."""
             )
 
             st.markdown("---")
-            st.markdown("### 🤖  Claude-driven Briefing strategy")
+            st.markdown("### ✦  Claude-driven Briefing strategy")
 
             rec = _briefing_strategy_record()
             if rec is None:
@@ -508,7 +508,7 @@ Keep responses concise and conversational."""
             symbols_for_prompt = [r["symbol"] for r in ctx["scores"]]
 
             if st.button(
-                "🤖  Ask Claude to propose trades",
+                "✦  Ask Claude to propose trades",
                 key="brief_propose_btn",
                 help=("Sends a hidden turn with the current Briefing-strategy "
                       "state and asks Claude for 0-3 paper-trade proposals. "
@@ -674,7 +674,7 @@ Keep responses concise and conversational."""
             _briefing_trade_panel(ctx["scores"])
 
         # ── 7-step analysis results ───────────────────────────────────────────
-        with st.expander("📊  7-step analysis — full metrics", expanded=False):
+        with st.expander("◆  7-step analysis — full metrics", expanded=False):
             scores = ctx["scores"]
             rows = []
             for r in scores:
