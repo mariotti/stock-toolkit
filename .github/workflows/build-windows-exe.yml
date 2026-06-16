@@ -12,6 +12,8 @@ on:
 jobs:
   build-windows-exe:
     runs-on: windows-latest
+    permissions:
+      contents: write   # needed so the final step can publish a GitHub Release
 
     steps:
       - name: Checkout
@@ -78,3 +80,31 @@ jobs:
           name: StockToolkit-windows-x64
           path: pyApi/pyinstaller/dist/*.zip
           if-no-files-found: error
+
+      # Publish a GitHub Release on tag pushes only. workflow_dispatch
+      # runs (manual triggers) skip this so we never accidentally
+      # publish a release outside the tagging flow.
+      - name: Publish GitHub Release
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          name: "${{ github.ref_name }} — Windows .exe"
+          tag_name: ${{ github.ref_name }}
+          files: pyApi/pyinstaller/dist/*.zip
+          fail_on_unmatched_files: true
+          body: |
+            **Native Windows binary** built on this GitHub Actions runner.
+
+            1. Download `StockToolkit-windows-x64-${{ steps.version.outputs.version }}.zip` below.
+            2. Right-click → *Extract All…*
+            3. Double-click `StockToolkit.exe`. SmartScreen on first
+               launch → *More info → Run anyway* (binary is unsigned).
+
+            Console opens, Streamlit starts, browser opens at
+            <http://localhost:8501>. Data lives in `./data/` next to
+            the .exe.
+
+            Source code + Mac/Linux distributions are at
+            [gitlab.com/Mariotti/stock-toolkit](https://gitlab.com/Mariotti/stock-toolkit/-/releases/${{ github.ref_name }}).
+            This GitHub mirror exists for the Windows build only —
+            file issues and PRs over there.
