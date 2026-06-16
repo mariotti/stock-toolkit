@@ -26,6 +26,7 @@ double-clickable launcher.
 2. Unzip — you get a folder containing the launcher, README, and the
    Docker stack source.
 3. **Mac:** double-click `Stock Toolkit.command` in Finder.
+   **Windows:** double-click `Stock Toolkit.bat` in Explorer.
    **Linux:** from a terminal in that folder, run `./Stock\ Toolkit.sh`.
 4. First run only: a short wizard asks for your watchlist + API keys
    (yfinance works without a key — you can start there). The image
@@ -33,9 +34,14 @@ double-clickable launcher.
    skip the wizard.
 5. Browser opens at http://localhost:8501.
 
-To stop: double-click `Stop Stock Toolkit.command` (Mac) or run
-`./Stop\ Toolkit.sh` (Linux) — or `docker compose down` from
-inside the bundle folder.
+To stop: double-click `Stop Stock Toolkit.command` (Mac) /
+`Stop Stock Toolkit.bat` (Windows), or run `./Stop\ Stock\ Toolkit.sh`
+(Linux) — or `docker compose down` from inside the bundle folder.
+
+> **Windows note.** Docker Desktop for Windows requires WSL2, which is
+> enabled by default on Windows 11 (one-time install on Windows 10).
+> After Docker is installed the launcher behaves exactly like the
+> Mac/Linux ones.
 
 Your state lives in `./data/` next to the launcher. It survives stops,
 re-launches, and machine reboots. Back it up.

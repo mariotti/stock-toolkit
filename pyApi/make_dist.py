@@ -637,6 +637,106 @@ echo
 read -p "  Press Enter to close this window..." _
 """
 
+_APP_LAUNCHER_BAT = """\
+@echo off
+setlocal enabledelayedexpansion
+cd /d "%~dp0"
+
+echo.
+echo   Stock Toolkit
+echo   ==============
+echo.
+
+REM ── Docker installed? ────────────────────────────────────────────
+where docker >nul 2>&1
+if errorlevel 1 (
+    echo   ERROR: Docker is not installed.
+    echo.
+    echo   Install Docker Desktop first:
+    echo     https://www.docker.com/products/docker-desktop/
+    echo.
+    pause
+    exit /b 1
+)
+
+REM ── Docker daemon running? ───────────────────────────────────────
+docker info >nul 2>&1
+if errorlevel 1 (
+    echo   Starting Docker Desktop...
+    REM Try the default install location; harmless if missing.
+    start "" "C:\\Program Files\\Docker\\Docker\\Docker Desktop.exe" 2>nul
+    REM Wait up to 90s for the daemon to come up.
+    set /a tries=0
+    :wait_docker
+    timeout /t 1 /nobreak >nul
+    docker info >nul 2>&1
+    if errorlevel 1 (
+        set /a tries+=1
+        if !tries! lss 90 goto wait_docker
+        echo.
+        echo   ERROR: Docker did not start.
+        echo   Open Docker Desktop manually and run me again.
+        pause
+        exit /b 1
+    )
+)
+
+REM ── First-run config wizard ─────────────────────────────────────
+if not exist data mkdir data
+if not exist "data\\config.env" (
+    echo.
+    echo   First-time setup — let's create your config (API keys, watchlist).
+    echo   Press Enter at any prompt to accept the default.
+    echo.
+    docker compose run --rm ui stock-setup
+    echo.
+)
+
+REM ── Bring up the stack ──────────────────────────────────────────
+echo   Starting Stock Toolkit...
+docker compose up -d
+
+REM ── Wait for the UI to respond ──────────────────────────────────
+set "URL=http://localhost:8501"
+echo   Waiting for the dashboard at %URL% ...
+set /a tries=0
+:wait_ui
+timeout /t 1 /nobreak >nul
+curl -sf -o nul %URL% >nul 2>&1
+if not errorlevel 1 goto ui_ready
+set /a tries+=1
+if !tries! lss 60 goto wait_ui
+
+:ui_ready
+echo   Opening %URL%
+start "" %URL%
+
+echo.
+echo   Stock Toolkit is running in the background.
+echo.
+echo   Your data lives in:
+echo     %CD%\\data\\
+echo   It persists across restarts. Back it up.
+echo.
+echo   To stop:
+echo     double-click  "Stop Stock Toolkit.bat"
+echo     or run        docker compose down
+echo.
+pause
+"""
+
+_APP_STOP_BAT = """\
+@echo off
+cd /d "%~dp0"
+
+echo   Stopping Stock Toolkit...
+docker compose down
+echo.
+echo   Stack stopped. Your data in %CD%\\data\\ is preserved.
+echo.
+pause
+"""
+
 _APP_STOP_SCRIPT = """\
 #!/usr/bin/env bash
 # Stop the Stock Toolkit stack. Your data in ./data/ is preserved.
@@ -661,8 +761,9 @@ Stock Toolkit — Quick Start
 1.  Make sure Docker Desktop is installed and running.
     https://www.docker.com/products/docker-desktop/
 
-2.  Mac:   double-click  "Stock Toolkit.command"
-    Linux: from a terminal in this folder:  ./"Stock Toolkit.sh"
+2.  Mac:     double-click  "Stock Toolkit.command"
+    Windows: double-click  "Stock Toolkit.bat"
+    Linux:   from a terminal in this folder:  ./"Stock Toolkit.sh"
 
     First run: a short wizard asks for your API keys and watchlist
     (Yahoo Finance works without a key — you can start there).
@@ -673,8 +774,9 @@ Stock Toolkit — Quick Start
     Back this folder up if it matters to you.
 
 4.  Stop the stack:
-    Mac:   double-click  "Stop Stock Toolkit.command"
-    Linux: ./"Stop Stock Toolkit.sh"
+    Mac:     double-click  "Stop Stock Toolkit.command"
+    Windows: double-click  "Stop Stock Toolkit.bat"
+    Linux:   ./"Stop Stock Toolkit.sh"
     Or anywhere:  docker compose down
 
 Notes
@@ -727,19 +829,23 @@ def _build_app_dist(out_dir: Path, dry_run: bool) -> None:
             )
 
     # ── 3. Double-clickable launcher / stopper scripts ─────────────
+    # Mac (.command) + Linux (.sh) + Windows (.bat) — same flow,
+    # platform-appropriate shell syntax.
     launchers = [
-        ("Stock Toolkit.command",      _APP_LAUNCHER_SCRIPT),
-        ("Stock Toolkit.sh",           _APP_LAUNCHER_SCRIPT),
-        ("Stop Stock Toolkit.command", _APP_STOP_SCRIPT),
-        ("Stop Stock Toolkit.sh",      _APP_STOP_SCRIPT),
+        ("Stock Toolkit.command",      _APP_LAUNCHER_SCRIPT, 0o755),
+        ("Stock Toolkit.sh",           _APP_LAUNCHER_SCRIPT, 0o755),
+        ("Stock Toolkit.bat",          _APP_LAUNCHER_BAT,    0o644),
+        ("Stop Stock Toolkit.command", _APP_STOP_SCRIPT,     0o755),
+        ("Stop Stock Toolkit.sh",      _APP_STOP_SCRIPT,     0o755),
+        ("Stop Stock Toolkit.bat",     _APP_STOP_BAT,        0o644),
     ]
-    for fname, body in launchers:
+    for fname, body, mode in launchers:
         print(f"  + {fname}")
         if dry_run:
             continue
         path = out_dir / fname
         path.write_text(body)
-        path.chmod(0o755)
+        path.chmod(mode)
 
     # ── 4. README ──────────────────────────────────────────────────
     print("  + README.txt")
