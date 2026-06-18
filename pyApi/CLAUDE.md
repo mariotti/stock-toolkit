@@ -6,6 +6,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 A stock market data toolkit with collection, analysis, scoring, backtesting, alerting, and a Streamlit UI. Configuration lives in `config.env` (not in git). The SQLite database `stock_data.db` is the live data store.
 
+For the human-facing dev workflow (test layout, release pipeline,
+conventions, CI), see [`DEVELOPING.md`](DEVELOPING.md) — most
+patterns you'd encounter while editing this codebase are described
+there in one place.
+
 ## Commands
 
 **Install dependencies:**

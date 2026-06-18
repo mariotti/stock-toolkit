@@ -75,6 +75,7 @@ All documentation lives in [`pyApi/`](pyApi/):
 |---|---|
 | [`pyApi/README.md`](pyApi/README.md) | Full reference: every module, flag, and workflow |
 | [`pyApi/QUICKSTART.md`](pyApi/QUICKSTART.md) | Getting started — install, configure, dashboard walkthrough, scheduling |
+| [`pyApi/DEVELOPING.md`](pyApi/DEVELOPING.md) | Dev environment, tests, release pipeline, conventions, CI |
 | [`pyApi/ANALYSIS.md`](pyApi/ANALYSIS.md) | The 11 analysis tools in depth |
 | [`pyApi/README_SCORE.md`](pyApi/README_SCORE.md) | How the 5-horizon scoring works |
 | [`pyApi/README_BACKTEST.md`](pyApi/README_BACKTEST.md) | Backtesting strategies and metrics |
