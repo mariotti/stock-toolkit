@@ -1,0 +1,38 @@
+[package]
+name = "stock-fetcher"
+version = "0.1.0"
+edition = "2021"
+description = "Concurrent stock data fetcher — Rust companion to pyApi/stock_toolkit."
+license = "MIT"
+repository = "https://gitlab.com/Mariotti/stock-toolkit"
+
+[[bin]]
+name = "stock-fetcher"
+path = "src/main.rs"
+
+[lib]
+name = "stock_fetcher"
+path = "src/lib.rs"
+
+[dependencies]
+# HTTP client — rustls so we don't need OpenSSL on the host.
+reqwest  = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+# Async runtime + concurrency primitives.
+tokio    = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time"] }
+# SQLite with bundled lib — no system dep, predictable across hosts.
+rusqlite = { version = "0.31", features = ["bundled"] }
+# JSON parsing.
+serde       = { version = "1", features = ["derive"] }
+serde_json  = "1"
+# CLI parser, anyhow for error context, async traits.
+clap        = { version = "4", features = ["derive"] }
+anyhow      = "1"
+async-trait = "0.1"
+# Tracing for structured logs.
+tracing            = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[dev-dependencies]
+# In-process HTTP server for offline tests.
+wiremock = "0.6"
+tempfile = "3"

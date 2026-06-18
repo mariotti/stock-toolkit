@@ -78,6 +78,7 @@ All documentation lives in [`pyApi/`](pyApi/):
 | [`pyApi/DEVELOPING.md`](pyApi/DEVELOPING.md) | Dev environment, tests, release pipeline, conventions, CI |
 | [`pyApi/SCHEMA.md`](pyApi/SCHEMA.md) | SQLite schemas + 2.x compatibility commitment |
 | [`pyApi/CHANGELOG.md`](pyApi/CHANGELOG.md) | Curated release highlights |
+| [`rust-fetcher/README.md`](rust-fetcher/README.md) | Experimental Rust fetcher (v2.2.0+) — concurrent, schema-compatible |
 | [`pyApi/ANALYSIS.md`](pyApi/ANALYSIS.md) | The 11 analysis tools in depth |
 | [`pyApi/README_SCORE.md`](pyApi/README_SCORE.md) | How the 5-horizon scoring works |
 | [`pyApi/README_BACKTEST.md`](pyApi/README_BACKTEST.md) | Backtesting strategies and metrics |

@@ -15,6 +15,57 @@ DB schemas are documented in [`SCHEMA.md`](SCHEMA.md).
 
 ---
 
+## 2.2.0 — Rust fetcher (experimental, opt-in)
+
+New top-level workspace `rust-fetcher/` — a concurrent fetcher
+written in Rust, schema-compatible with the Python collector's
+`prices` table. Coexists with the Python pipeline; you can drive
+either independently.
+
+**Why**: the Python collector loops over `(symbol, source)` pairs
+sequentially within each source. The Rust fetcher uses tokio +
+per-source semaphores so symbols run in parallel — roughly the
+time of the slowest single fetch instead of the sum.
+
+**Scope of this release** (first ship, intentionally narrow):
+- `Source` async trait + one concrete implementation: Alpha
+  Vantage `TIME_SERIES_DAILY`.
+- SQLite writer with `INSERT OR IGNORE` dedup against the same
+  `UNIQUE(symbol, source, timestamp)` Python uses. WAL journal
+  mode so a concurrent Python reader doesn't block.
+- `config.env` parser byte-compatible with Python's `load_config`
+  (single source of truth for `ALPHAVANTAGE_KEY`, `SYMBOLS`).
+- Per-source rate-limit / budget state bookkeeping (`state.rs`).
+- CLI binary `stock-fetcher` with `--sources`, `--symbols`,
+  `--concurrency`, `--summary`.
+- 20 tests across config parsing, schema/dedup, state, the
+  AV response parser, and a wiremock end-to-end round trip.
+
+**Verified end-to-end against the live Alpha Vantage API**: 100
+AAPL bars fetched on first run, 100 dedupe-skipped on second.
+
+**What's deliberately NOT done yet**:
+- The other six sources. Architecture is set; each is a single
+  module implementing `Source::fetch_daily`.
+- Real per-minute rate limiting (Finnhub 60/min, Polygon 5/min).
+  The current semaphore caps concurrency but doesn't pace at a
+  fixed RPM. Token bucket goes in the per-source semaphore seam.
+- Sharing `.collector_state.json` with Python. Rust keeps its own
+  state file until both sides need to coordinate budget.
+- CI for cross-platform Rust binaries. Local `cargo build --release`
+  only for now.
+- Python invocation surface. Run from the shell; no `subprocess`
+  shim from `stock-collect` yet.
+
+The Rust DDL in `rust-fetcher/src/db.rs::SCHEMA` is the
+cross-language contract — the column-level stability rules in
+`SCHEMA.md` apply to both implementations. Touching one means
+touching the other in the same change.
+
+No Python behaviour change. No new Python dependencies. The Rust
+workspace is gitignored except for source — no pre-built artefacts
+in the repo.
+
 ## 2.1.0 — News sentiment in the Briefing
 
 New module `stock_toolkit/news.py` — fetches Alpha Vantage's
