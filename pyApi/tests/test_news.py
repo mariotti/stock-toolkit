@@ -150,8 +150,17 @@ class TestFormatForPrompt(unittest.TestCase):
         out = news.format_for_prompt(sentiment)
         self.assertIn("…", out)
 
-    def test_zero_articles_renders_coverage_disclaimer(self):
+    def test_per_ticker_empty_shows_coverage_disclaimer(self):
+        """One symbol empty alongside symbols with articles → use the
+        per-ticker disclaimer (free-tier US bias)."""
         sentiment = {
+            "AAPL": {
+                "symbol":     "AAPL",
+                "n_articles": 1,
+                "score":      0.2,
+                "label":      "Somewhat-Bullish",
+                "articles":   [{"title": "t", "score": 0.2, "relevance": 1.0}],
+            },
             "BMW.DE": {
                 "symbol":     "BMW.DE",
                 "n_articles": 0,
@@ -161,8 +170,21 @@ class TestFormatForPrompt(unittest.TestCase):
             },
         }
         out = news.format_for_prompt(sentiment)
-        self.assertIn("no articles", out)
         self.assertIn("US-biased", out)
+        # The throttle wording must NOT appear when only one symbol is empty.
+        self.assertNotIn("throttled", out)
+
+    def test_all_empty_shows_throttle_disclaimer(self):
+        """When EVERY symbol came back empty, that's almost always a
+        rate limit. Don't mislead Claude into reasoning about coverage."""
+        sentiment = {
+            sym: {"symbol": sym, "n_articles": 0, "score": None,
+                  "label": "—", "articles": []}
+            for sym in ("AAPL", "MSFT", "GOOGL")
+        }
+        out = news.format_for_prompt(sentiment)
+        self.assertIn("throttled", out)
+        self.assertNotIn("US-biased", out)
 
 
 if __name__ == "__main__":

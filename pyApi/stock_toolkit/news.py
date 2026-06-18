@@ -197,6 +197,13 @@ def format_for_prompt(
         "Symbol     Score    Label              Articles",
         "─" * 60,
     ]
+    # If every symbol came back empty, the issue is almost certainly
+    # a throttle (HTTP 200 with a 'Note' / 'Information' key) rather
+    # than per-ticker coverage. Surface that honestly so Claude doesn't
+    # blame US bias for what's really a rate limit.
+    all_empty = all(
+        (row.get("n_articles") or 0) == 0 for row in sentiment.values()
+    )
     for sym, row in sentiment.items():
         score_str = f"{row['score']:+.2f}" if row.get("score") is not None else "  n/a"
         label_str = (row.get("label") or "—")[:18]
@@ -205,10 +212,18 @@ def format_for_prompt(
             f"{sym:<10} {score_str:>7}  {label_str:<18} {n}"
         )
         if not n:
-            lines.append(
-                "    (no articles — Alpha Vantage NEWS_SENTIMENT free "
-                "tier is US-biased; non-US tickers often return empty.)"
-            )
+            if all_empty:
+                lines.append(
+                    "    (no articles for any symbol — Alpha Vantage "
+                    "likely throttled; the 25-call/day free budget is "
+                    "shared with stock-collect.)"
+                )
+            else:
+                lines.append(
+                    "    (no articles — Alpha Vantage NEWS_SENTIMENT "
+                    "free tier is US-biased; non-US tickers often "
+                    "return empty even when the ticker is recognised.)"
+                )
             continue
         for h in row.get("articles", [])[:max_headlines]:
             title = h["title"].replace("\n", " ").strip()

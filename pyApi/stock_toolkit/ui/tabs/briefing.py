@@ -377,7 +377,8 @@ Keep responses concise and conversational."""
         # 25/day budget shared with the collector, so we only ever pull
         # for the top scored symbols (see below).
         _av_key_set = bool((_cfg.get("ALPHAVANTAGE_KEY") or "").strip())
-        include_news = st.checkbox(
+        news_col, refresh_col = st.columns([5, 1])
+        include_news = news_col.checkbox(
             "Include news sentiment (Alpha Vantage)",
             value=_av_key_set,
             disabled=not _av_key_set,
@@ -391,6 +392,19 @@ Keep responses concise and conversational."""
                   "enable."),
             key="brief_include_news",
         )
+        # Cache flush — useful when a previous fetch hit a throttle
+        # (HTTP 200 + 'Note' or 'Information' instead of 'feed') and
+        # the empty result got stuck under the 1-hour st.cache_data
+        # TTL. One click here forgets the cached news so the next
+        # Preview / Generate retries fresh.
+        if refresh_col.button("🔄", key="brief_news_refresh",
+                              disabled=not _av_key_set,
+                              help="Refresh the news cache. Click after "
+                                   "fixing an Alpha Vantage throttle or "
+                                   "key change to discard stale empties."):
+            from stock_toolkit.ui.helpers import get_news_sentiment as _g
+            _g.clear()
+            st.toast("News cache cleared — next preview will refetch.")
 
     with bf2:
         st.markdown(
