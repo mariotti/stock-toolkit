@@ -516,6 +516,47 @@ class TestIconRegistry(unittest.TestCase):
             self.assertEqual(icons.icon("tab.analysis"),  "◆")
 
 
+class TestAdminSettingsRoundTrip(unittest.TestCase):
+    """v1.15 — the Settings expander writes all the right keys to config.env."""
+
+    def test_settings_keys_round_trip(self):
+        """Each field maps to its expected config.env key via the same
+        update_config_value() writer the Settings expander uses."""
+        import tempfile
+        from pathlib import Path
+        from stock_toolkit.common import load_config, update_config_value
+
+        with tempfile.TemporaryDirectory() as td:
+            cfg_path = Path(td) / "config.env"
+            cfg_path.write_text("SYMBOLS=AAPL\n")
+
+            # Mimic what the Save settings button does end-to-end.
+            updates = {
+                "FINNHUB_PAID":       "true",
+                "ALPHAVANTAGE_PAID":  "false",
+                "UI_COLLECT_SOURCES": "yfinance,finnhub",
+                "ALERT_EMAIL":        "you@example.com",
+                "ALERT_SMTP_HOST":    "smtp.gmail.com",
+                "ALERT_SMTP_PORT":    "587",
+                "ALERT_SMTP_USER":    "you@gmail.com",
+                "ALERT_SMTP_PASS":    "app-pw",
+                "PUSHOVER_USER_KEY":  "po-user",
+                "PUSHOVER_APP_TOKEN": "po-token",
+                "SLACK_WEBHOOK_URL":  "https://hooks.slack.com/services/T/B/X",
+            }
+            for k, v in updates.items():
+                update_config_value(k, v, cfg_path)
+
+            cfg = load_config(cfg_path)
+            for k, expected in updates.items():
+                self.assertEqual(
+                    cfg.get(k), expected,
+                    f"{k}: expected {expected!r}, got {cfg.get(k)!r}",
+                )
+            # SYMBOLS was preserved through every write.
+            self.assertEqual(cfg["SYMBOLS"], "AAPL")
+
+
 class TestHelpPageRenders(unittest.TestCase):
     """Help page (❓) renders and contains the orientation sections.
 

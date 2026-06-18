@@ -70,6 +70,24 @@ def render():
     cfg = load_config(CONFIG_PATH)
 
     # ─────────────────────────────────────────────────────────────────────────
+    #  First-run banner — guides new users through the three sections needed
+    #  to reach a working install. Disappears once SYMBOLS is non-empty.
+    # ─────────────────────────────────────────────────────────────────────────
+    if not (cfg.get("SYMBOLS") or "").strip():
+        st.info(
+            "👋  **First time here?** Three quick steps to get going:\n\n"
+            "1. **Watchlist** below — add the tickers you care about "
+            "(yfinance works with no key).\n"
+            "2. **API Keys** — optional, only if you want extra sources "
+            "or the Claude Briefing tab.\n"
+            "3. **Settings** — choose which sources the Collect tab can "
+            "use, and (optionally) wire up email / Pushover / Slack "
+            "notifications.\n\n"
+            "All three write to `config.env` and take effect on the "
+            "next request — no restart."
+        )
+
+    # ─────────────────────────────────────────────────────────────────────────
     #  Watchlist
     # ─────────────────────────────────────────────────────────────────────────
     st.markdown(heading("watchlist", "Watchlist"))
@@ -248,6 +266,133 @@ def render():
                 )
             else:
                 st.info("No changes detected.")
+
+    # ─────────────────────────────────────────────────────────────────────────
+    #  Settings — paid-tier flags, UI collect sources, notification channels
+    # ─────────────────────────────────────────────────────────────────────────
+    _ALL_SOURCES = ["yfinance", "alphavantage", "finnhub", "polygon",
+                    "fmp", "twelvedata", "marketstack"]
+
+    with st.expander("🛠  Settings", expanded=False):
+        st.caption(
+            "Everything else `stock-setup` would ask for, edit-in-place. "
+            "All changes save to `config.env`."
+        )
+
+        # ── paid-tier flags ────────────────────────────────────────────
+        st.markdown("**Paid-tier flags** — tick if you have a paid plan.")
+        pa1, pa2 = st.columns(2)
+        cur_finn_paid = (cfg.get("FINNHUB_PAID") or "false").lower() == "true"
+        cur_av_paid   = (cfg.get("ALPHAVANTAGE_PAID") or "false").lower() == "true"
+        new_finn_paid = pa1.checkbox(
+            "Finnhub paid (EU + candles)",
+            value=cur_finn_paid, key="adm_finn_paid",
+        )
+        new_av_paid = pa2.checkbox(
+            "Alpha Vantage paid (full history)",
+            value=cur_av_paid, key="adm_av_paid",
+        )
+
+        # ── UI collect sources ─────────────────────────────────────────
+        st.markdown("**UI collect sources** — which sources the "
+                    "*Collect* tab can trigger.")
+        cur_ui = [s.strip() for s in
+                  (cfg.get("UI_COLLECT_SOURCES") or "yfinance").split(",")
+                  if s.strip()]
+        new_ui = st.multiselect(
+            "Allowed sources", _ALL_SOURCES, default=cur_ui,
+            help="Keep conservative to protect daily-call budgets.",
+            key="adm_ui_collect",
+        )
+
+        # ── notifications ─────────────────────────────────────────────
+        st.markdown("**Notifications** — leave blank to disable a channel.")
+
+        st.caption("📧  Email (SMTP)")
+        em1, em2 = st.columns(2)
+        new_email = em1.text_input(
+            "ALERT_EMAIL", value=cfg.get("ALERT_EMAIL", ""),
+            placeholder="you@example.com", key="adm_alert_email",
+        )
+        new_smtp_host = em2.text_input(
+            "ALERT_SMTP_HOST", value=cfg.get("ALERT_SMTP_HOST", ""),
+            placeholder="smtp.gmail.com", key="adm_smtp_host",
+        )
+        em3, em4, em5 = st.columns([1, 2, 2])
+        new_smtp_port = em3.text_input(
+            "Port", value=cfg.get("ALERT_SMTP_PORT", "587"),
+            key="adm_smtp_port",
+        )
+        new_smtp_user = em4.text_input(
+            "ALERT_SMTP_USER", value=cfg.get("ALERT_SMTP_USER", ""),
+            key="adm_smtp_user",
+        )
+        new_smtp_pass = em5.text_input(
+            "ALERT_SMTP_PASS", value="",
+            type="password",
+            placeholder=("•••••  set"
+                         if (cfg.get("ALERT_SMTP_PASS") or "").strip()
+                         else "App-specific password"),
+            help="Leave blank to keep the current password.",
+            key="adm_smtp_pass",
+        )
+
+        st.caption("📱  Pushover")
+        pu1, pu2 = st.columns(2)
+        new_po_user = pu1.text_input(
+            "PUSHOVER_USER_KEY", value=cfg.get("PUSHOVER_USER_KEY", ""),
+            type="password", key="adm_po_user",
+        )
+        new_po_token = pu2.text_input(
+            "PUSHOVER_APP_TOKEN", value=cfg.get("PUSHOVER_APP_TOKEN", ""),
+            type="password", key="adm_po_token",
+        )
+
+        st.caption("💬  Slack")
+        new_slack = st.text_input(
+            "SLACK_WEBHOOK_URL", value=cfg.get("SLACK_WEBHOOK_URL", ""),
+            type="password",
+            placeholder="https://hooks.slack.com/services/…",
+            key="adm_slack",
+        )
+
+        if st.button("✓  Save settings", type="primary",
+                     key="adm_save_settings"):
+            # Boolean flags
+            update_config_value("FINNHUB_PAID",
+                                "true" if new_finn_paid else "false",
+                                CONFIG_PATH)
+            update_config_value("ALPHAVANTAGE_PAID",
+                                "true" if new_av_paid else "false",
+                                CONFIG_PATH)
+            # UI sources — guarantee at least yfinance so the tab works
+            update_config_value(
+                "UI_COLLECT_SOURCES",
+                ",".join(new_ui) if new_ui else "yfinance",
+                CONFIG_PATH,
+            )
+            # Plain-text notification fields
+            for k, v in [
+                ("ALERT_EMAIL",      new_email),
+                ("ALERT_SMTP_HOST",  new_smtp_host),
+                ("ALERT_SMTP_PORT",  new_smtp_port),
+                ("ALERT_SMTP_USER",  new_smtp_user),
+                ("PUSHOVER_USER_KEY",  new_po_user),
+                ("PUSHOVER_APP_TOKEN", new_po_token),
+                ("SLACK_WEBHOOK_URL",  new_slack),
+            ]:
+                update_config_value(k, v.strip(), CONFIG_PATH)
+            # SMTP password — blank means keep current
+            if new_smtp_pass.strip():
+                update_config_value(
+                    "ALERT_SMTP_PASS", new_smtp_pass, CONFIG_PATH,
+                )
+            from stock_toolkit.ui.helpers import reload_config
+            reload_config()
+            st.success(
+                "✅  Saved to `config.env`. Takes effect on the next "
+                "request — no restart."
+            )
 
     # ─────────────────────────────────────────────────────────────────────────
     #  Collect & bootstrap
