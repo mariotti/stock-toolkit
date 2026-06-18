@@ -44,9 +44,11 @@ import pandas as pd
 #  PATHS AND CONFIG
 # ─────────────────────────────────────────────
 
-from stock_toolkit.common import BASE_DIR, LIVE_DB, HIST_DIR, CONFIG_PATH, load_config
+from stock_toolkit.common import (
+    CONFIG_PATH, DATA_DIR, HIST_DIR, LIVE_DB, load_config,
+)
 
-STATE_PATH = BASE_DIR / ".alerts_state.json"
+STATE_PATH = DATA_DIR / ".alerts_state.json"
 
 SOURCE_PRIORITY = [
     "alphavantage", "fmp", "yfinance",

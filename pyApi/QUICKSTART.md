@@ -82,9 +82,19 @@ stock-bootstrap                                  # seed years of history
 stock-ui                                         # dashboard opens in browser
 ```
 
+State lives in `./data/` next to where you ran the commands —
+`stock_data.db`, `portfolio.db`, the state JSONs, plus
+`historical/` for bootstrap DBs and `logs/` for the rotating
+collector log. Set `OUTPUT_DIR=…` in `config.env` to relocate.
+
 > **macOS note.** The Python that ships with macOS is too old (3.9).
 > Install a modern one: `brew install python@3.12`, or download from
 > [python.org](https://www.python.org/downloads/), then retry.
+
+> **Upgrading from a pre-v1.17 install?** The first `stock-*` command
+> you run will move any loose DBs at the project root into `data/`
+> and rename the old `data/` (which held bootstrap historicals) to
+> `data/historical/`. One stderr line records what moved.
 
 ---
 

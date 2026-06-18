@@ -5,12 +5,29 @@ Shared configuration loading and filesystem paths for the stock toolkit.
 All toolkit modules import from here instead of re-implementing the
 config.env parser and the database path constants.
 
-The data directory (config.env, stock_data.db, data/) is resolved from
-the STOCK_DIR environment variable if set, otherwise the current working
-directory. The bin/ wrappers cd into STOCK_DIR before launching.
+Path hierarchy (resolved once at import time):
+
+  BASE_DIR  = $STOCK_DIR if set, else os.getcwd()
+              — where config.env, bin/, etc. live
+  CONFIG_PATH = BASE_DIR / "config.env"
+  DATA_DIR  = where all on-disk *state* lives — DBs, state files,
+              logs, historical bootstrap DBs
+              — resolved via _resolve_data_dir() (see docstring)
+
+Stable exports for downstream consumers:
+
+  LIVE_DB       = DATA_DIR / "stock_data.db"
+  HIST_DIR      = DATA_DIR / "historical"
+  PORTFOLIO_DB  = DATA_DIR / "portfolio.db"
+
+If a legacy install is detected on import (loose DBs sitting at
+BASE_DIR from before the v1.17 layout), _auto_migrate() moves them
+into DATA_DIR once and continues.
 """
 
 import os
+import shutil
+import sys
 from pathlib import Path
 
 if os.environ.get("STOCK_DIR"):
@@ -19,8 +36,6 @@ else:
     BASE_DIR = Path.cwd()
 
 CONFIG_PATH = BASE_DIR / "config.env"   # keep out of git (see .gitignore)
-LIVE_DB     = BASE_DIR / "stock_data.db"
-HIST_DIR    = BASE_DIR / "data"
 
 
 class NoDataError(RuntimeError):
@@ -99,3 +114,132 @@ def update_config_value(key: str, value: str,
         lines[-1] += "\n"
     lines.append(new_line)
     config_path.write_text("".join(lines))
+
+
+# ─────────────────────────────────────────────────────────────────────────
+#  DATA_DIR — single root for every on-disk state file
+# ─────────────────────────────────────────────────────────────────────────
+
+# Loose state files to relocate from BASE_DIR → DATA_DIR on first run
+# of the v1.17 layout. Order matters only insofar as we always move the
+# main DB last so a half-failed migration is detectable.
+_LEGACY_STATE_FILES = (
+    ".collector_state.json",
+    ".alerts_state.json",
+    "stock_data.csv",
+    "stock_failures.csv",
+    "stock_failures_report.csv",
+    "stock_failures.db",
+    "stock_failures.db-shm",
+    "stock_failures.db-wal",
+    "portfolio.db",
+    "portfolio.db-shm",
+    "portfolio.db-wal",
+    "stock_data.db",
+    "stock_data.db-shm",
+    "stock_data.db-wal",
+)
+
+
+def _resolve_data_dir() -> Path:
+    """Single root for all on-disk state. Precedence:
+
+      1. ``OUTPUT_DIR`` in config.env — explicit user override.
+      2. ``STOCK_DIR`` env var set — Docker / production mode. The
+         bind-mount root IS the data dir; do not nest a second
+         ``data/`` inside it.
+      3. ``BASE_DIR / "data"`` — fresh native install, keeps the
+         source tree clean (this is the v1.17 default).
+    """
+    cfg = load_config(CONFIG_PATH)
+    explicit = (cfg.get("OUTPUT_DIR") or "").strip()
+    if explicit:
+        return Path(explicit).expanduser().resolve()
+    if os.environ.get("STOCK_DIR"):
+        return BASE_DIR
+    return BASE_DIR / "data"
+
+
+def _auto_migrate(data_dir: Path) -> None:
+    """Move legacy loose state files from BASE_DIR into DATA_DIR
+    and rename the legacy ``HIST_DIR`` (``BASE_DIR/data/``) to the
+    new ``DATA_DIR/historical/``. Idempotent — re-running it is a
+    no-op once the layout is already v1.17.
+    """
+    # Step 1 — record what counts as a "historical bootstrap DB"
+    # BEFORE any moves change the layout. After we relocate loose
+    # files into DATA_DIR (= BASE_DIR/data in the common native case),
+    # a naive glob would otherwise capture the freshly-moved
+    # stock_data.db as a "historical".
+    old_hist = BASE_DIR / "data"
+    new_hist = data_dir / "historical"
+    historicals = []
+    if old_hist.exists() and old_hist != new_hist:
+        historicals = [
+            p for p in old_hist.glob("*.db")
+            if p.name not in _LEGACY_STATE_FILES and p.is_file()
+        ]
+
+    moved_files = []
+
+    # Step 2 — move loose state files BASE_DIR → DATA_DIR. Skipped
+    # entirely when the two are equal (Docker / OUTPUT_DIR=BASE_DIR).
+    if data_dir != BASE_DIR:
+        for name in _LEGACY_STATE_FILES:
+            src = BASE_DIR / name
+            dst = data_dir / name
+            if not src.exists() or dst.exists():
+                continue
+            try:
+                data_dir.mkdir(parents=True, exist_ok=True)
+                shutil.move(str(src), str(dst))
+                moved_files.append(name)
+            except OSError as e:
+                print(
+                    f"[stock-toolkit] migration: could not move "
+                    f"{src} → {dst}: {e}",
+                    file=sys.stderr,
+                )
+
+    # Step 3 — relocate the historicals collected in step 1. The list
+    # was frozen before step 2 so we never mistake a freshly-moved
+    # live DB for a historical.
+    if historicals:
+        try:
+            new_hist.mkdir(parents=True, exist_ok=True)
+            for p in historicals:
+                target = new_hist / p.name
+                if not target.exists() and p.exists():
+                    shutil.move(str(p), str(target))
+            # Husk cleanup: rm the old hist dir only if it's now empty.
+            if old_hist.exists() and not any(old_hist.iterdir()):
+                old_hist.rmdir()
+        except OSError as e:
+            print(
+                f"[stock-toolkit] migration: could not move historical "
+                f"DBs to {new_hist}: {e}",
+                file=sys.stderr,
+            )
+
+    if moved_files or historicals:
+        parts = []
+        if moved_files:
+            parts.append(
+                f"moved {len(moved_files)} legacy file(s) → {data_dir}"
+            )
+        if historicals:
+            parts.append(
+                f"relocated {len(historicals)} historical DB(s) → {new_hist}"
+            )
+        print(
+            f"[stock-toolkit] v1.17 layout migration: {'; '.join(parts)}",
+            file=sys.stderr,
+        )
+
+
+DATA_DIR = _resolve_data_dir()
+_auto_migrate(DATA_DIR)
+
+LIVE_DB      = DATA_DIR / "stock_data.db"
+HIST_DIR     = DATA_DIR / "historical"
+PORTFOLIO_DB = DATA_DIR / "portfolio.db"

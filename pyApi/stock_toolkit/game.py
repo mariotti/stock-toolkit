@@ -29,11 +29,11 @@ from collections import defaultdict
 from pathlib import Path
 
 from stock_toolkit.analysis import discover_dbs as _discover_data_dbs
-from stock_toolkit.common import BASE_DIR
+from stock_toolkit.common import PORTFOLIO_DB as _PORTFOLIO_DB_PATH
 
 SLIPPAGE_BPS = 10                                # 10 bps = 0.10%
 SLIPPAGE     = SLIPPAGE_BPS / 10000.0
-DEFAULT_PORTFOLIO_DB = BASE_DIR / "portfolio.db"
+DEFAULT_PORTFOLIO_DB = _PORTFOLIO_DB_PATH
 DEFAULT_STARTING_CASH = 10_000.0
 
 

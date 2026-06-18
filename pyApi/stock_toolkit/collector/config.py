@@ -4,7 +4,7 @@ import logging
 import logging.handlers
 from pathlib import Path
 
-from stock_toolkit.common import BASE_DIR, CONFIG_PATH, load_config
+from stock_toolkit.common import CONFIG_PATH, load_config
 
 # ─────────────────────────────────────────────
 #  CONFIG — loaded from config.env, with
@@ -153,7 +153,13 @@ ALPHAVANTAGE_PAID = _cfg.get("ALPHAVANTAGE_PAID", "false").lower() == "true"
 
 # ── paths ─────────────────────────────────────────────────────────────────────
 
-OUTPUT_DIR     = Path(_cfg.get("OUTPUT_DIR", str(BASE_DIR)))
+# OUTPUT_DIR / DATA_DIR resolution + legacy migration lives in
+# stock_toolkit.common (single source of truth across the whole
+# toolkit). Honour an explicit OUTPUT_DIR override in config.env
+# here too for clarity, but it ends up at the same path either way.
+from stock_toolkit.common import DATA_DIR as _DATA_DIR
+
+OUTPUT_DIR     = Path(_cfg.get("OUTPUT_DIR", str(_DATA_DIR)))
 DB_PATH        = OUTPUT_DIR / _cfg.get("DB_FILE",      "stock_data.db")
 CSV_PATH       = OUTPUT_DIR / _cfg.get("CSV_FILE",     "stock_data.csv")
 STATE_PATH     = OUTPUT_DIR / _cfg.get("STATE_FILE",   ".collector_state.json")
@@ -163,7 +169,10 @@ LOG_DIR        = OUTPUT_DIR / _cfg.get("LOG_DIR",      "logs")
 LOG_PATH       = LOG_DIR    / _cfg.get("LOG_FILE",     "collector.log")
 GNUPLOT_DIR    = OUTPUT_DIR / _cfg.get("GNUPLOT_DIR",  "gnuplot-data")
 MATPLOTLIB_DIR = OUTPUT_DIR / _cfg.get("MATPLOT_DIR",  "matplot")
-HIST_DIR       = OUTPUT_DIR / _cfg.get("HIST_DIR",     "data")
+# v1.17 renamed the default from "data" to "historical" so the live
+# stock_data.db and the bootstrap historicals live in clearly distinct
+# folders. common._auto_migrate() handles the rename for upgrades.
+HIST_DIR       = OUTPUT_DIR / _cfg.get("HIST_DIR",     "historical")
 FAILURES_DB_PATH     = OUTPUT_DIR / _cfg.get("FAILURES_DB",     "stock_failures.db")
 FAILURES_REPORT_PATH = OUTPUT_DIR / _cfg.get("FAILURES_REPORT", "stock_failures_report.csv")
 

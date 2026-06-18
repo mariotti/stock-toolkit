@@ -49,7 +49,7 @@ def main():
 
     print(f"[stock-bootstrap] Backfilling historical OHLCV via yfinance "
           f"(range: {args.range_}). This may take a minute or two.")
-    print( "                  Output → data/stock_data_<range>.db "
+    print( "                  Output → historical/stock_data_<range>.db "
            "(live stock_data.db is untouched).")
     print()
 

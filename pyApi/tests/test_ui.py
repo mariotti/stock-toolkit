@@ -516,6 +516,117 @@ class TestIconRegistry(unittest.TestCase):
             self.assertEqual(icons.icon("tab.analysis"),  "◆")
 
 
+class TestDataDirMigration(unittest.TestCase):
+    """v1.17 — single DATA_DIR + auto-migration of legacy loose state.
+
+    Exercises the _resolve_data_dir() + _auto_migrate() helpers as
+    pure functions against a tempdir BASE_DIR. Each test runs the
+    functions in isolation; we don't reimport common.py (it caches
+    module-level constants at import time)."""
+
+    def _stage_legacy_layout(self, base):
+        """Lay down a v1.16 install: loose DBs at BASE_DIR/ plus a
+        bootstrap historical at BASE_DIR/data/. Returns the staged
+        files for assertion."""
+        (base / "stock_data.db").write_bytes(b"live\0")
+        (base / "stock_failures.db").write_bytes(b"fail\0")
+        (base / "portfolio.db").write_bytes(b"port\0")
+        (base / ".collector_state.json").write_text('{"a":1}')
+        (base / ".alerts_state.json").write_text('{"b":2}')
+        (base / "data").mkdir()
+        (base / "data" / "stock_data_2025-2026.db").write_bytes(b"hist\0")
+
+    def test_migration_moves_loose_files(self):
+        from unittest import mock as _mock
+
+        with tempfile.TemporaryDirectory() as td:
+            base = pathlib.Path(td)
+            self._stage_legacy_layout(base)
+            data_dir = base / "data"
+
+            with _mock.patch.object(_common, "BASE_DIR", base):
+                _common._auto_migrate(data_dir)
+
+            for name in (
+                "stock_data.db", "stock_failures.db", "portfolio.db",
+                ".collector_state.json", ".alerts_state.json",
+            ):
+                self.assertFalse((base / name).exists(),
+                                 f"{name} should have moved out of BASE_DIR")
+                self.assertTrue((data_dir / name).exists(),
+                                f"{name} should now live in DATA_DIR")
+            # Historicals renamed too.
+            self.assertTrue(
+                (data_dir / "historical" / "stock_data_2025-2026.db").exists()
+            )
+
+    def test_migration_is_idempotent(self):
+        """Running the migration a second time is a no-op — no files
+        change, no exception."""
+        from unittest import mock as _mock
+
+        with tempfile.TemporaryDirectory() as td:
+            base = pathlib.Path(td)
+            self._stage_legacy_layout(base)
+            data_dir = base / "data"
+
+            with _mock.patch.object(_common, "BASE_DIR", base):
+                _common._auto_migrate(data_dir)
+                snapshot = {
+                    p.name: p.stat().st_mtime_ns
+                    for p in data_dir.iterdir() if p.is_file()
+                }
+                # Re-run.
+                _common._auto_migrate(data_dir)
+                after = {
+                    p.name: p.stat().st_mtime_ns
+                    for p in data_dir.iterdir() if p.is_file()
+                }
+            self.assertEqual(snapshot, after)
+
+    def test_migration_skipped_when_data_dir_equals_base(self):
+        """Docker / OUTPUT_DIR=BASE_DIR: data already lives at the
+        root, the loose-files step is a no-op. Only the historical
+        rename runs."""
+        from unittest import mock as _mock
+
+        with tempfile.TemporaryDirectory() as td:
+            base = pathlib.Path(td)
+            # Lay out the Docker pre-v1.17 mess: state at root,
+            # historicals at root/data/.
+            self._stage_legacy_layout(base)
+            with _mock.patch.object(_common, "BASE_DIR", base):
+                _common._auto_migrate(base)
+            # Loose files stay put.
+            self.assertTrue((base / "stock_data.db").exists())
+            # Historicals get renamed to base/historical/.
+            self.assertTrue(
+                (base / "historical" / "stock_data_2025-2026.db").exists()
+            )
+
+    def test_migration_never_overwrites_existing_target(self):
+        """If a target file already exists at DATA_DIR (user already
+        migrated by hand), the source is preserved untouched."""
+        from unittest import mock as _mock
+
+        with tempfile.TemporaryDirectory() as td:
+            base = pathlib.Path(td)
+            data_dir = base / "data"
+            data_dir.mkdir()
+            (base / "stock_data.db").write_bytes(b"old_contents")
+            (data_dir / "stock_data.db").write_bytes(b"new_contents")
+
+            with _mock.patch.object(_common, "BASE_DIR", base):
+                _common._auto_migrate(data_dir)
+
+            self.assertEqual(
+                (data_dir / "stock_data.db").read_bytes(), b"new_contents",
+                "migration must NOT overwrite an existing destination",
+            )
+            # And the source was left alone for the user to investigate.
+            self.assertTrue((base / "stock_data.db").exists())
+
+
 class TestThemeApplied(unittest.TestCase):
     """v1.16 — every page calls setup_page() so the dark sidebar /
     background CSS is applied uniformly. Without this, sidebar pages

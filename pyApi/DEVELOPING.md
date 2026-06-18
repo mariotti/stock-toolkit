@@ -27,14 +27,37 @@ same `config.env` and the same SQLite databases.
 and edit by hand. `config.env*` is gitignored — your keys never get
 committed.
 
-**Data location.** The collector writes to
-`OUTPUT_DIR/stock_data.db` (defaults to `BASE_DIR`, which is `pyApi/`
-during dev). Multi-DB analysis also scans `OUTPUT_DIR/data/` for
-historical DBs that `stock-bootstrap` produced. Set `OUTPUT_DIR` in
-`config.env` to point somewhere else for sandbox runs.
+**Data location (v1.17+).** All on-disk state lives under a single
+`DATA_DIR`. Defaults:
 
-**Logs** land in `OUTPUT_DIR/logs/collector.log` (rotating handler,
-3 × 1 MB). Override with `LOG_DIR` in `config.env`.
+| Mode                  | `BASE_DIR`               | `DATA_DIR`                  |
+|-----------------------|--------------------------|-----------------------------|
+| Native dev (no env)   | `os.getcwd()` (= `pyApi/`) | `BASE_DIR/data/`            |
+| Docker / Win .exe     | `$STOCK_DIR` (= `/data`)   | same as `BASE_DIR` (no nest) |
+| Explicit override     | (unchanged)              | `$OUTPUT_DIR` in `config.env` |
+
+Inside `DATA_DIR` after migration:
+
+```
+data/
+├── stock_data.db          live DB
+├── stock_failures.db
+├── portfolio.db           Game state
+├── .collector_state.json
+├── .alerts_state.json
+├── stock_data.csv         CSV mirror (if produced)
+├── historical/            bootstrap DBs (was data/ pre-v1.17)
+│   └── stock_data_<range>.db
+└── logs/
+    └── collector.log
+```
+
+Upgrading from a pre-v1.17 install? On the first run, `common.py`
+auto-detects loose DBs at `BASE_DIR/` and moves them into
+`DATA_DIR/` — one stderr line records what was moved. Idempotent.
+
+**Logs** land in `DATA_DIR/logs/collector.log` (rotating, 3 × 1 MB).
+Override with `LOG_DIR` in `config.env`.
 
 ---
 

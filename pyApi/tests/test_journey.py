@@ -156,14 +156,15 @@ class TestBootstrapThenScore(unittest.TestCase):
                 "MPLBACKEND": "Agg",
             }
 
-            # 1. bootstrap (writes data/stock_data_2024.db)
+            # 1. bootstrap (writes historical/stock_data_2024.db
+            # under the v1.17 layout — was data/ pre-v1.17)
             r1 = run([bootstrap, "--range", "2024"], env=env, timeout=120)
             self.assertEqual(
                 r1.returncode, 0,
                 f"stock-bootstrap failed (exit {r1.returncode})\n"
                 f"stdout: {r1.stdout[-500:]}\nstderr: {r1.stderr[-500:]}")
 
-            db = data_dir / "data" / "stock_data_2024.db"
+            db = data_dir / "historical" / "stock_data_2024.db"
             self.assertTrue(db.exists(), f"expected {db} to exist")
 
             # 2. score reads the historical DB and ranks
