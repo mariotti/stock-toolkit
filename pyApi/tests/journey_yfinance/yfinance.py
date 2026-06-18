@@ -33,14 +33,26 @@ def _series(symbol: str, n: int = 252 * 5) -> pd.DataFrame:
 
 
 class Ticker:
-    """Drop-in for yfinance.Ticker for the subset our collector uses."""
+    """Drop-in for yfinance.Ticker for the subset our collector uses.
+
+    Magic symbol names recognised:
+      "NODATA*"  → history() returns an empty DataFrame, so the
+                   collector records a per-source failure into
+                   stock_failures.db. Used by the collector-failures
+                   journey test.
+    """
 
     def __init__(self, symbol):
         self.symbol = symbol
-        self._history = _series(symbol)
+        if symbol.startswith("NODATA"):
+            self._history = pd.DataFrame()
+        else:
+            self._history = _series(symbol)
 
     def history(self, start=None, end=None, period=None, interval="1d"):
         df = self._history
+        if df.empty:
+            return df
         if start:
             df = df[df.index >= pd.Timestamp(start, tz="UTC")]
         if end:

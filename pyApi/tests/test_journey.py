@@ -431,6 +431,96 @@ class TestBriefingOfflineJourney(unittest.TestCase):
             self.assertIn("OK", r.stdout)
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+#  7. stock-alerts — end-to-end exercise of build_context + edge detection
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestAlertsJourney(unittest.TestCase):
+    """Runs ``stock-alerts --dry-run`` against a seeded DB so the entire
+    ``build_context`` path executes for a real Bollinger window (≥ 20
+    bars). Guards the v1.18.2 NaN fix at the subprocess level — if a
+    future regression makes the Bollinger fields leak NaN again, the
+    condition evaluator will raise and this test will catch it before
+    a unit test would."""
+
+    def test_dry_run_evaluates_conditions(self):
+        path = find_entry_point("stock-alerts")
+        self.assertIsNotNone(path, "stock-alerts is not installed")
+        with tempfile.TemporaryDirectory() as tmp:
+            base = pathlib.Path(tmp)
+            (base / "config.env").write_text("SYMBOLS=AAPL\n")
+            # 60 bars is well above the 20-bar Bollinger window, so the
+            # bbands_* fields are real numbers — not NaN. This is the
+            # path the v1.18.2 fix protects.
+            _seed_prices_db(base / "stock_data.db", "AAPL",
+                            n_bars=60, start_close=150.0)
+            env = {**os.environ, "STOCK_DIR": str(base), "MPLBACKEND": "Agg"}
+            r = run(
+                [path, "-s", "AAPL",
+                 "--when", "price > 0",       # always true
+                 "--when", "rsi14 > 1000",    # always false
+                 "--dry-run"],
+                env=env, timeout=30,
+            )
+            self.assertEqual(
+                r.returncode, 0,
+                f"stock-alerts --dry-run exited {r.returncode}\n"
+                f"stdout: {r.stdout[-500:]}\nstderr: {r.stderr[-500:]}",
+            )
+            # Both conditions should appear in the dry-run report.
+            self.assertIn("AAPL", r.stdout)
+            self.assertIn("price > 0", r.stdout)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  8. stock-collect — failure-report path (the v1.18.2 duplicate-except fix)
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestCollectorFailuresJourney(unittest.TestCase):
+    """Runs ``stock-collect`` against a watchlist containing a symbol the
+    fake yfinance returns empty for. Verifies the collector records the
+    failure and writes the report CSV — exercising the failures.py path
+    that v1.18.2 cleaned up (the duplicate-except clause that used to
+    double-write on failure)."""
+
+    def test_failures_db_and_report_written(self):
+        path = find_entry_point("stock-collect")
+        self.assertIsNotNone(path, "stock-collect is not installed")
+        with tempfile.TemporaryDirectory() as tmp:
+            base = pathlib.Path(tmp)
+            # The magic prefix "NODATA" makes the fake yfinance return
+            # an empty DataFrame, simulating a delisted ticker.
+            (base / "config.env").write_text("SYMBOLS=AAPL,NODATA1\n")
+            env = {
+                **os.environ,
+                "STOCK_DIR":  str(base),
+                "PYTHONPATH": f"{FAKE_YF}{os.pathsep}{os.environ.get('PYTHONPATH','')}",
+                "MPLBACKEND": "Agg",
+            }
+            r = run([path, "--sources", "yfinance"], env=env, timeout=60)
+            # The collector exits 0 even when some symbols fail — that's
+            # by design; partial successes shouldn't kill cron jobs.
+            self.assertEqual(
+                r.returncode, 0,
+                f"stock-collect exited {r.returncode}\n"
+                f"stdout: {r.stdout[-500:]}\nstderr: {r.stderr[-500:]}",
+            )
+
+            # STOCK_DIR is set → DATA_DIR == BASE_DIR (Docker rule).
+            failures_db  = base / "stock_failures.db"
+            failures_csv = base / "stock_failures_report.csv"
+            self.assertTrue(
+                failures_db.exists(),
+                f"expected {failures_db} to be written; stdout: {r.stdout[-500:]}",
+            )
+            self.assertTrue(
+                failures_csv.exists(),
+                f"expected {failures_csv} to be written.",
+            )
+            # The CSV should mention the failed symbol.
+            self.assertIn("NODATA1", failures_csv.read_text())
+
+
 if __name__ == "__main__":
     runner = unittest.main(verbosity=2, exit=False)
     sys.exit(0 if runner.result.wasSuccessful() else 1)
