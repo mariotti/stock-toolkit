@@ -395,6 +395,48 @@ def render():
             )
 
     # ─────────────────────────────────────────────────────────────────────────
+    #  Sanity check — opt-in audit of the deterministic invariants
+    # ─────────────────────────────────────────────────────────────────────────
+    with st.expander("🩺  Sanity check", expanded=False):
+        st.caption(
+            "Runs `stock_toolkit.sanity.run_all()` against the live "
+            "config + databases. Each check is opt-in and never auto-runs."
+        )
+        if st.button("🩺  Run sanity check", key="adm_run_sanity"):
+            from stock_toolkit.sanity import (
+                ERROR, INFO, WARNING, run_all,
+            )
+            report = run_all()
+            if report.ok and not report.warnings:
+                st.success(
+                    f"✅  All clean — {len(report.issues)} info note(s) only."
+                )
+            elif report.ok:
+                st.warning(
+                    f"⚠  {len(report.warnings)} warning(s), no errors."
+                )
+            else:
+                st.error(
+                    f"❌  {len(report.errors)} error(s), "
+                    f"{len(report.warnings)} warning(s)."
+                )
+            if report.issues:
+                import pandas as _pd
+                rows = []
+                _icon = {ERROR: "❌", WARNING: "⚠", INFO: "ℹ"}
+                for i in report.issues:
+                    rows.append({
+                        "":         _icon.get(i.severity, ""),
+                        "Severity": i.severity.upper(),
+                        "Check":    i.check,
+                        "Message":  i.message,
+                        "Detail":   i.detail or "",
+                    })
+                st.dataframe(
+                    _pd.DataFrame(rows), width="stretch", hide_index=True,
+                )
+
+    # ─────────────────────────────────────────────────────────────────────────
     #  Collect & bootstrap
     # ─────────────────────────────────────────────────────────────────────────
     st.markdown(heading("collect", "Collect & bootstrap"))
