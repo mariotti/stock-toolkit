@@ -516,6 +516,33 @@ class TestIconRegistry(unittest.TestCase):
             self.assertEqual(icons.icon("tab.analysis"),  "◆")
 
 
+class TestThemeApplied(unittest.TestCase):
+    """v1.16 — every page calls setup_page() so the dark sidebar /
+    background CSS is applied uniformly. Without this, sidebar pages
+    fall back to Streamlit's default light theme."""
+
+    def test_every_renderable_calls_setup_page(self):
+        for mod_name in (
+            "stock_toolkit.ui.app",
+            "stock_toolkit.ui.admin",
+            "stock_toolkit.ui.game",
+            "stock_toolkit.ui.help",
+        ):
+            import importlib
+            import inspect
+            mod = importlib.import_module(mod_name)
+            src = inspect.getsource(mod)
+            self.assertIn(
+                "setup_page", src,
+                f"{mod_name} does not call setup_page() — sidebar pages "
+                "will render in Streamlit's light default theme.",
+            )
+
+    def test_theme_module_exports_setup_page(self):
+        from stock_toolkit.ui import theme
+        self.assertTrue(callable(getattr(theme, "setup_page", None)))
+
+
 class TestAdminSettingsRoundTrip(unittest.TestCase):
     """v1.15 — the Settings expander writes all the right keys to config.env."""
 

@@ -29,8 +29,8 @@ def _pct(v: float) -> str:
 
 
 def render():
-    st.set_page_config(page_title="Stock Toolkit — Game",
-                       page_icon=icon("page.game"), layout="wide")
+    from stock_toolkit.ui.theme import setup_page
+    setup_page("Stock Toolkit — Game")
     st.title(f"{icon('page.game')} Game")
     st.caption(
         "Paper-trading portfolio. No real money, no API orders — fills "

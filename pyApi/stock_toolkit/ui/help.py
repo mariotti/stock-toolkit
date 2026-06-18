@@ -11,6 +11,8 @@ from stock_toolkit.ui.icons import icon
 
 
 def render() -> None:
+    from stock_toolkit.ui.theme import setup_page
+    setup_page("Stock Toolkit — Help")
     st.title(f"{icon('page.help')}  Help — using Stock Toolkit")
     st.caption(
         "First time here? Read top-to-bottom. Already comfortable? "

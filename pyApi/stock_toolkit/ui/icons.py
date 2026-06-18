@@ -45,6 +45,7 @@ GLYPHS: dict[str, str] = {
     "game":         "🎮",     # paper-trading (user kept)
     "help":         "❓",     # help (user kept)
     "chat":         "🤖",     # assistant chat avatar (Streamlit idiom)
+    "app":          "●",      # main app brand mark (favicon, sidebar title)
 }
 
 
@@ -95,6 +96,9 @@ SEMANTIC: dict[str, str] = {
     "seven_step":        "data",
     "paper_trade":       "game",
     "chat_avatar":       "chat",
+
+    # global app brand
+    "app.icon":          "app",
 }
 
 

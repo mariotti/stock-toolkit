@@ -58,9 +58,9 @@ def _run(cmd: list, label: str, timeout: int = 600) -> tuple:
 
 
 def render():
-    st.set_page_config(page_title="Stock Toolkit — Admin", page_icon="⚙️",
-                       layout="wide")
-    st.title("⚙️ Admin")
+    from stock_toolkit.ui.theme import setup_page
+    setup_page("Stock Toolkit — Admin")
+    st.title(f"{icon('page.admin')} Admin")
     st.caption(
         "Backend operations: edit your watchlist, trigger collection, "
         "inspect the database. Every action here is the same code path "
