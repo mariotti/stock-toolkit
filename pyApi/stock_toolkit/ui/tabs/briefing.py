@@ -372,6 +372,25 @@ Keep responses concise and conversational."""
             "Available budget (CHF)", min_value=100, max_value=100000,
             value=500, step=100, key="brief_budget"
         )
+        # News sentiment toggle — defaults ON if an Alpha Vantage key is
+        # configured, OFF otherwise. The fetch is rate-limited by the AV
+        # 25/day budget shared with the collector, so we only ever pull
+        # for the top scored symbols (see below).
+        _av_key_set = bool((_cfg.get("ALPHAVANTAGE_KEY") or "").strip())
+        include_news = st.checkbox(
+            "Include news sentiment (Alpha Vantage)",
+            value=_av_key_set,
+            disabled=not _av_key_set,
+            help=("Pre-computed per-symbol sentiment from Alpha Vantage's "
+                  "NEWS_SENTIMENT endpoint. Free tier is US-biased: "
+                  "non-US tickers often return zero articles. Caps at "
+                  "the top 5 scored symbols to protect the 25-call/day "
+                  "shared budget."
+                  if _av_key_set else
+                  "Configure ALPHAVANTAGE_KEY in Admin → API Keys to "
+                  "enable."),
+            key="brief_include_news",
+        )
 
     with bf2:
         st.markdown(
@@ -413,6 +432,22 @@ Keep responses concise and conversational."""
             funda_table = _fundamentals_to_summary(
                 get_fundamentals(tuple(r["symbol"] for r in scores))
             )
+
+        # News sentiment — only the top-5 scored symbols, only if the
+        # checkbox is set + key configured. The fetch is cached for 1h,
+        # so re-clicking Generate hits the cache rather than burning the
+        # shared Alpha Vantage budget.
+        news_block = ""
+        if include_news and scores:
+            from stock_toolkit.news import format_for_prompt
+            from stock_toolkit.ui.helpers import get_news_sentiment
+            top_syms = tuple(r["symbol"] for r in scores[:5])
+            with st.spinner("Fetching news sentiment…"):
+                sentiment = get_news_sentiment(
+                    top_syms, _cfg.get("ALPHAVANTAGE_KEY", ""),
+                )
+            news_block = format_for_prompt(sentiment) if sentiment else ""
+
         score_table   = _scores_to_summary(scores)
         alert_summary = []
         for sym, ctx in alerts_ctx.items():
@@ -435,7 +470,10 @@ Keep responses concise and conversational."""
             + (f"FUNDAMENTALS (valuation snapshot, yfinance):\n{funda_table}\n\n"
                if funda_table else "")
             + "CURRENT INDICATORS:\n" + "\n".join(alert_summary) + "\n\n"
-            "Please give me:\n"
+            + (f"NEWS SENTIMENT (pre-computed by Alpha Vantage; top-5 scored "
+               f"symbols only):\n{news_block}\n\n"
+               if news_block else "")
+            + "Please give me:\n"
             "1. A 2-3 sentence plain-English summary of what stands out\n"
             "2. The top 2 symbols worth watching and why\n"
             "3. Any red flags to avoid right now\n"

@@ -219,6 +219,7 @@ class TestPublicAPIIsStable(unittest.TestCase):
         "stock_toolkit.alerts",
         "stock_toolkit.analysis",
         "stock_toolkit.sanity",
+        "stock_toolkit.news",
     )
 
     def test_every_all_name_is_actually_defined(self):

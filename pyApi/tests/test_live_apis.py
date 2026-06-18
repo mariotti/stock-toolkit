@@ -255,6 +255,39 @@ class TestAlphaVantageDemo(LiveAPITest):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+#  3b. Alpha Vantage NEWS_SENTIMENT — the v2.1 news sentiment integration
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestAlphaVantageNews(LiveAPITest):
+    """One call to fetch_news_sentiment for AAPL using the real
+    Alpha Vantage key. Costs 1 call against the daily 25 budget."""
+
+    def test_fetch_returns_expected_shape(self):
+        from stock_toolkit.news import fetch_news_sentiment
+        key = _key("ALPHAVANTAGE_KEY")
+        if not key:
+            self.skipTest("ALPHAVANTAGE_KEY not set in config.env")
+        out = fetch_news_sentiment(["AAPL"], key, limit=10)
+        if not out:
+            self.skipTest("Alpha Vantage NEWS_SENTIMENT returned empty "
+                          "— budget exhausted or feed throttled")
+        self.assertIn("AAPL", out)
+        rec = out["AAPL"]
+        # Either score is a number in [-1, 1], or there are zero articles
+        # (free-tier coverage gap) — both are valid outcomes.
+        if rec["n_articles"] == 0:
+            self.assertIsNone(rec["score"])
+        else:
+            self.assertIsInstance(rec["score"], float)
+            self.assertGreaterEqual(rec["score"], -1.0)
+            self.assertLessEqual(rec["score"], 1.0)
+            self.assertIn(rec["label"], (
+                "Bearish", "Somewhat-Bearish", "Neutral",
+                "Somewhat-Bullish", "Bullish",
+            ))
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 #  4. FMP — demo key available (costs 0 of your quota)
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -518,6 +551,7 @@ if __name__ == "__main__":
         TestConnectivity,
         TestYFinance,
         TestAlphaVantageDemo,
+        TestAlphaVantageNews,
         TestFMPDemo,
         TestFinnhub,
         TestPolygon,

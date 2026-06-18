@@ -15,7 +15,59 @@ DB schemas are documented in [`SCHEMA.md`](SCHEMA.md).
 
 ---
 
-## 1.19.0 — Public-API + schema commitment _(this release)_
+## 2.1.0 — News sentiment in the Briefing
+
+New module `stock_toolkit/news.py` — fetches Alpha Vantage's
+pre-computed `NEWS_SENTIMENT` per symbol, aggregates per-ticker with
+relevance-weighted averaging, and formats a compact text block for
+the Briefing prompt. **The LLM never computes the score** — it
+receives a finished number plus a few headlines, exactly the same
+contract Sharpe / Calmar / Monte Carlo already use.
+
+- Briefing tab gains an "Include news sentiment (Alpha Vantage)"
+  checkbox. Defaults on when `ALPHAVANTAGE_KEY` is configured, off
+  otherwise. Disabled with a hint if no key is set.
+- Only the top-5 scored symbols are fetched per briefing — protects
+  the 25-call/day Alpha Vantage budget shared with `stock-collect`.
+- 1-hour cache (via `st.cache_data`) so re-clicking Generate within
+  an hour hits the cache, not the API.
+- All failure modes degrade silently: missing key → empty block,
+  throttle → empty block, uncovered ticker → "(no articles — free
+  tier is US-biased)" line in the prompt.
+- Coverage note in the prompt itself, not just docs — Claude reads
+  "non-US tickers often return empty" rather than guessing why
+  ENEL.MI / BMW.DE / DOCM.SW are missing.
+
+Tests:
+- 16 new offline unit tests (`tests/test_news.py`) cover the
+  aggregation pipeline against a committed anonymised fixture
+  (`tests/fixtures/news_sentiment_aapl.json`).
+- New `TestAlphaVantageNews` in `test_live_apis.py` (under the
+  existing `RUN_LIVE=1` gate) exercises the real call. Confirmed
+  green against the production AV key.
+- `__all__` of `stock_toolkit.news` registered in the public-API
+  stability test.
+
+Honest scope: free-tier news coverage is US-heavy. Symbols outside
+the US frequently return zero articles even when the ticker is
+recognised. The prompt block surfaces this explicitly rather than
+faking uniform coverage.
+
+No new dependencies, no schema changes, no breaking changes to the
+v1.19 public surface.
+
+## 1.19.1 — DATA_DIR config rename + resurrected live-API smoke
+
+- `OUTPUT_DIR` in config.env renamed to `DATA_DIR`. The old name is
+  still honoured with a one-shot `DeprecationWarning` (slated for
+  removal in 3.x).
+- `tests/test_live_apis.py` (zero bytes since the v1.0 restructure)
+  restored from history with the v1.19-compatible import path and
+  the `setUpModule` + `SkipTest` discovery pattern.
+- Live run found two stale provider keys (FMP, Polygon/Massive) —
+  both returning 403. The other five sources are healthy.
+
+## 1.19.0 — Public-API + schema commitment
 
 Stability pass ahead of the 2.0 bump. **No behaviour change.**
 

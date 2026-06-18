@@ -47,6 +47,21 @@ def get_fundamentals(symbols: tuple) -> dict:
     return fetch_fundamentals(symbols)
 
 
+@st.cache_data(ttl=3600, show_spinner=False)
+def get_news_sentiment(symbols: tuple, api_key: str) -> dict:
+    """Cached wrapper around stock_toolkit.news.fetch_news_sentiment.
+
+    1-hour TTL matches get_fundamentals — protects the shared Alpha
+    Vantage 25-calls/day budget when a user clicks Generate-briefing
+    multiple times in quick succession. The api_key is part of the
+    cache key so swapping it in Admin → API Keys invalidates correctly.
+    """
+    if not (api_key or "").strip() or not symbols:
+        return {}
+    from stock_toolkit.news import fetch_news_sentiment
+    return fetch_news_sentiment(symbols, api_key)
+
+
 def score_color(score):
     if score >= 60:   return "#4ade80"
     if score >= 40:   return "#fbbf24"

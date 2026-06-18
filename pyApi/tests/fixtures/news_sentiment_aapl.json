@@ -1,0 +1,58 @@
+{
+  "items": "3",
+  "sentiment_score_definition": "x <= -0.35: Bearish; -0.35 < x <= -0.15: Somewhat-Bearish; -0.15 < x < 0.15: Neutral; 0.15 <= x < 0.35: Somewhat-Bullish; x >= 0.35: Bullish",
+  "relevance_score_definition": "0 < x <= 1, with a higher score indicating higher relevance.",
+  "feed": [
+    {
+      "title": "Test headline one — earnings beat estimates",
+      "url": "https://example.test/news/article-1",
+      "time_published": "20260101T143000",
+      "summary": "Anonymised test summary for offline fixture.",
+      "source": "Test Wire",
+      "overall_sentiment_score": 0.32,
+      "overall_sentiment_label": "Somewhat-Bullish",
+      "ticker_sentiment": [
+        {
+          "ticker": "AAPL",
+          "relevance_score": "0.85",
+          "ticker_sentiment_score": "0.41",
+          "ticker_sentiment_label": "Bullish"
+        }
+      ]
+    },
+    {
+      "title": "Test headline two — services growth accelerates",
+      "url": "https://example.test/news/article-2",
+      "time_published": "20260101T120000",
+      "summary": "Anonymised test summary for offline fixture.",
+      "source": "Test Daily",
+      "overall_sentiment_score": 0.18,
+      "overall_sentiment_label": "Somewhat-Bullish",
+      "ticker_sentiment": [
+        {
+          "ticker": "AAPL",
+          "relevance_score": "0.70",
+          "ticker_sentiment_score": "0.25",
+          "ticker_sentiment_label": "Somewhat-Bullish"
+        }
+      ]
+    },
+    {
+      "title": "Test headline three — passing tangential mention",
+      "url": "https://example.test/news/article-3",
+      "time_published": "20260101T100000",
+      "summary": "Anonymised test summary for offline fixture.",
+      "source": "Test Wire",
+      "overall_sentiment_score": -0.05,
+      "overall_sentiment_label": "Neutral",
+      "ticker_sentiment": [
+        {
+          "ticker": "AAPL",
+          "relevance_score": "0",
+          "ticker_sentiment_score": "0.10",
+          "ticker_sentiment_label": "Neutral"
+        }
+      ]
+    }
+  ]
+}

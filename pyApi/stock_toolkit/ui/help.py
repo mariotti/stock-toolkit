@@ -73,7 +73,7 @@ def render() -> None:
 | **{icon("tab.analysis")} Analysis** | The eleven statistical tools, one chart per tool: returns histogram, regression, rolling volatility, correlation matrix, SMA crossovers, drawdown, RSI, Bollinger Bands, Monte Carlo paths, Hurst exponent. Useful for *understanding* a symbol, not picking one. |
 | **{icon("tab.backtest")} Backtest** | Run RSI, SMA-cross, Bollinger Bands, breakout, or MACD on any symbol with commission + slippage. Compares against buy-and-hold so you can see whether the strategy actually adds value. |
 | **{icon("tab.alerts")} Alerts** | Edge-triggered conditions (fires once on False → True): RSI cross, Bollinger squeeze, 52-week high/low, MACD cross, etc. Channels: email (SMTP), Pushover, Slack — configured in `config.env`. |
-| **{icon("tab.briefing")} Briefing** | Claude reads your scores + fundamentals + indicators and writes a plain-English summary you can chat with. The "Ask Claude to propose trades" button drops 0–3 confirmable trade cards into a dedicated *Briefing strategy* paper portfolio. |
+| **{icon("tab.briefing")} Briefing** | Claude reads your scores + fundamentals + indicators (optionally + Alpha Vantage news sentiment for the top-5 symbols, US-heavy coverage) and writes a plain-English summary you can chat with. The "Ask Claude to propose trades" button drops 0–3 confirmable trade cards into a dedicated *Briefing strategy* paper portfolio. |
 | **{icon("tab.collect")} Collect** | Trigger on-demand collection from any enabled source. Faster than dropping to the CLI. |
         """
     )
