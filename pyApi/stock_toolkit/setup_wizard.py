@@ -225,8 +225,14 @@ def run_wizard(non_interactive: bool = False) -> dict:
 
     # ── paths ─────────────────────────────────────────────────────────────────
     section("Paths (optional)")
-    print(dim("  Leave blank to use the directory containing the scripts."))
-    cfg["OUTPUT_DIR"] = field("OUTPUT_DIR", "Output directory (blank = script dir)")
+    print(dim("  Leave blank to use the v1.17 default ($STOCK_DIR/data/)."))
+    # DATA_DIR replaced OUTPUT_DIR as the user-facing spelling in v1.19.
+    # If a legacy OUTPUT_DIR is in cfg already, migrate it over silently
+    # so re-running the wizard cleans it up.
+    if not cfg.get("DATA_DIR") and cfg.get("OUTPUT_DIR"):
+        cfg["DATA_DIR"] = cfg.pop("OUTPUT_DIR")
+    cfg["DATA_DIR"] = field("DATA_DIR",
+                            "Data directory (blank = v1.17 default)")
 
     return cfg
 

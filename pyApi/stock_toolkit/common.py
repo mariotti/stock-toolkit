@@ -159,17 +159,31 @@ _LEGACY_STATE_FILES = (
 def _resolve_data_dir() -> Path:
     """Single root for all on-disk state. Precedence:
 
-      1. ``OUTPUT_DIR`` in config.env — explicit user override.
-      2. ``STOCK_DIR`` env var set — Docker / production mode. The
+      1. ``DATA_DIR`` in config.env — the v1.19 spelling.
+      2. ``OUTPUT_DIR`` in config.env — pre-v1.19 spelling. Honoured
+         with a one-shot DeprecationWarning so existing installs keep
+         working; will be removed in 3.x.
+      3. ``STOCK_DIR`` env var set — Docker / production mode. The
          bind-mount root IS the data dir; do not nest a second
          ``data/`` inside it.
-      3. ``BASE_DIR / "data"`` — fresh native install, keeps the
+      4. ``BASE_DIR / "data"`` — fresh native install, keeps the
          source tree clean (this is the v1.17 default).
     """
     cfg = load_config(CONFIG_PATH)
-    explicit = (cfg.get("OUTPUT_DIR") or "").strip()
+    explicit = (cfg.get("DATA_DIR") or "").strip()
     if explicit:
         return Path(explicit).expanduser().resolve()
+    legacy = (cfg.get("OUTPUT_DIR") or "").strip()
+    if legacy:
+        import warnings as _warnings
+        _warnings.warn(
+            "config.env: OUTPUT_DIR is deprecated as of v1.19; rename to "
+            "DATA_DIR. The old name still works in 2.x but will be removed "
+            "in 3.x.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return Path(legacy).expanduser().resolve()
     if os.environ.get("STOCK_DIR"):
         return BASE_DIR
     return BASE_DIR / "data"

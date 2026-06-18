@@ -15,6 +15,7 @@ import pathlib
 import sys
 import tempfile
 import unittest
+import warnings
 
 SCRIPT_DIR = pathlib.Path(__file__).parent
 PKG_ROOT   = SCRIPT_DIR.parent
@@ -625,6 +626,58 @@ class TestDataDirMigration(unittest.TestCase):
             )
             # And the source was left alone for the user to investigate.
             self.assertTrue((base / "stock_data.db").exists())
+
+
+class TestDataDirConfigDeprecation(unittest.TestCase):
+    """v1.19 — DATA_DIR is the new user-facing name; OUTPUT_DIR still
+    works for back-compat with a DeprecationWarning. Covers the three
+    precedence branches in _resolve_data_dir()."""
+
+    def _resolve_with(self, cfg_text):
+        """Run _resolve_data_dir() against a tempdir CONFIG_PATH."""
+        from unittest import mock as _mock
+        with tempfile.TemporaryDirectory() as td:
+            base = pathlib.Path(td)
+            cfg = base / "config.env"
+            cfg.write_text(cfg_text)
+            with _mock.patch.object(_common, "BASE_DIR", base), \
+                 _mock.patch.object(_common, "CONFIG_PATH", cfg), \
+                 _mock.patch.dict(os.environ, {}, clear=False):
+                # Make sure STOCK_DIR doesn't leak through to the
+                # final fallback branch.
+                os.environ.pop("STOCK_DIR", None)
+                with warnings.catch_warnings(record=True) as caught:
+                    warnings.simplefilter("always")
+                    result = _common._resolve_data_dir()
+                return result, caught
+
+    def test_data_dir_wins_no_warning(self):
+        path, warns = self._resolve_with("DATA_DIR=/tmp/sanity_dd\n")
+        self.assertEqual(path, pathlib.Path("/tmp/sanity_dd").resolve())
+        self.assertFalse(
+            any(issubclass(w.category, DeprecationWarning) for w in warns),
+            "DATA_DIR alone must not emit a DeprecationWarning",
+        )
+
+    def test_legacy_output_dir_still_resolves(self):
+        path, warns = self._resolve_with("OUTPUT_DIR=/tmp/sanity_od\n")
+        self.assertEqual(path, pathlib.Path("/tmp/sanity_od").resolve())
+        self.assertTrue(
+            any(issubclass(w.category, DeprecationWarning)
+                and "OUTPUT_DIR" in str(w.message) for w in warns),
+            "OUTPUT_DIR must emit a DeprecationWarning",
+        )
+
+    def test_data_dir_overrides_output_dir(self):
+        path, warns = self._resolve_with(
+            "OUTPUT_DIR=/tmp/old\nDATA_DIR=/tmp/new\n"
+        )
+        self.assertEqual(path, pathlib.Path("/tmp/new").resolve())
+        self.assertFalse(
+            any(issubclass(w.category, DeprecationWarning) for w in warns),
+            "DATA_DIR taking precedence must not warn — the user already "
+            "migrated; OUTPUT_DIR is harmless residue.",
+        )
 
 
 class TestThemeApplied(unittest.TestCase):

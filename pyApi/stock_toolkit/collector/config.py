@@ -153,13 +153,19 @@ ALPHAVANTAGE_PAID = _cfg.get("ALPHAVANTAGE_PAID", "false").lower() == "true"
 
 # ── paths ─────────────────────────────────────────────────────────────────────
 
-# OUTPUT_DIR / DATA_DIR resolution + legacy migration lives in
-# stock_toolkit.common (single source of truth across the whole
-# toolkit). Honour an explicit OUTPUT_DIR override in config.env
-# here too for clarity, but it ends up at the same path either way.
+# DATA_DIR resolution + legacy migration lives in stock_toolkit.common
+# (single source of truth across the whole toolkit). DATA_DIR is the
+# v1.19 spelling; OUTPUT_DIR is the deprecated alias still honoured
+# for back-compat. Either way the resolved path matches common.DATA_DIR.
 from stock_toolkit.common import DATA_DIR as _DATA_DIR
 
-OUTPUT_DIR     = Path(_cfg.get("OUTPUT_DIR", str(_DATA_DIR)))
+# The OUTPUT_DIR module attribute name is kept stable because every
+# path constant below derives from it — renaming would ripple through
+# downstream importers. The user-facing spelling in config.env is now
+# DATA_DIR; OUTPUT_DIR still wins for back-compat.
+OUTPUT_DIR     = Path(
+    _cfg.get("DATA_DIR") or _cfg.get("OUTPUT_DIR") or str(_DATA_DIR)
+)
 DB_PATH        = OUTPUT_DIR / _cfg.get("DB_FILE",      "stock_data.db")
 CSV_PATH       = OUTPUT_DIR / _cfg.get("CSV_FILE",     "stock_data.csv")
 STATE_PATH     = OUTPUT_DIR / _cfg.get("STATE_FILE",   ".collector_state.json")

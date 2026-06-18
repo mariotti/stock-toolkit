@@ -275,12 +275,14 @@ ALPHAVANTAGE_PAID=false
 
 
 # ── paths (optional) ──────────────────────────────────────────────────────────
-# All paths default to $STOCK_DIR (or the working directory).
-# Uncomment and set OUTPUT_DIR to store data elsewhere.
+# All on-disk state (DBs, logs, historicals) lives in $STOCK_DIR/data/
+# by default. Uncomment and set DATA_DIR to relocate.
+# (OUTPUT_DIR is the deprecated pre-v1.19 alias; still honoured for
+# back-compat with a one-shot DeprecationWarning.)
 
-# OUTPUT_DIR=/data/stocks
+# DATA_DIR=/data/stocks
 
-# Collector log file lives under OUTPUT_DIR/logs/collector.log by default.
+# Collector log file lives under DATA_DIR/logs/collector.log by default.
 # Override LOG_DIR if you want logs somewhere else (absolute or relative).
 # LOG_DIR=logs
 """
