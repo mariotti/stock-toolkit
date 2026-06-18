@@ -29,6 +29,17 @@ import pandas as pd
 
 from stock_toolkit.common import LIVE_DB, HIST_DIR, NoDataError
 
+# Public API — frozen from 2.x. Indicator helpers (_rsi, _sma, _bbands,
+# _macd) are deliberately not exported; consumers should pull them from
+# score.py if they need the same calc, or copy + adapt.
+__all__ = [
+    "STRATEGIES",
+    "discover_dbs", "load_prices",
+    "signals_rsi", "signals_sma_cross", "signals_bbands",
+    "signals_breakout", "signals_macd",
+    "Backtester",
+]
+
 SOURCE_PRIORITY = [
     "alphavantage", "fmp", "yfinance",
     "finnhub", "twelvedata", "polygon", "marketstack",

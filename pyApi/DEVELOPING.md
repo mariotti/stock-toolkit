@@ -189,7 +189,27 @@ add a behaviour, add the test that protects it.
 
 ---
 
-## 5. CI shape
+## 5. Upgrading from a pre-2.0 install
+
+For any user picking up a release from before the 2.0 cutover:
+
+- **The v1.17 layout** (single `DATA_DIR`, historicals under
+  `historical/`) is migrated automatically on the first import of
+  `stock_toolkit.common` — including from a `stock-*` CLI. One
+  stderr line records what moved; idempotent.
+- **The v1.13 API-keys flow** is the new way to add free keys via
+  Admin; existing `config.env` files keep working.
+- **The public API** (the names in each module's `__all__`) is the
+  surface 2.x commits to preserve. Anything not listed is
+  implementation detail; if you reach for it, expect breakage.
+- **DB schemas**: see [`SCHEMA.md`](SCHEMA.md) for the column-level
+  compatibility table — what's safe to add / drop / rename inside a
+  major.
+
+If anything looks off, `stock-sanity` audits the deterministic
+invariants in one shot.
+
+## 6. CI shape
 
 Two pipelines, intentionally on different platforms:
 

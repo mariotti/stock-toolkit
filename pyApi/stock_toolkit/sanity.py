@@ -19,6 +19,16 @@ import sqlite3
 from pathlib import Path
 from typing import Optional
 
+# Public API — frozen from 2.x onwards.
+__all__ = [
+    "ERROR", "WARNING", "INFO",
+    "Issue", "Report",
+    "check_data_layout", "check_config", "check_database",
+    "check_portfolios", "check_trade_stats", "check_value_history",
+    "check_score_outputs", "check_historical_dir",
+    "run_all",
+]
+
 from stock_toolkit.common import (
     CONFIG_PATH, DATA_DIR, HIST_DIR, LIVE_DB, PORTFOLIO_DB, load_config,
 )

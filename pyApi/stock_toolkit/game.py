@@ -31,6 +31,27 @@ from pathlib import Path
 from stock_toolkit.analysis import discover_dbs as _discover_data_dbs
 from stock_toolkit.common import PORTFOLIO_DB as _PORTFOLIO_DB_PATH
 
+# Public API — frozen from 2.x onwards. Anything not listed here is
+# implementation detail (notably _connect, _migrate_to_v2, _resolve_pid,
+# _record_trade) and may change between releases.
+__all__ = [
+    "GameError",
+    "SLIPPAGE_BPS",
+    "DEFAULT_PORTFOLIO_DB",
+    "DEFAULT_STARTING_CASH",
+    # portfolio lifecycle
+    "get_active_portfolio_id", "set_active_portfolio",
+    "list_portfolios", "create_portfolio", "rename_portfolio",
+    "archive_portfolio", "unarchive_portfolio", "delete_portfolio",
+    "init_portfolio", "get_portfolio", "reset_portfolio",
+    # trades + positions
+    "buy", "sell", "get_trades", "get_positions",
+    "get_latest_price",
+    # analytics
+    "mark_to_market", "trade_stats", "value_history",
+    "benchmark_history", "risk_stats",
+]
+
 SLIPPAGE_BPS = 10                                # 10 bps = 0.10%
 SLIPPAGE     = SLIPPAGE_BPS / 10000.0
 DEFAULT_PORTFOLIO_DB = _PORTFOLIO_DB_PATH

@@ -203,6 +203,43 @@ class TestPackageDistribution(unittest.TestCase):
                                 f"{tab} tab missing render()")
 
 
+class TestPublicAPIIsStable(unittest.TestCase):
+    """v1.19 — every module that declares __all__ must actually export
+    every name listed. Pins the public surface so a future refactor
+    can't silently drop a function the 2.x stability contract promised.
+
+    If you intentionally rename or remove a public name, the right move
+    is to bump to 2.0 — not edit this test."""
+
+    MODULES_WITH_ALL = (
+        "stock_toolkit.common",
+        "stock_toolkit.game",
+        "stock_toolkit.score",
+        "stock_toolkit.backtest",
+        "stock_toolkit.alerts",
+        "stock_toolkit.analysis",
+        "stock_toolkit.sanity",
+    )
+
+    def test_every_all_name_is_actually_defined(self):
+        import importlib
+
+        for mod_name in self.MODULES_WITH_ALL:
+            with self.subTest(module=mod_name):
+                mod = importlib.import_module(mod_name)
+                self.assertTrue(hasattr(mod, "__all__"),
+                                f"{mod_name}: missing __all__")
+                missing = [
+                    name for name in mod.__all__
+                    if not hasattr(mod, name)
+                ]
+                self.assertEqual(
+                    missing, [],
+                    f"{mod_name}: __all__ lists names that don't exist on "
+                    f"the module: {missing}",
+                )
+
+
 class TestBootstrap(unittest.TestCase):
     """stock-bootstrap is a thin shorthand over stock-collect — verify the
     argument translation, not the underlying collection itself."""

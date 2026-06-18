@@ -32,6 +32,18 @@ import warnings
 from pathlib import Path
 
 import numpy as np
+
+# Public API — frozen from 2.x onwards. Indicators prefixed with _
+# (e.g. _rsi, _sma, _pct_b) are implementation detail.
+__all__ = [
+    "HORIZON_PROFILES",
+    "discover_dbs", "list_all_symbols", "load_prices",
+    # 7-step pipeline + extras
+    "step_summary", "step_regression", "step_drawdown",
+    "step_entry_timing", "step_montecarlo", "step_momentum",
+    "step_macd", "step_hurst",
+    "score_symbol",
+]
 import pandas as pd
 
 warnings.filterwarnings("ignore")

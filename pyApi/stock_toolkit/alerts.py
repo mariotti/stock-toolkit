@@ -48,6 +48,18 @@ from stock_toolkit.common import (
     CONFIG_PATH, DATA_DIR, HIST_DIR, LIVE_DB, load_config,
 )
 
+# Public API — frozen from 2.x. Indicator helpers (_rsi, _sma, _ema)
+# remain private; cross-module callers should reach into score.py for
+# the same calc.
+__all__ = [
+    "STATE_PATH", "SOURCE_PRIORITY",
+    "discover_dbs", "load_series", "build_context",
+    "evaluate_condition", "load_state", "save_state", "check_edge",
+    # notifier surface (downstream users can register custom channels)
+    "notify_console", "notify_email", "notify_pushover", "notify_slack",
+    "fire_alert", "list_conditions",
+]
+
 STATE_PATH = DATA_DIR / ".alerts_state.json"
 
 SOURCE_PRIORITY = [

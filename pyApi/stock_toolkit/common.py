@@ -30,6 +30,21 @@ import shutil
 import sys
 from pathlib import Path
 
+# Public API — the stable surface 2.x onwards commits to preserve.
+# Anything not listed here (names starting with _) is implementation
+# detail and may change between any two versions.
+__all__ = [
+    "BASE_DIR",
+    "CONFIG_PATH",
+    "DATA_DIR",
+    "LIVE_DB",
+    "HIST_DIR",
+    "PORTFOLIO_DB",
+    "NoDataError",
+    "load_config",
+    "update_config_value",
+]
+
 if os.environ.get("STOCK_DIR"):
     BASE_DIR = Path(os.environ["STOCK_DIR"]).expanduser().resolve()
 else:

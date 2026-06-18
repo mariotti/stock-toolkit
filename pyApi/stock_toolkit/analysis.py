@@ -94,6 +94,24 @@ _ANN_FACTOR = {
     "auto": 252,
 }
 
+# Public API — frozen from 2.x. The analysis_* functions are the
+# eleven tools advertised in QUICKSTART. discover_dbs / load_data /
+# resolve_source are the data-plumbing surface a downstream caller
+# would use to build their own pipeline.
+__all__ = [
+    "ann_factor",
+    "discover_dbs", "load_raw", "load_data",
+    "resolve_source", "auto_granularity", "apply_granularity",
+    "list_symbols",
+    # eleven analysis tools
+    "analysis_summary", "analysis_regression", "analysis_returns",
+    "analysis_volatility", "analysis_correlation", "analysis_sma",
+    "analysis_drawdown", "analysis_rsi", "analysis_bbands",
+    "analysis_montecarlo", "analysis_hurst",
+    "hurst_exponent",
+]
+
+
 def ann_factor(gran: str) -> float:
     """Annualisation factor for Sharpe and volatility calculations."""
     return _ANN_FACTOR.get(gran, 252)
