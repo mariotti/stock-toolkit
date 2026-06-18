@@ -18,6 +18,9 @@ from stock_toolkit.game import (
     set_active_portfolio, value_history,
 )
 from stock_toolkit.ui.icons import heading, icon
+from stock_toolkit.ui.theme import (
+    CHART_AXIS, CHART_BG, CHART_FONT, CHART_GRID, CHART_INK, CHART_MUTED,
+)
 
 
 def _money(v: float) -> str:
@@ -417,19 +420,19 @@ def render():
                 ))
 
         fig.add_hline(
-            y=mtm["starting_cash"], line_dash="dot", line_color="#8ba0b4",
+            y=mtm["starting_cash"], line_dash="dot", line_color=CHART_MUTED,
             annotation_text=f"Starting cash {_money(mtm['starting_cash'])}",
             annotation_position="bottom right",
-            annotation_font_color="#8ba0b4",
+            annotation_font_color=CHART_MUTED,
         )
         fig.update_layout(
-            paper_bgcolor="#0e1922", plot_bgcolor="#0e1922",
-            font=dict(family="IBM Plex Mono", size=11, color="#8ba0b4"),
+            paper_bgcolor=CHART_BG, plot_bgcolor=CHART_BG,
+            font=dict(family=CHART_FONT, size=11, color=CHART_MUTED),
             margin=dict(l=48, r=16, t=16, b=36), height=320,
             legend=dict(bgcolor="rgba(0,0,0,0)",
-                        font=dict(size=10, color="#c8d8e8")),
-            xaxis=dict(gridcolor="#2d4258", linecolor="#2d4258"),
-            yaxis=dict(gridcolor="#2d4258", linecolor="#2d4258",
+                        font=dict(size=10, color=CHART_INK)),
+            xaxis=dict(gridcolor=CHART_GRID, linecolor=CHART_AXIS),
+            yaxis=dict(gridcolor=CHART_GRID, linecolor=CHART_AXIS,
                        tickformat=",.0f"),
         )
         st.plotly_chart(fig, width="stretch")
@@ -494,19 +497,19 @@ def render():
                 st.caption("No trade history on any strategy yet.")
             else:
                 cmp_fig.add_hline(
-                    y=0.0, line_dash="dot", line_color="#8ba0b4",
+                    y=0.0, line_dash="dot", line_color=CHART_MUTED,
                     annotation_text="Inception baseline (0 %)",
                     annotation_position="bottom right",
-                    annotation_font_color="#8ba0b4",
+                    annotation_font_color=CHART_MUTED,
                 )
                 cmp_fig.update_layout(
-                    paper_bgcolor="#0e1922", plot_bgcolor="#0e1922",
-                    font=dict(family="IBM Plex Mono", size=11, color="#8ba0b4"),
+                    paper_bgcolor=CHART_BG, plot_bgcolor=CHART_BG,
+                    font=dict(family=CHART_FONT, size=11, color=CHART_MUTED),
                     margin=dict(l=48, r=16, t=16, b=36), height=320,
                     legend=dict(bgcolor="rgba(0,0,0,0)",
-                                font=dict(size=10, color="#c8d8e8")),
-                    xaxis=dict(gridcolor="#2d4258", linecolor="#2d4258"),
-                    yaxis=dict(gridcolor="#2d4258", linecolor="#2d4258",
+                                font=dict(size=10, color=CHART_INK)),
+                    xaxis=dict(gridcolor=CHART_GRID, linecolor=CHART_AXIS),
+                    yaxis=dict(gridcolor=CHART_GRID, linecolor=CHART_AXIS,
                                ticksuffix=" %", tickformat=".1f"),
                 )
                 st.plotly_chart(cmp_fig, width="stretch")

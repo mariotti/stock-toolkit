@@ -7,23 +7,26 @@ from plotly.subplots import make_subplots
 
 from stock_toolkit import score as ss
 from stock_toolkit.ui.helpers import fmt_pct, fmt_val, score_color
+from stock_toolkit.ui.theme import (
+    CHART_AXIS, CHART_BG, CHART_FONT, CHART_GRID, CHART_INK, CHART_MUTED,
+)
 
 # ─────────────────────────────────────────────
 #  PLOTLY CHART HELPERS
 # ─────────────────────────────────────────────
 
 CHART_LAYOUT = dict(
-    template="plotly_dark",
-    paper_bgcolor="#0e1922",
-    plot_bgcolor="#0e1922",
-    font=dict(family="IBM Plex Mono", size=11, color="#8ba0b4"),
+    template="plotly_white",
+    paper_bgcolor=CHART_BG,
+    plot_bgcolor=CHART_BG,
+    font=dict(family=CHART_FONT, size=11, color=CHART_MUTED),
     margin=dict(l=48, r=16, t=36, b=36),
-    # Legend labels (e.g. "Price", "RSI") need to be brighter than the
+    # Legend labels (e.g. "Price", "RSI") need higher contrast than the
     # general chart font — they're a key UI element users scan first.
     legend=dict(bgcolor="rgba(0,0,0,0)",
-                font=dict(size=10, color="#c8d8e8")),
-    xaxis=dict(gridcolor="#2d4258", linecolor="#2d4258", zeroline=False),
-    yaxis=dict(gridcolor="#2d4258", linecolor="#2d4258", zeroline=False),
+                font=dict(size=10, color=CHART_INK)),
+    xaxis=dict(gridcolor=CHART_GRID, linecolor=CHART_AXIS, zeroline=False),
+    yaxis=dict(gridcolor=CHART_GRID, linecolor=CHART_AXIS, zeroline=False),
 )
 
 
@@ -58,8 +61,8 @@ def score_bar_chart(results: list[dict]) -> go.Figure:
     fig.update_layout(**layout,
                       height=max(260, len(syms) * 38),
                       showlegend=False)
-    fig.update_xaxes(range=[0, 105], gridcolor="#2d4258")
-    fig.update_yaxes(autorange="reversed", gridcolor="#2d4258")
+    fig.update_xaxes(range=[0, 105], gridcolor=CHART_GRID)
+    fig.update_yaxes(autorange="reversed", gridcolor=CHART_GRID)
     return fig
 
 
@@ -117,8 +120,8 @@ def rsi_chart(df: pd.DataFrame, window: int = 14) -> go.Figure:
     lo = CHART_LAYOUT.copy()
     lo.update(height=420)
     fig.update_layout(**lo)
-    fig.update_xaxes(gridcolor="#2d4258", linecolor="#2d4258")
-    fig.update_yaxes(gridcolor="#2d4258", linecolor="#2d4258")
+    fig.update_xaxes(gridcolor=CHART_GRID, linecolor=CHART_AXIS)
+    fig.update_yaxes(gridcolor=CHART_GRID, linecolor=CHART_AXIS)
     return fig
 
 
@@ -254,7 +257,7 @@ def correlation_heatmap(dfs: dict[str, pd.DataFrame]) -> go.Figure:
 
     fig = go.Figure(go.Heatmap(
         z=z, x=syms, y=syms,
-        colorscale=[[0,"#f87171"],[0.5,"#2d4258"],[1,"#4ade80"]],
+        colorscale=[[0, "#f87171"], [0.5, "#f5f7fa"], [1, "#4ade80"]],
         zmin=-1, zmax=1,
         text=[[f"{v:.2f}" for v in row] for row in z],
         texttemplate="%{text}",
