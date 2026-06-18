@@ -118,16 +118,10 @@ def flush_failures() -> None:
         suppressed = sum(1 for r in rows if r[3] >= cfg.FAILURE_THRESHOLD)
         log.info(f"[failures] report written to {cfg.FAILURES_REPORT_PATH.name} "
                  f"({len(rows)} entries, {suppressed} suppressed)")
-    except Exception as e:
-        log.warning(f"[failures] could not write report: {e}")
-        with open(cfg.FAILURES_REPORT_PATH, "w", newline="") as f:
-            writer = csv.writer(f)
-            writer.writerow(["symbol", "source", "reason", "hits",
-                             "first_seen", "last_seen"])
-            writer.writerows(rows)
-        suppressed = sum(1 for r in rows if r[3] >= cfg.FAILURE_THRESHOLD)
-        log.info(f"[failures] report written to {cfg.FAILURES_REPORT_PATH.name} "
-                 f"({len(rows)} entries, {suppressed} suppressed)")
-    except Exception as e:
+    except (sqlite3.OperationalError, OSError) as e:
+        # OSError covers CSV write failures (disk full / permission);
+        # sqlite3.OperationalError covers a corrupt failures DB. Anything
+        # else (e.g. import-time KeyError) should propagate so the cron
+        # job logs it properly instead of silently swallowing.
         log.warning(f"[failures] could not write report: {e}")
 

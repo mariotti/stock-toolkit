@@ -259,9 +259,11 @@ def create_portfolio(name: str,
             "last_reset_at) VALUES (?, ?, ?, ?, ?)",
             (name, starting_cash, starting_cash, ts, ts),
         )
-    except sqlite3.IntegrityError:
+    except sqlite3.IntegrityError as e:
         con.close()
-        raise GameError(f"A portfolio named {name!r} already exists.")
+        raise GameError(
+            f"A portfolio named {name!r} already exists."
+        ) from e
     pid = cur.lastrowid
     if activate:
         _set_active_id(con, pid)
@@ -279,9 +281,11 @@ def rename_portfolio(portfolio_id: int, new_name: str,
     try:
         con.execute("UPDATE portfolios SET name = ? WHERE id = ?",
                     (new_name, portfolio_id))
-    except sqlite3.IntegrityError:
+    except sqlite3.IntegrityError as e:
         con.close()
-        raise GameError(f"A portfolio named {new_name!r} already exists.")
+        raise GameError(
+            f"A portfolio named {new_name!r} already exists."
+        ) from e
     con.commit(); con.close()
 
 
@@ -507,9 +511,9 @@ def get_latest_price(symbol: str) -> tuple:
         except sqlite3.OperationalError:
             row = None
         con.close()
-        if row and row[0] is not None:
-            if best[1] is None or row[1] > best[1]:
-                best = (float(row[0]), row[1])
+        if (row and row[0] is not None
+                and (best[1] is None or row[1] > best[1])):
+            best = (float(row[0]), row[1])
     return best
 
 

@@ -1295,6 +1295,19 @@ class TestPipeline(FixtureTestCase):
         fired = self.sal.check_edge(state, "AAPL|price > 0", result)
         self.assertTrue(fired)
 
+    def test_bollinger_short_series_returns_none(self):
+        """v1.18.2 regression: with fewer bars than the Bollinger window,
+        upper/mid/lower are NaN. The contract is that build_context
+        surfaces those as Python ``None``, not NaN floats. v1.18.1 had
+        ``x is not np.nan`` which is ALWAYS True (IEEE 754 inequality)
+        — the bug silently leaked NaNs into the context dict."""
+        df = self.sal.load_series("AAPL", n_bars=250).head(10)
+        ctx = self.sal.build_context(df)
+        # Window of 20 needs ≥ 20 bars; 10 bars → NaN → must be None.
+        self.assertIsNone(ctx["bbands_upper"])
+        self.assertIsNone(ctx["bbands_mid"])
+        self.assertIsNone(ctx["bbands_lower"])
+
     def test_all_symbols_have_data(self):
         """Verify fixture DB has rows for every expected symbol."""
         syms = self.ss.list_all_symbols()

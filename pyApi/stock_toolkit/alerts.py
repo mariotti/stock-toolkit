@@ -187,9 +187,12 @@ def build_context(df: pd.DataFrame) -> dict:
         bw    = ((upper - lower) / mid * 100).dropna()
         pct_b = (close - lower) / (upper - lower)
 
-        ctx["bbands_upper"]   = float(upper.iloc[-1]) if upper.iloc[-1] is not np.nan else None
-        ctx["bbands_mid"]     = float(mid.iloc[-1])
-        ctx["bbands_lower"]   = float(lower.iloc[-1]) if lower.iloc[-1] is not np.nan else None
+        # NaN comparison: `x is not np.nan` is ALWAYS true (np.nan != np.nan
+        # by IEEE 754). The intent here is "undefined/short-series" detection,
+        # which means np.isnan.
+        ctx["bbands_upper"]   = float(upper.iloc[-1]) if not np.isnan(upper.iloc[-1]) else None
+        ctx["bbands_mid"]     = float(mid.iloc[-1])   if not np.isnan(mid.iloc[-1])   else None
+        ctx["bbands_lower"]   = float(lower.iloc[-1]) if not np.isnan(lower.iloc[-1]) else None
         ctx["bbands_pct_b"]   = float(pct_b.iloc[-1]) if not np.isnan(pct_b.iloc[-1]) else None
         ctx["bbands_bw"]      = float(bw.iloc[-1]) if len(bw) > 0 else None
         # squeeze: bandwidth in bottom 20th percentile

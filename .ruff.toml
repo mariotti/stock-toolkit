@@ -3,13 +3,24 @@ line-length = 120
 
 extend-exclude = [
     "pyApi/venv",
-    "pyApi/dist",
+    "pyApi/dist",        # `make_dist --package toolkit` staging
+    "pyApi/dist-app",    # `make_dist --package app` staging
     "pyApi/docs",
     "pyApi/old_data",
 ]
 
 [lint]
-# default rule set: pycodestyle errors (E4/E7/E9) + pyflakes (F)
+# Default (E4/E7/E9 + F) plus a small bug-hunting subset of bugbear
+# and pylint-warnings. Picked for low false-positive rate. The full
+# B / UP / SIM families are intentionally NOT enabled — too much
+# stylistic churn for too little real benefit on a script-shaped
+# codebase.
+extend-select = [
+    "B025",     # duplicate except (real masking bug)
+    "B904",     # raise ... from err inside except — preserves the cause
+    "PLW0177",  # NaN comparison via `is`/`==` — silent data bug
+]
+
 # ignored rules clash with the existing script style:
 #   E402 — imports after sys.path setup; E701/E702 — compact one-liners;
 #   E731 — lambda assignments used as small inline helpers
