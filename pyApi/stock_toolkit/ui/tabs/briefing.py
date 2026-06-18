@@ -408,26 +408,12 @@ Keep responses concise and conversational."""
     if "brief_context" not in st.session_state:
         st.session_state.brief_context  = None
 
-    # ── generate briefing button ──────────────────────────────────────────────
-    if st.button("📋  Generate today's briefing", type="primary"):
-        with st.spinner("Running 7-step analysis on all symbols…"):
-            scores, alerts_ctx = _build_context(
-                selected_symbols, date_from_str, date_to_str,
-                brief_horizon, mc_paths=500
-            )
-        st.session_state.brief_context = {
-            "scores":     scores,
-            "alerts_ctx": alerts_ctx,
-        }
-        st.session_state.brief_messages = []   # reset chat on new briefing
-        st.session_state.brief_skipped_idx = set()
-        st.session_state.brief_executed_idx = set()
-
-        if not scores:
-            st.warning("No data found. Run stock_collector.py first.")
-            st.stop()
-
-        # build the initial briefing prompt
+    def _assemble_prompt(scores, alerts_ctx):
+        """Build the user-message text Claude will see. Shared between
+        the Generate button (which then calls Claude) and the Preview
+        button (which only stashes it for the inspector). Pulls in
+        fundamentals + news sentiment behind the existing 1-hour
+        st.cache_data so re-running is free until the cache expires."""
         with st.spinner("Fetching fundamentals (P/E, growth)…"):
             funda_table = _fundamentals_to_summary(
                 get_fundamentals(tuple(r["symbol"] for r in scores))
@@ -435,8 +421,8 @@ Keep responses concise and conversational."""
 
         # News sentiment — only the top-5 scored symbols, only if the
         # checkbox is set + key configured. The fetch is cached for 1h,
-        # so re-clicking Generate hits the cache rather than burning the
-        # shared Alpha Vantage budget.
+        # so toggling the checkbox / clicking Preview / clicking
+        # Generate within an hour all hit the same cache.
         news_block = ""
         if include_news and scores:
             from stock_toolkit.news import format_for_prompt
@@ -448,7 +434,6 @@ Keep responses concise and conversational."""
                 )
             news_block = format_for_prompt(sentiment) if sentiment else ""
 
-        score_table   = _scores_to_summary(scores)
         alert_summary = []
         for sym, ctx in alerts_ctx.items():
             rsi = ctx.get("rsi14")
@@ -462,11 +447,11 @@ Keep responses concise and conversational."""
                     + (f", change={chg:+.1f}%" if chg else "")
                 )
 
-        user_msg = (
+        return (
             f"Today's watchlist analysis — {brief_horizon} horizon\n"
             f"Budget: {brief_budget} CHF | Broker: {brief_broker}\n"
             f"Date range: {date_from_str} → {date_to_str}\n\n"
-            f"SCORES (ranked best→worst):\n{score_table}\n\n"
+            f"SCORES (ranked best→worst):\n{_scores_to_summary(scores)}\n\n"
             + (f"FUNDAMENTALS (valuation snapshot, yfinance):\n{funda_table}\n\n"
                if funda_table else "")
             + "CURRENT INDICATORS:\n" + "\n".join(alert_summary) + "\n\n"
@@ -480,18 +465,62 @@ Keep responses concise and conversational."""
             "4. One honest limitation of this analysis I should keep in mind"
         )
 
-        st.session_state.brief_prompt = user_msg   # store before call so expanders work even on failure
+    # ── generate + preview buttons ────────────────────────────────────────────
+    gen_col, prev_col = st.columns([2, 1])
+    do_generate = gen_col.button(
+        "📋  Generate today's briefing", type="primary",
+        key="brief_generate",
+    )
+    do_preview = prev_col.button(
+        "🔍  Preview prompt",
+        key="brief_preview",
+        help="Build the prompt locally so you can see what would be sent "
+             "to Claude — including the effect of the news-sentiment "
+             "toggle. No API call to Claude. The news fetch (if enabled) "
+             "is cached for an hour.",
+    )
 
-        with st.spinner("Claude is reading the numbers…"):
-            reply = _call_claude(
-                [{"role": "user", "content": user_msg}],
-                SYSTEM_PROMPT
+    if do_generate or do_preview:
+        with st.spinner("Running 7-step analysis on all symbols…"):
+            scores, alerts_ctx = _build_context(
+                selected_symbols, date_from_str, date_to_str,
+                brief_horizon, mc_paths=500
             )
+        st.session_state.brief_context = {
+            "scores":     scores,
+            "alerts_ctx": alerts_ctx,
+        }
 
-        st.session_state.brief_messages = [
-            {"role": "user",      "content": user_msg},
-            {"role": "assistant", "content": reply},
-        ]
+        if not scores:
+            st.warning("No data found. Run stock_collector.py first.")
+            st.stop()
+
+        user_msg = _assemble_prompt(scores, alerts_ctx)
+        # Always stash so the existing "🔍 Prompt sent to Claude"
+        # expander renders it. The Preview path stops here; only
+        # Generate proceeds to call Claude.
+        st.session_state.brief_prompt = user_msg
+
+        if do_preview:
+            st.info(
+                "🔍  Preview built. Scroll down to **🔍 Prompt sent to "
+                "Claude** to inspect the result — toggle the news "
+                "checkbox and click Preview again to compare."
+            )
+        else:
+            # Generate path: reset chat + proposal state, call Claude.
+            st.session_state.brief_messages    = []
+            st.session_state.brief_skipped_idx = set()
+            st.session_state.brief_executed_idx = set()
+            with st.spinner("Claude is reading the numbers…"):
+                reply = _call_claude(
+                    [{"role": "user", "content": user_msg}],
+                    SYSTEM_PROMPT
+                )
+            st.session_state.brief_messages = [
+                {"role": "user",      "content": user_msg},
+                {"role": "assistant", "content": reply},
+            ]
 
     # ── chat interface ─────────────────────────────────────────────────────────
     # ── always show analysis + prompt once data is computed ───────────────────
