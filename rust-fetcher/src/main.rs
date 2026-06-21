@@ -126,19 +126,25 @@ async fn main() -> Result<()> {
             }
         };
 
-        // Per-source semaphore caps concurrent in-flight requests.
-        // Free-tier AV is 25/day rather than per-second, but other
-        // sources (Finnhub 60/min, Polygon 5/min) will need a real
-        // rate limiter — the semaphore is the seam where that goes.
+        // Two gates compose:
+        //   - semaphore: caps in-flight requests (network parallelism)
+        //   - rate limit: caps requests per unit time (per-source quota)
+        // Both apply. The semaphore protects bandwidth / fd count;
+        // the rate limit protects the API quota.
         let sem = Arc::new(Semaphore::new(cli.concurrency));
+        let rl  = Arc::new(source.default_rate_limit());
         let mut handles = Vec::with_capacity(symbols.len());
 
         for sym in &symbols {
             let sem    = sem.clone();
+            let rl     = rl.clone();
             let source = source.clone();
             let sym    = sym.clone();
             handles.push(tokio::spawn(async move {
                 let _permit = sem.acquire().await.expect("semaphore");
+                if let Some(rl) = rl.as_ref() {
+                    rl.acquire().await;
+                }
                 match source.fetch_daily(&sym).await {
                     Ok(rows) => Ok((sym, rows)),
                     Err(e)   => Err((sym, e)),

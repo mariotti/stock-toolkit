@@ -30,9 +30,11 @@
 
 pub mod config;
 pub mod db;
+pub mod rate_limit;
 pub mod sources;
 pub mod state;
 
 pub use crate::config::Config;
 pub use crate::db::{Db, PriceRow};
+pub use crate::rate_limit::RateLimit;
 pub use crate::sources::Source;

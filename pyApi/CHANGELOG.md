@@ -15,6 +15,32 @@ DB schemas are documented in [`SCHEMA.md`](SCHEMA.md).
 
 ---
 
+## 2.3.0 — Rust fetcher: token-bucket rate limiting
+
+Follow-on to v2.2.0. Adds the per-source rate limiter the architecture
+needed before more sources land.
+
+- New `rust-fetcher/src/rate_limit.rs` — token bucket with `per_minute`,
+  `per_second`, `per_day` constructors. Composes with the existing
+  per-source semaphore (semaphore caps in-flight requests; rate limit
+  caps requests per unit time).
+- `Source` trait gains `default_rate_limit()` so each source declares
+  its own free-tier cap. Default is `None` — opt-in per source.
+- `main.rs` wraps the per-symbol fetch in `rl.acquire().await` so the
+  bucket gates real HTTP calls.
+- Alpha Vantage source declares its limit. Two empirical findings:
+  1. The free tier enforces both 25/day AND ~1/sec — the second is
+     undocumented but real. Caught it on the first live two-symbol
+     fetch; AAPL went through, MSFT got throttled.
+  2. 1.0 s spacing still tripped the limiter — needed 1.5 s margin
+     for clock skew. `Some(RateLimit::new(1, 1500ms))` clears it.
+
+4 new Rust tests covering: initial burst, refill after sleep, blocking
+acquire, concurrent-caller serialisation. 24 total Rust tests now,
+all green.
+
+No Python changes. No new pip / cargo deps.
+
 ## 2.2.0 — Rust fetcher (experimental, opt-in)
 
 New top-level workspace `rust-fetcher/` — a concurrent fetcher

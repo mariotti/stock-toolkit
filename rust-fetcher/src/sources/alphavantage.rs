@@ -26,6 +26,7 @@
 //! as `NEWS_SENTIMENT` — we detect and return an empty vec.
 
 use crate::db::PriceRow;
+use crate::rate_limit::RateLimit;
 use crate::sources::Source;
 use anyhow::Result;
 use async_trait::async_trait;
@@ -98,6 +99,30 @@ impl AlphaVantage {
 impl Source for AlphaVantage {
     fn name(&self) -> &'static str {
         "alphavantage"
+    }
+
+    fn default_rate_limit(&self) -> Option<RateLimit> {
+        // Free tier has TWO limits — only the daily is in the docs:
+        //   25 requests / day  (documented, hard cap)
+        //   1  request / sec   (undocumented, returns throttle on burst)
+        //
+        // At any realistic concurrency, the per-second is the binding
+        // constraint — pace at 1/sec and you can't physically exceed
+        // 25/day before the day rolls over anyway. We learned this the
+        // hard way: with `per_day(25)` two concurrent symbols both
+        // pulled tokens within ~150 ms and the second got throttled.
+        //
+        // The daily 25-count is still tracked by `state.rs::record_call`
+        // so a future "stop before the 26th call" guard has the data.
+        //
+        // 1.5 sec spacing, no burst. Empirically: 1.0 sec spacing
+        // still gets throttled on back-to-back requests (the second
+        // returns AV's "1 request per second" note even when our
+        // sends are >1.0 s apart on the wire — there's clock skew /
+        // server-side smoothing). 1.5 s clears it without measurably
+        // hurting throughput; at this rate the daily-25 cap binds
+        // long before the per-second one does.
+        Some(RateLimit::new(1, std::time::Duration::from_millis(1500)))
     }
 
     async fn fetch_daily(&self, symbol: &str) -> Result<Vec<PriceRow>> {
