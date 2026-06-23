@@ -15,6 +15,77 @@ DB schemas are documented in [`SCHEMA.md`](SCHEMA.md).
 
 ---
 
+## 2.4.0 — Game audit log
+
+First slice of the audit + backup work prompted by 2 paper-trading
+strategies "missing" from `portfolio.db` (turned out they were never
+saved — but we had no way to tell). v2.4.0 makes every mutation
+visible; v2.4.1 will add the backup CLI; v2.4.2 the UI History tab.
+
+### What's new
+
+- New table `audit_log` in `portfolio.db`:
+  `(id, timestamp, actor, op_type, target_kind, target_id,
+    before_json, after_json, note)`. Schema-CREATE-IF-NOT-EXISTS,
+  so existing DBs gain it on next open with a
+  `system.audit_log.initialised` marker row.
+- Every mutation in `stock_toolkit/game.py` now writes an audit row
+  in the same transaction as the change it records — half-committed
+  state is impossible. If the op fails (e.g. duplicate name), the
+  audit row rolls back too.
+
+### Operations covered
+
+| op_type | Actor | Notes |
+|---|---|---|
+| `portfolio.create` | user (or system, for init's auto-Default) | `after_json` = new row |
+| `portfolio.rename` | user | before/after name; same-name is a no-op |
+| `portfolio.set_active` | user OR system | system rows mark rollovers after archive/delete and init adoption |
+| `portfolio.archive` / `.unarchive` | user | before/after `archived_at` |
+| `portfolio.delete` | user | **`before_json` carries the full portfolio row + all cascaded trades** — recovery source after VACUUM |
+| `portfolio.reset` | user | **`before_json` carries the full pre-reset portfolio + wiped trades** |
+| `trade.buy` / `trade.sell` | user | `after_json` = trade row + `cash_before` / `cash_after` |
+| `system.schema_migrate.v1_to_v2` | system | one-shot when the legacy single-portfolio DB is upgraded |
+| `system.audit_log.initialised` | system | one-shot when this table is created on a pre-v2.4.0 DB |
+
+The `init_portfolio` auto-Default path is now flagged `actor=system`
+with note "auto-created on first open" — exactly the case that bit
+us earlier where a fresh "Default" appeared without an explicit user
+click.
+
+### Public API additions
+
+- `get_audit_log(portfolio_id=None, limit=None, op_prefix=None, db=None) -> list[dict]`
+  — newest-first; filters by portfolio (joins trade audits via FK)
+  and op_type prefix.
+- `get_audit_event(audit_id, db=None) -> dict | None` — single-row
+  detail view for the upcoming UI History tab.
+
+### Tests
+
+- **21 new audit tests** (`tests/test_audit_log.py`) covering
+  bootstrap (idempotent init marker), every mutation, the destructive
+  recovery-source guarantee (delete + reset embed full pre-state),
+  v1→v2 migration marker, atomicity (failed op leaves no audit row),
+  and the reader API (newest-first, filters, limit, unknown id).
+- All 38 pre-existing game tests still green — no behavior drift on
+  the public surface.
+
+**Total: 402 Python tests** (was 381 → +21), all green. **Rust: 24**,
+unchanged.
+
+### Not yet (deliberately)
+
+- No backup CLI — `stock-backup` arrives in v2.4.1 with
+  `VACUUM INTO`, rotation, and pre-destructive auto-snapshot.
+- No UI History tab — lands in v2.4.2 once the audit data has been
+  exercised in real use.
+- Audit doesn't yet cover collector ops (record_failure,
+  suppression) or the JSON state files. Same shape applies if the
+  pattern proves itself here.
+
+No new pip / cargo deps.
+
 ## 2.3.2 — v2.3.1 paperwork: docs + cross-language pickup hints
 
 Docs-only follow-up to v2.3.1. No behavior change, no test count

@@ -9,13 +9,19 @@ State lives in $STOCK_DIR/portfolio.db. v2 schema (since 1.1.0) supports
 multiple named strategies; one is "active" at a time. The previous
 single-portfolio DB layout is migrated transparently on first open.
 
-Schema (v2):
+Schema (v2 + audit_log since v2.4.0):
 
   portfolios(id, name UNIQUE, starting_cash, cash, created_at,
              last_reset_at, archived_at)
   trades(id, portfolio_id FK→portfolios, timestamp, symbol, side,
          qty, price, fill_price, cash_delta)
   meta(key, value)        -- meta('active_portfolio_id', '1')
+  audit_log(id, timestamp, actor, op_type, target_kind, target_id,
+            before_json, after_json, note)
+                          -- every user + system mutation, one row each.
+                          -- destructive ops (delete/reset) store the
+                          -- full pre-state in before_json so the row
+                          -- itself is a recovery source.
 
 Pricing model (deliberately simple):
   buy  → latest close × 1.001  (0.1% slippage premium)
@@ -24,6 +30,7 @@ Pricing model (deliberately simple):
 """
 
 import datetime
+import json
 import sqlite3
 from collections import defaultdict
 from pathlib import Path
@@ -33,7 +40,7 @@ from stock_toolkit.common import PORTFOLIO_DB as _PORTFOLIO_DB_PATH
 
 # Public API — frozen from 2.x onwards. Anything not listed here is
 # implementation detail (notably _connect, _migrate_to_v2, _resolve_pid,
-# _record_trade) and may change between releases.
+# _record_trade, _audit) and may change between releases.
 __all__ = [
     "GameError",
     "SLIPPAGE_BPS",
@@ -50,6 +57,8 @@ __all__ = [
     # analytics
     "mark_to_market", "trade_stats", "value_history",
     "benchmark_history", "risk_stats",
+    # audit (v2.4.0+)
+    "get_audit_log", "get_audit_event",
 ]
 
 SLIPPAGE_BPS = 10                                # 10 bps = 0.10%
@@ -101,27 +110,46 @@ CREATE TABLE IF NOT EXISTS meta (
     value TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS audit_log (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    timestamp   TEXT    NOT NULL,
+    actor       TEXT    NOT NULL,
+    op_type     TEXT    NOT NULL,
+    target_kind TEXT,
+    target_id   INTEGER,
+    before_json TEXT,
+    after_json  TEXT,
+    note        TEXT
+);
+
 CREATE INDEX IF NOT EXISTS idx_trades_ts        ON trades (timestamp);
 CREATE INDEX IF NOT EXISTS idx_trades_symbol    ON trades (symbol);
 CREATE INDEX IF NOT EXISTS idx_trades_portfolio ON trades (portfolio_id);
+CREATE INDEX IF NOT EXISTS idx_audit_ts         ON audit_log (timestamp);
+CREATE INDEX IF NOT EXISTS idx_audit_op         ON audit_log (op_type);
+CREATE INDEX IF NOT EXISTS idx_audit_target     ON audit_log (target_kind, target_id);
 """
 
 
-def _migrate_to_v2(con: sqlite3.Connection) -> None:
+def _migrate_to_v2(con: sqlite3.Connection) -> bool:
     """If the DB is the v1 single-portfolio layout, transform it in place:
     rename portfolio→portfolios with name='Default', add portfolio_id FK
-    to trades, mark Default as active. No-op on fresh or already-v2 DBs."""
+    to trades, mark Default as active. No-op on fresh or already-v2 DBs.
+
+    Returns True if a migration actually ran (the caller writes a
+    `system.schema_migrate.v1_to_v2` audit row when so).
+    """
     has_new = con.execute(
         "SELECT name FROM sqlite_master WHERE type='table' AND name='portfolios'"
     ).fetchone() is not None
     if has_new:
-        return
+        return False
 
     has_old = con.execute(
         "SELECT name FROM sqlite_master WHERE type='table' AND name='portfolio'"
     ).fetchone() is not None
     if not has_old:
-        return        # fresh DB; the schema CREATE IF NOT EXISTS will handle it
+        return False  # fresh DB; the schema CREATE IF NOT EXISTS will handle it
 
     # Build the v2 portfolios + meta tables alongside the legacy ones.
     con.executescript("""
@@ -180,24 +208,181 @@ def _migrate_to_v2(con: sqlite3.Connection) -> None:
 
     con.execute("DROP TABLE portfolio")
     con.commit()
+    return True
 
 
 def _connect(db: Path) -> sqlite3.Connection:
     con = sqlite3.connect(db)
     con.execute("PRAGMA foreign_keys = ON")
-    _migrate_to_v2(con)
+    migrated_v1 = _migrate_to_v2(con)
+    # Pre-2.4.0 DBs lack the audit_log table. Detect *before* applying
+    # _NEW_SCHEMA so we can write a single retro-active row noting that
+    # audit started at this point (everything before is unaudited).
+    audit_pre_existed = con.execute(
+        "SELECT name FROM sqlite_master "
+        "WHERE type='table' AND name='audit_log'"
+    ).fetchone() is not None
     con.executescript(_NEW_SCHEMA)
     # v1.7 schema bump: add `note` column to trades if missing. SQLite
     # has no ALTER ... ADD COLUMN IF NOT EXISTS, so do it conditionally.
     cols = {r[1] for r in con.execute("PRAGMA table_info(trades)").fetchall()}
     if "note" not in cols:
         con.execute("ALTER TABLE trades ADD COLUMN note TEXT")
+    if migrated_v1:
+        _audit(con, actor="system",
+               op_type="system.schema_migrate.v1_to_v2",
+               note="Legacy single-portfolio DB transformed into v2 "
+                    "(portfolios + trades.portfolio_id + meta).")
+    if not audit_pre_existed:
+        _audit(con, actor="system",
+               op_type="system.audit_log.initialised",
+               note="audit_log table created (v2.4.0+). Pre-existing rows "
+                    "in portfolios / trades pre-date the audit and have "
+                    "no history.")
+    con.commit()
     return con
 
 
 def _now() -> str:
     return datetime.datetime.now(datetime.timezone.utc).isoformat(
         timespec="seconds")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  Audit log (v2.4.0+)
+# ─────────────────────────────────────────────────────────────────────────────
+# Internal write helper. Every mutation in this module calls _audit
+# BEFORE its commit() so the audit row is atomic with the change it
+# records — half-committed state is impossible.
+#
+# Destructive ops (delete_portfolio, reset_portfolio) snapshot the
+# entire prior row(s) into before_json, so the audit log itself is the
+# recovery source even after VACUUM has cleared SQLite's freelist.
+#
+# Convention for op_type strings:
+#   portfolio.create / .rename / .archive / .unarchive / .delete /
+#                    .reset / .set_active / .set_cash
+#   trade.buy / .sell
+#   system.schema_migrate.v1_to_v2
+#   system.audit_log.initialised
+#   system.auto_create_default
+#
+# target_kind is "portfolio", "trade", or NULL for system rows.
+
+def _audit(con: sqlite3.Connection, *, actor: str, op_type: str,
+           target_kind: str = None, target_id: int = None,
+           before: dict | list = None, after: dict | list = None,
+           note: str = None) -> int:
+    before_json = json.dumps(before, default=str) if before is not None else None
+    after_json  = json.dumps(after,  default=str) if after  is not None else None
+    cur = con.execute(
+        "INSERT INTO audit_log (timestamp, actor, op_type, target_kind, "
+        "target_id, before_json, after_json, note) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        (_now(), actor, op_type, target_kind, target_id,
+         before_json, after_json, note),
+    )
+    return cur.lastrowid
+
+
+def _row_to_dict(row, keys):
+    return dict(zip(keys, row)) if row else None
+
+
+_PORTFOLIO_COLS = ("id", "name", "starting_cash", "cash", "created_at",
+                   "last_reset_at", "archived_at")
+_TRADE_COLS     = ("id", "portfolio_id", "timestamp", "symbol", "side", "qty",
+                   "price", "fill_price", "cash_delta", "note")
+
+
+def _snapshot_portfolio(con: sqlite3.Connection, pid: int) -> dict | None:
+    row = con.execute(
+        f"SELECT {', '.join(_PORTFOLIO_COLS)} FROM portfolios WHERE id = ?",
+        (pid,),
+    ).fetchone()
+    return _row_to_dict(row, _PORTFOLIO_COLS)
+
+
+def _snapshot_trades(con: sqlite3.Connection, pid: int) -> list[dict]:
+    rows = con.execute(
+        f"SELECT {', '.join(_TRADE_COLS)} FROM trades "
+        f"WHERE portfolio_id = ? ORDER BY id",
+        (pid,),
+    ).fetchall()
+    return [_row_to_dict(r, _TRADE_COLS) for r in rows]
+
+
+def get_audit_log(portfolio_id: int = None, limit: int = None,
+                  op_prefix: str = None, db: Path = None) -> list[dict]:
+    """Read audit rows in reverse-chronological order.
+
+    Filters (any combination):
+      portfolio_id — only rows where target_kind='portfolio' AND target_id=pid,
+                     OR rows where target_kind='trade' AND the parent
+                     portfolio matches.
+      op_prefix   — e.g. 'portfolio.' or 'trade.' or 'system.'
+      limit       — at most N rows (newest first).
+    """
+    db = db or DEFAULT_PORTFOLIO_DB
+    con = _connect(db)
+    where  = []
+    params = []
+    if op_prefix:
+        where.append("op_type LIKE ?")
+        params.append(op_prefix + "%")
+    if portfolio_id is not None:
+        # Match portfolio rows directly + trade rows whose audit entry
+        # referenced the trade id but carries the parent portfolio in
+        # before/after json. To avoid an expensive JSON scan we only
+        # match by target_kind for now; trade-on-portfolio joins land
+        # in a follow-on if needed.
+        where.append(
+            "((target_kind='portfolio' AND target_id=?) OR "
+            " (target_kind='trade' AND target_id IN "
+            "  (SELECT id FROM trades WHERE portfolio_id=?)))"
+        )
+        params += [portfolio_id, portfolio_id]
+    sql = (
+        "SELECT id, timestamp, actor, op_type, target_kind, target_id, "
+        "before_json, after_json, note FROM audit_log"
+    )
+    if where:
+        sql += " WHERE " + " AND ".join(where)
+    sql += " ORDER BY id DESC"
+    if limit is not None:
+        sql += " LIMIT ?"
+        params.append(int(limit))
+    rows = con.execute(sql, params).fetchall()
+    con.close()
+    keys = ("id", "timestamp", "actor", "op_type", "target_kind",
+            "target_id", "before", "after", "note")
+    out = []
+    for r in rows:
+        d = dict(zip(keys, r))
+        d["before"] = json.loads(d["before"]) if d["before"] else None
+        d["after"]  = json.loads(d["after"])  if d["after"]  else None
+        out.append(d)
+    return out
+
+
+def get_audit_event(audit_id: int, db: Path = None) -> dict | None:
+    """Fetch one audit row by id (for a detail view)."""
+    db = db or DEFAULT_PORTFOLIO_DB
+    con = _connect(db)
+    row = con.execute(
+        "SELECT id, timestamp, actor, op_type, target_kind, target_id, "
+        "before_json, after_json, note FROM audit_log WHERE id = ?",
+        (audit_id,),
+    ).fetchone()
+    con.close()
+    if not row:
+        return None
+    keys = ("id", "timestamp", "actor", "op_type", "target_kind",
+            "target_id", "before", "after", "note")
+    d = dict(zip(keys, row))
+    d["before"] = json.loads(d["before"]) if d["before"] else None
+    d["after"]  = json.loads(d["after"])  if d["after"]  else None
+    return d
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -240,7 +425,16 @@ def set_active_portfolio(portfolio_id: int, db: Path = None) -> None:
                    (portfolio_id,)).fetchone() is None:
         con.close()
         raise GameError(f"No portfolio with id {portfolio_id}.")
-    _set_active_id(con, portfolio_id); con.commit(); con.close()
+    prev = _get_active_id(con)
+    if prev == portfolio_id:
+        con.close()
+        return
+    _set_active_id(con, portfolio_id)
+    _audit(con, actor="user", op_type="portfolio.set_active",
+           target_kind="portfolio", target_id=portfolio_id,
+           before={"active_portfolio_id": prev},
+           after={"active_portfolio_id": portfolio_id})
+    con.commit(); con.close()
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -264,8 +458,15 @@ def list_portfolios(include_archived: bool = False, db: Path = None) -> list:
 def create_portfolio(name: str,
                      starting_cash: float = DEFAULT_STARTING_CASH,
                      db: Path = None,
-                     activate: bool = True) -> dict:
-    """Create a new portfolio. Optionally make it the active one."""
+                     activate: bool = True,
+                     _actor: str = "user",
+                     _audit_note: str = None) -> dict:
+    """Create a new portfolio. Optionally make it the active one.
+
+    Private hooks ``_actor`` and ``_audit_note`` let internal callers
+    (e.g. ``init_portfolio``'s auto-create-Default path) override the
+    audit row's actor/note. Public callers should leave them as-is.
+    """
     name = (name or "").strip()
     if not name:
         raise GameError("Portfolio name must be non-empty.")
@@ -286,8 +487,19 @@ def create_portfolio(name: str,
             f"A portfolio named {name!r} already exists."
         ) from e
     pid = cur.lastrowid
+    prev_active = _get_active_id(con)
     if activate:
         _set_active_id(con, pid)
+    after_snapshot = _snapshot_portfolio(con, pid)
+    _audit(con, actor=_actor, op_type="portfolio.create",
+           target_kind="portfolio", target_id=pid,
+           after=after_snapshot, note=_audit_note)
+    if activate and prev_active != pid:
+        _audit(con, actor="system", op_type="portfolio.set_active",
+               target_kind="portfolio", target_id=pid,
+               before={"active_portfolio_id": prev_active},
+               after={"active_portfolio_id": pid},
+               note="activated by create_portfolio(activate=True)")
     con.commit(); con.close()
     return get_portfolio(portfolio_id=pid, db=db)
 
@@ -299,6 +511,13 @@ def rename_portfolio(portfolio_id: int, new_name: str,
         raise GameError("New name must be non-empty.")
     db = db or DEFAULT_PORTFOLIO_DB
     con = _connect(db)
+    before = _snapshot_portfolio(con, portfolio_id)
+    if before is None:
+        con.close()
+        raise GameError(f"No portfolio with id {portfolio_id}.")
+    if before["name"] == new_name:
+        con.close()
+        return
     try:
         con.execute("UPDATE portfolios SET name = ? WHERE id = ?",
                     (new_name, portfolio_id))
@@ -307,6 +526,10 @@ def rename_portfolio(portfolio_id: int, new_name: str,
         raise GameError(
             f"A portfolio named {new_name!r} already exists."
         ) from e
+    after = _snapshot_portfolio(con, portfolio_id)
+    _audit(con, actor="user", op_type="portfolio.rename",
+           target_kind="portfolio", target_id=portfolio_id,
+           before={"name": before["name"]}, after={"name": after["name"]})
     con.commit(); con.close()
 
 
@@ -316,8 +539,17 @@ def archive_portfolio(portfolio_id: int, db: Path = None) -> None:
     pointer is moved to the next available portfolio (or cleared)."""
     db = db or DEFAULT_PORTFOLIO_DB
     con = _connect(db)
+    before = _snapshot_portfolio(con, portfolio_id)
+    if before is None:
+        con.close()
+        raise GameError(f"No portfolio with id {portfolio_id}.")
     con.execute("UPDATE portfolios SET archived_at = ? WHERE id = ?",
                 (_now(), portfolio_id))
+    after = _snapshot_portfolio(con, portfolio_id)
+    _audit(con, actor="user", op_type="portfolio.archive",
+           target_kind="portfolio", target_id=portfolio_id,
+           before={"archived_at": before["archived_at"]},
+           after={"archived_at": after["archived_at"]})
     if _get_active_id(con) == portfolio_id:
         nxt = con.execute(
             "SELECT id FROM portfolios "
@@ -326,35 +558,76 @@ def archive_portfolio(portfolio_id: int, db: Path = None) -> None:
         ).fetchone()
         if nxt:
             _set_active_id(con, nxt[0])
+            _audit(con, actor="system", op_type="portfolio.set_active",
+                   target_kind="portfolio", target_id=nxt[0],
+                   before={"active_portfolio_id": portfolio_id},
+                   after={"active_portfolio_id": nxt[0]},
+                   note="active rolled over after archive")
         else:
             con.execute(
                 "DELETE FROM meta WHERE key = 'active_portfolio_id'")
+            _audit(con, actor="system", op_type="portfolio.set_active",
+                   before={"active_portfolio_id": portfolio_id},
+                   after={"active_portfolio_id": None},
+                   note="no remaining portfolios; active cleared after archive")
     con.commit(); con.close()
 
 
 def unarchive_portfolio(portfolio_id: int, db: Path = None) -> None:
     db = db or DEFAULT_PORTFOLIO_DB
     con = _connect(db)
+    before = _snapshot_portfolio(con, portfolio_id)
+    if before is None:
+        con.close()
+        raise GameError(f"No portfolio with id {portfolio_id}.")
+    if before["archived_at"] is None:
+        con.close()
+        return
     con.execute("UPDATE portfolios SET archived_at = NULL WHERE id = ?",
                 (portfolio_id,))
+    _audit(con, actor="user", op_type="portfolio.unarchive",
+           target_kind="portfolio", target_id=portfolio_id,
+           before={"archived_at": before["archived_at"]},
+           after={"archived_at": None})
     con.commit(); con.close()
 
 
 def delete_portfolio(portfolio_id: int, db: Path = None) -> None:
-    """Hard-delete a portfolio and its trades (cascade). Irreversible."""
+    """Hard-delete a portfolio and its trades (cascade). Irreversible from
+    the live tables — but the audit log's before_json carries the full
+    portfolio row + all its trades, so it remains the recovery source."""
     db = db or DEFAULT_PORTFOLIO_DB
     con = _connect(db)
+    before_p = _snapshot_portfolio(con, portfolio_id)
+    if before_p is None:
+        con.close()
+        raise GameError(f"No portfolio with id {portfolio_id}.")
+    before_trades = _snapshot_trades(con, portfolio_id)
+    was_active = _get_active_id(con) == portfolio_id
     con.execute("DELETE FROM portfolios WHERE id = ?", (portfolio_id,))
-    if _get_active_id(con) == portfolio_id:
+    _audit(con, actor="user", op_type="portfolio.delete",
+           target_kind="portfolio", target_id=portfolio_id,
+           before={"portfolio": before_p, "trades": before_trades},
+           note=f"deleted {len(before_trades)} trade(s) via FK cascade")
+    if was_active:
         nxt = con.execute(
             "SELECT id FROM portfolios WHERE archived_at IS NULL "
             "ORDER BY id LIMIT 1"
         ).fetchone()
         if nxt:
             _set_active_id(con, nxt[0])
+            _audit(con, actor="system", op_type="portfolio.set_active",
+                   target_kind="portfolio", target_id=nxt[0],
+                   before={"active_portfolio_id": portfolio_id},
+                   after={"active_portfolio_id": nxt[0]},
+                   note="active rolled over after delete")
         else:
             con.execute(
                 "DELETE FROM meta WHERE key = 'active_portfolio_id'")
+            _audit(con, actor="system", op_type="portfolio.set_active",
+                   before={"active_portfolio_id": portfolio_id},
+                   after={"active_portfolio_id": None},
+                   note="no remaining portfolios; active cleared after delete")
     con.commit(); con.close()
 
 
@@ -378,10 +651,23 @@ def init_portfolio(starting_cash: float = DEFAULT_STARTING_CASH,
     ).fetchone()
     if any_existing:
         _set_active_id(con, any_existing[0])
+        _audit(con, actor="system", op_type="portfolio.set_active",
+               target_kind="portfolio", target_id=any_existing[0],
+               before={"active_portfolio_id": None},
+               after={"active_portfolio_id": any_existing[0]},
+               note="no active pointer; init_portfolio adopted the "
+                    "earliest existing portfolio")
         con.commit(); con.close()
         return get_portfolio(portfolio_id=any_existing[0], db=db)
     con.close()
-    return create_portfolio("Default", starting_cash=starting_cash, db=db)
+    # Mark this row as system-actor so the History view can show why
+    # a "Default" appeared without an explicit user click — this is the
+    # case that bit us earlier (a Default ghost-appeared after a wipe).
+    return create_portfolio(
+        "Default", starting_cash=starting_cash, db=db,
+        _actor="system", _audit_note="auto-created by init_portfolio on "
+                                     "first open (no portfolios existed)",
+    )
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -544,15 +830,29 @@ def get_latest_price(symbol: str) -> tuple:
 
 def _record_trade(con, pid, *, symbol, side, qty, price, fill_price,
                   cash_delta, note=None):
-    con.execute(
+    cash_before = con.execute(
+        "SELECT cash FROM portfolios WHERE id = ?", (pid,)
+    ).fetchone()[0]
+    cur = con.execute(
         "INSERT INTO trades (portfolio_id, timestamp, symbol, side, qty, "
         "price, fill_price, cash_delta, note) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (pid, _now(), symbol.upper(), side, float(qty), float(price),
          float(fill_price), float(cash_delta),
          (note or "").strip() or None),
     )
+    trade_id = cur.lastrowid
     con.execute("UPDATE portfolios SET cash = cash + ? WHERE id = ?",
                 (cash_delta, pid))
+    after_trade = con.execute(
+        f"SELECT {', '.join(_TRADE_COLS)} FROM trades WHERE id = ?",
+        (trade_id,),
+    ).fetchone()
+    _audit(con, actor="user", op_type=f"trade.{side}",
+           target_kind="trade", target_id=trade_id,
+           after={"trade": _row_to_dict(after_trade, _TRADE_COLS),
+                  "portfolio_id": pid,
+                  "cash_before": cash_before,
+                  "cash_after":  cash_before + cash_delta})
 
 
 def buy(symbol: str, cash_amount: float,
@@ -620,10 +920,14 @@ def sell(symbol: str, qty: float = None,
 def reset_portfolio(starting_cash: float = DEFAULT_STARTING_CASH,
                     portfolio_id: int = None, db: Path = None) -> dict:
     """Wipe all trades for ONE portfolio (the active one by default) and
-    reset its cash. Other portfolios are untouched."""
+    reset its cash. Other portfolios are untouched. Destructive — the
+    audit_log row carries the full pre-reset portfolio row + all wiped
+    trades in before_json so they remain recoverable."""
     db = db or DEFAULT_PORTFOLIO_DB
     con = _connect(db)
     pid = _resolve_pid(con, portfolio_id)
+    before_p      = _snapshot_portfolio(con, pid)
+    before_trades = _snapshot_trades(con, pid)
     ts = _now()
     con.execute("DELETE FROM trades WHERE portfolio_id = ?", (pid,))
     con.execute(
@@ -631,6 +935,13 @@ def reset_portfolio(starting_cash: float = DEFAULT_STARTING_CASH,
         "WHERE id = ?",
         (starting_cash, starting_cash, ts, pid),
     )
+    after_p = _snapshot_portfolio(con, pid)
+    _audit(con, actor="user", op_type="portfolio.reset",
+           target_kind="portfolio", target_id=pid,
+           before={"portfolio": before_p, "trades": before_trades},
+           after={"portfolio": after_p},
+           note=f"wiped {len(before_trades)} trade(s); "
+                f"starting_cash {before_p['starting_cash']} → {starting_cash}")
     con.commit(); con.close()
     return get_portfolio(portfolio_id=pid, db=db)
 
