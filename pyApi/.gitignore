@@ -21,8 +21,13 @@ hists/
 stock_failures*.csv
 
 # ─── packaged releases ────────────────────────
+# Per-version archives now land in dist-bundles/ (see make_dist.py).
+# Top-level patterns retained for old artifacts that pre-date the move.
+dist-bundles/
 stock-toolkit-*.tar.gz
 stock-toolkit-*.zip
+stock-app-*.tar.gz
+stock-app-*.zip
 
 # ─── generated plot output ────────────────────
 gnuplot-data/

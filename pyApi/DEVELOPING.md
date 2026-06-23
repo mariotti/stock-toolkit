@@ -82,6 +82,7 @@ ruff check .                                  # lint (CI also runs this)
 | `tests/test_sources.py`    | API fetchers against pre-recorded JSON/HTML — never hits the network. |
 | `tests/test_collector_units.py` | Budgets, retry/backoff, the safe_get wrapper. |
 | `tests/test_game.py`       | Game engine (`game.py`) + the Game UI render. Pattern is `GameTestCase` with a tmp `portfolio.db` and a tmp price DB. |
+| `tests/test_engine_rust.py`| Dispatcher for `stock-collect --engine rust` (`collector/engine.py`). Mocks `subprocess.run` + `shutil.which` — never spawns the real Rust binary. Covers binary discovery, source allow-list, argv shape, exit-code propagation. |
 | `tests/test_live_apis.py`  | **Network-touching** — only run on demand, NOT in CI. |
 
 **Fast iteration loop.** Run just one class:

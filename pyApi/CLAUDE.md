@@ -30,6 +30,7 @@ python3 tests/test_toolkit.py                # core: collector/analysis/score/ba
 python3 tests/test_ui.py                     # Streamlit dashboard via AppTest
 python3 tests/test_sources.py                # API fetchers against canned responses
 python3 tests/test_collector_units.py        # budgets, safe_get, historical orchestration
+python3 tests/test_engine_rust.py            # --engine rust dispatcher (binary discovery, argv, exit codes)
 ```
 
 **Run live API integration tests (requires valid API keys in config.env):**
@@ -65,6 +66,17 @@ stock-bootstrap -s AAPL --range 2020-2024
 stock-gap-fill --dry-run         # show what would be re-fetched
 stock-gap-fill                   # fetch only the missing date ranges via yfinance
 ```
+
+**Drive the Rust fetcher from Python (opt-in, v2.3.1+):**
+```bash
+cd ../rust-fetcher && cargo build --release && cd ../pyApi   # one-time build
+stock-collect --engine rust --sources alphavantage           # subprocess to Rust binary
+```
+Default engine remains `python` (in-process collector — no observable change for existing users).
+`--engine rust` writes to the same `stock_data.db` Python uses; cross-language dedup via
+`UNIQUE(symbol, source, timestamp)`. Currently Rust supports only `alphavantage` — adding
+others requires updates in two places (see `stock_toolkit/collector/engine.py:RUST_SUPPORTED_SOURCES`
+and `rust-fetcher/src/main.rs` `match source_name`).
 
 ## Architecture
 

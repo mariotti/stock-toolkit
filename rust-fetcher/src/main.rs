@@ -108,6 +108,11 @@ async fn main() -> Result<()> {
     let mut db = Db::open(&db_path)?;
 
     for source_name in &cli.sources {
+        // CROSS-LANGUAGE CONTRACT — when you add an arm here, also add
+        // the source name to `RUST_SUPPORTED_SOURCES` in
+        // `pyApi/stock_toolkit/collector/engine.py`. Otherwise the
+        // Python `--engine rust` shim will refuse the new source with
+        // rc=2 before this binary is ever invoked.
         let source: Arc<dyn Source> = match source_name.as_str() {
             "alphavantage" => {
                 let key = cfg.get("ALPHAVANTAGE_KEY")

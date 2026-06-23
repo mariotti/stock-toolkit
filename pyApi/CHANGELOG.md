@@ -15,6 +15,42 @@ DB schemas are documented in [`SCHEMA.md`](SCHEMA.md).
 
 ---
 
+## 2.3.2 — v2.3.1 paperwork: docs + cross-language pickup hints
+
+Docs-only follow-up to v2.3.1. No behavior change, no test count
+change. The point: make the next engineer's pickup obvious.
+
+- `rust-fetcher/README.md` — status line updated from "v2.2.0
+  experimental" to v2.3.x; layout table now lists `rate_limit.rs`;
+  test count 20 → 24; new "From Python (`stock-collect --engine
+  rust`)" section pointing at the dispatcher; the "what's NOT
+  done" list now spells out *exactly* which two files a new Rust
+  source has to touch.
+- `pyApi/stock_toolkit/collector/engine.py` — comment above
+  `RUST_SUPPORTED_SOURCES` flags the cross-language contract with
+  `rust-fetcher/src/main.rs` (and explains the rc=2 failure mode).
+- `rust-fetcher/src/main.rs` — matching comment above the
+  `match source_name.as_str()` arm pointing the other way.
+- `pyApi/DEVELOPING.md` — test files table now lists
+  `test_engine_rust.py` (was missing; auto-discovered, just
+  invisible to readers).
+- `pyApi/CLAUDE.md` — Commands section now shows `--engine rust`
+  + the cross-language contract pointer; `test_engine_rust.py`
+  added to the test-list block.
+- `pyApi/README.md` — stock-collect usage gains a `--engine rust`
+  example; new "Rust engine" subsection explaining the opt-in,
+  the failure modes, and the binary discovery order.
+
+Also small housekeeping: `make_dist.py --package {toolkit,app}` now
+writes the per-version archives into `pyApi/dist-bundles/` (sibling
+to `dist/` and `dist-app/`) instead of dropping them at the top of
+`pyApi/`. Keeps `git status` quiet as versions accumulate. Gitignore
+gained `dist-bundles/` and the long-missing `stock-app-*.{tar.gz,zip}`
+patterns (the existing rules only covered `stock-toolkit-*`, so app
+bundles kept showing up in `git status` until now).
+
+No production code change. No new pip / cargo deps.
+
 ## 2.3.1 — Python `stock-collect --engine rust` shim
 
 Visible payoff for the Rust foundation laid in v2.2.0 + v2.3.0:

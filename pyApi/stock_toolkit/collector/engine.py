@@ -35,8 +35,13 @@ from pathlib import Path
 from typing import Optional
 
 
-# Sources the Rust fetcher currently supports. Update as
-# rust-fetcher gains modules. Python handles the rest.
+# Sources the Rust fetcher currently supports. Python handles the rest.
+#
+# CROSS-LANGUAGE CONTRACT — keep in sync with `rust-fetcher/src/main.rs`,
+# specifically the `match source_name.as_str()` arm. If you add a source
+# to Rust without updating this set, `stock-collect --engine rust
+# --sources <new>` will be rejected with rc=2 *before* the binary is
+# invoked. (Safe failure, confusing failure — update both at once.)
 RUST_SUPPORTED_SOURCES = frozenset({"alphavantage"})
 
 

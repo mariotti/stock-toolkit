@@ -863,6 +863,10 @@ def _create_packages(out_dir: Path, name: str) -> None:
     with the directory renamed to NAME inside the archive.
     Version is read from VERSION file in the source directory.
     Works on both macOS (BSD tar) and Linux (GNU tar).
+
+    Output lands in `SCRIPT_DIR/dist-bundles/` — sibling to `dist/`
+    (unpacked toolkit) and `dist-app/` (unpacked Docker app). Keeps
+    the top of `pyApi/` clean as versions accumulate.
     """
     import tarfile
     import zipfile
@@ -871,10 +875,11 @@ def _create_packages(out_dir: Path, name: str) -> None:
     version_file = SCRIPT_DIR / "VERSION"
     version = version_file.read_text().strip() if version_file.exists() else "dev"
 
-    parent   = out_dir.parent
+    bundles_dir = SCRIPT_DIR / "dist-bundles"
+    bundles_dir.mkdir(exist_ok=True)
     base     = f"stock-{name}-{version}"
-    tar_path = parent / f"{base}.tar.gz"
-    zip_path = parent / f"{base}.zip"
+    tar_path = bundles_dir / f"{base}.tar.gz"
+    zip_path = bundles_dir / f"{base}.zip"
 
     print(f"  Version: {version}")
     print(f"  Creating {tar_path.name} ...")
@@ -891,8 +896,8 @@ def _create_packages(out_dir: Path, name: str) -> None:
 
     print()
     print("  Distribute either file — the user unpacks with:")
-    print(f"    tar xzf {base}.tar.gz   # creates {name}/ directory")
-    print(f"    unzip   {base}.zip       # creates {name}/ directory")
+    print(f"    tar xzf dist-bundles/{base}.tar.gz   # creates {name}/ directory")
+    print(f"    unzip   dist-bundles/{base}.zip       # creates {name}/ directory")
 
 
 if __name__ == "__main__":

@@ -253,6 +253,9 @@ stock-collect --symbol CAT
 
 # write to CSV instead of SQLite (legacy mode)
 stock-collect --csv
+
+# use the Rust fetcher (v2.3.1+, opt-in — see "Rust engine" below)
+stock-collect --engine rust --sources alphavantage
 ```
 
 **What gets stored per run:**
@@ -272,6 +275,34 @@ stock-collect --csv
 All seven sources run **in parallel** — their rate-limit sleeps overlap rather
 than stack, so a full run completes in roughly the time of the slowest single
 source rather than the sum of all sources.
+
+**Rust engine (`--engine rust`, opt-in, v2.3.1+):**
+
+If you also have the [Rust fetcher](../rust-fetcher/) built (`cargo build
+--release` in `rust-fetcher/`), you can route `stock-collect` through it
+per-run. The Rust binary runs symbols concurrently per source with a token-bucket
+rate limiter, and writes to the *same* `stock_data.db` Python uses — cross-language
+dedup via `UNIQUE(symbol, source, timestamp)` keeps the two engines safe to mix.
+
+```bash
+# one-time build
+cd ../rust-fetcher && cargo build --release && cd -
+
+# opt in per invocation
+stock-collect --engine rust --sources alphavantage
+stock-collect --engine rust --sources alphavantage -s AAPL
+```
+
+Notes:
+- Default engine is `python` — current behavior unchanged.
+- Currently Rust supports `alphavantage` only. `--engine rust --sources yfinance`
+  errors with rc=2 before the subprocess spawns — drop the flag, or restrict
+  `--sources` to what Rust covers.
+- Binary discovery order: `STOCK_FETCHER_BIN` env →
+  `rust-fetcher/target/release/stock-fetcher` → `PATH`. Missing binary
+  errors with rc=127 + a build hint; never silently falls back to Python.
+- Symbol resolution (`SYMBOLS_IGNORE`, DB-discovered, staleness-sort) stays in
+  Python — Rust sees the same watchlist either engine would have used.
 
 **Running via cron:**
 
