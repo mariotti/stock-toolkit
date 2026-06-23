@@ -128,6 +128,20 @@ class TestBuy(GameTestCase):
         with self.assertRaises(game.GameError):
             game.buy("NOPE", 500.0, db=self.port_db)
 
+    def test_get_trades_returns_row_id(self):
+        # v2.4.4: trades-table id is the ordering source of truth.
+        # Two same-symbol buys produce distinct, monotonic ids — the
+        # UI surfaces them so back-to-back clicks (which may share a
+        # second-precision timestamp) are visibly distinguishable.
+        game.buy("AAPL", 100.0, db=self.port_db)
+        game.buy("AAPL", 100.0, db=self.port_db)
+        trades = game.get_trades(db=self.port_db)
+        self.assertEqual(len(trades), 2)
+        self.assertIn("id", trades[0])
+        self.assertIn("id", trades[1])
+        # Monotonic (FIFO order); distinct even if timestamps collide.
+        self.assertLess(trades[0]["id"], trades[1]["id"])
+
 
 class TestSell(GameTestCase):
 

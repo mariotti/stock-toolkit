@@ -532,7 +532,12 @@ def render():
         t_df = pd.DataFrame(trades)
         if "note" not in t_df.columns:
             t_df["note"] = ""
+        # The "#" column is the trades-table row id (v2.4.4+). Two clicks
+        # within the same second share a "When" timestamp but always get
+        # distinct ids — the id is the actual ordering source of truth,
+        # surfaced so the user can tell back-to-back clicks apart.
         t_display = pd.DataFrame({
+            "#":          t_df["id"].map(lambda v: f"#{v}"),
             "When":       t_df["timestamp"].map(lambda v: v[:19].replace("T", " ")),
             "Side":       t_df["side"].map(str.upper),
             "Symbol":     t_df["symbol"],
@@ -771,8 +776,10 @@ def _render_history(mtm: dict) -> None:
             f"{len(events)} row(s) below. Use the CSV for the full set."
         )
         for e in events[:30]:
+            # Lead with the audit row id (v2.4.4+) — without it, two
+            # same-second mutations show identical summary labels.
             summary = (
-                f"`{e['op_type']}`  ·  {e['actor']}  ·  "
+                f"`#{e['id']}`  `{e['op_type']}`  ·  {e['actor']}  ·  "
                 f"{e['timestamp'][:19].replace('T', ' ')}"
             )
             with st.expander(summary, expanded=False):

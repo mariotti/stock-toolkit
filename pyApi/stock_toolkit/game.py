@@ -744,19 +744,27 @@ def get_portfolio(portfolio_id: int = None, db: Path = None) -> dict:
 
 
 def get_trades(portfolio_id: int = None, db: Path = None) -> list:
+    """List trades for ONE portfolio (active by default), in insertion
+    order (oldest first).
+
+    The ``id`` is the trades-table row id — monotonic, atomic, and the
+    actual ordering source of truth. Two clicks within the same second
+    share a timestamp string but always get distinct ids; expose this
+    so the UI can distinguish them without faking sub-second precision.
+    """
     db = db or DEFAULT_PORTFOLIO_DB
     con = _connect(db)
     pid = _resolve_pid(con, portfolio_id)
     rows = con.execute(
-        "SELECT timestamp, symbol, side, qty, price, fill_price, cash_delta, "
-        "note FROM trades WHERE portfolio_id = ? ORDER BY id",
+        "SELECT id, timestamp, symbol, side, qty, price, fill_price, "
+        "cash_delta, note FROM trades WHERE portfolio_id = ? ORDER BY id",
         (pid,),
     ).fetchall()
     con.close()
     return [
-        {"timestamp": r[0], "symbol": r[1], "side": r[2], "qty": r[3],
-         "price": r[4], "fill_price": r[5], "cash_delta": r[6],
-         "note": r[7] or ""}
+        {"id": r[0], "timestamp": r[1], "symbol": r[2], "side": r[3],
+         "qty": r[4], "price": r[5], "fill_price": r[6], "cash_delta": r[7],
+         "note": r[8] or ""}
         for r in rows
     ]
 

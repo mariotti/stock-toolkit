@@ -15,6 +15,55 @@ DB schemas are documented in [`SCHEMA.md`](SCHEMA.md).
 
 ---
 
+## 2.4.4 — Surface trade + audit row ids in the UI
+
+Tiny UX fix found while exercising v2.4.2's History expander on the
+live DB: two back-to-back clicks of the same symbol produced
+identical-looking rows in the Trade history table and in the History
+expander summaries, because timestamps are stored at second
+precision (`isoformat(timespec="seconds")`) and the row id wasn't
+surfaced anywhere.
+
+This is a paper-trading sim — we have no broker-grade timing to
+expose — so faking millisecond precision in the timestamp would be
+dishonest. The actual ordering source of truth is the auto-increment
+row id; two clicks within the same second always get distinct
+monotonic ids. v2.4.4 just surfaces them.
+
+### What's new
+
+- **`get_trades()`** now returns the trades-table row `id` for each
+  entry (backwards-compatible: the dict gains a key, no key removed).
+- **Trade history table** — new leading **`#`** column showing
+  `#<row_id>`. Two clicks at `22:00:00` now read `#14` and `#15`,
+  visibly distinct.
+- **History expander summary** — now leads with `` `#<audit_id>` ``,
+  so two same-second audit rows have distinguishable headers.
+
+### What's *not* changed
+
+- The DB schema (no migration).
+- `_now()` still returns second precision. We deliberately don't
+  inflate the timestamp.
+- All FIFO matching (`trade_stats`), position aggregation, value
+  history, slippage math, cash math — none of these ever looked at
+  the timestamp for ordering, so nothing downstream changes.
+
+### Tests
+
+- **1 new game test** (`TestBuy::test_get_trades_returns_row_id`):
+  two same-symbol buys → distinct, monotonic ids — surfaced by the
+  UI so identical-second timestamps don't blur into a single visible
+  event.
+- The v2.4.2 UI smoke test still passes — the new `#` column and the
+  audit-id-leading summary don't change the rendered selectbox keys
+  or expander labels asserted there.
+
+**Total: 423 Python tests** (was 422 → +1), all green. **Rust: 24**,
+unchanged.
+
+No new pip / cargo deps.
+
 ## 2.4.3 — Release flow: `bin/relay-windows-zip` (GitHub → GitLab)
 
 Docs-only release. Documents and automates the post-tag relay step
