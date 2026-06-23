@@ -289,6 +289,38 @@ def _row_to_dict(row, keys):
     return dict(zip(keys, row)) if row else None
 
 
+def _pre_destructive_backup_safe(db: Path, *, op_name: str,
+                                 target_id: int = None) -> Path | None:
+    """Take a pre-destructive snapshot of ``db``. Returns the snapshot
+    path on success, or None if disabled / unavailable.
+
+    Failures are logged to stderr but never raised — a failed backup
+    must not block the destructive op (the user explicitly asked for
+    it). The audit log's ``before_json`` is the second safety net.
+
+    Custom ``db`` paths (tests, non-default DATA_DIR) drop snapshots
+    next to the DB itself (``<db.parent>/backups/pre-destructive/``),
+    not next to the live PORTFOLIO_DB.
+    """
+    try:
+        from stock_toolkit.backup import pre_destructive_snapshot as _hook
+    except Exception as e:                                    # noqa: BLE001
+        import sys as _sys
+        print(f"[game] pre-destructive backup skipped (import "
+              f"failed): {e}", file=_sys.stderr)
+        return None
+    backups_root = (None if db == _PORTFOLIO_DB_PATH
+                    else db.parent / "backups")
+    try:
+        return _hook(op_name=op_name, target_id=target_id,
+                     db_paths=(db,), backups_root=backups_root)
+    except Exception as e:                                    # noqa: BLE001
+        import sys as _sys
+        print(f"[game] pre-destructive backup of {db} failed: {e}",
+              file=_sys.stderr)
+        return None
+
+
 _PORTFOLIO_COLS = ("id", "name", "starting_cash", "cash", "created_at",
                    "last_reset_at", "archived_at")
 _TRADE_COLS     = ("id", "portfolio_id", "timestamp", "symbol", "side", "qty",
@@ -594,9 +626,20 @@ def unarchive_portfolio(portfolio_id: int, db: Path = None) -> None:
 
 def delete_portfolio(portfolio_id: int, db: Path = None) -> None:
     """Hard-delete a portfolio and its trades (cascade). Irreversible from
-    the live tables — but the audit log's before_json carries the full
-    portfolio row + all its trades, so it remains the recovery source."""
+    the live tables — but TWO recovery sources remain:
+
+      1. ``audit_log.before_json`` carries the full portfolio row + all
+         its cascaded trades, in the same transaction as the delete.
+      2. A pre-destructive snapshot of ``portfolio.db`` is auto-taken
+         under ``data/backups/pre-destructive/`` before the delete runs
+         (opt-out via ``AUTO_BACKUP_BEFORE_DESTRUCTIVE=false`` in
+         config.env). That snapshot is never rotated.
+    """
     db = db or DEFAULT_PORTFOLIO_DB
+    # Snapshot OUTSIDE the connection so VACUUM INTO sees a stable
+    # state and doesn't fight our open transaction.
+    snap_path = _pre_destructive_backup_safe(
+        db, op_name="delete-portfolio", target_id=portfolio_id)
     con = _connect(db)
     before_p = _snapshot_portfolio(con, portfolio_id)
     if before_p is None:
@@ -605,10 +648,13 @@ def delete_portfolio(portfolio_id: int, db: Path = None) -> None:
     before_trades = _snapshot_trades(con, portfolio_id)
     was_active = _get_active_id(con) == portfolio_id
     con.execute("DELETE FROM portfolios WHERE id = ?", (portfolio_id,))
+    note = f"deleted {len(before_trades)} trade(s) via FK cascade"
+    if snap_path is not None:
+        note += f"; pre_destructive_snapshot={snap_path}"
     _audit(con, actor="user", op_type="portfolio.delete",
            target_kind="portfolio", target_id=portfolio_id,
            before={"portfolio": before_p, "trades": before_trades},
-           note=f"deleted {len(before_trades)} trade(s) via FK cascade")
+           note=note)
     if was_active:
         nxt = con.execute(
             "SELECT id FROM portfolios WHERE archived_at IS NULL "
@@ -920,12 +966,20 @@ def sell(symbol: str, qty: float = None,
 def reset_portfolio(starting_cash: float = DEFAULT_STARTING_CASH,
                     portfolio_id: int = None, db: Path = None) -> dict:
     """Wipe all trades for ONE portfolio (the active one by default) and
-    reset its cash. Other portfolios are untouched. Destructive — the
-    audit_log row carries the full pre-reset portfolio row + all wiped
-    trades in before_json so they remain recoverable."""
+    reset its cash. Other portfolios are untouched. Destructive — recovery
+    sources are the same as ``delete_portfolio``: ``audit_log.before_json``
+    carries the full pre-reset state, and a pre-destructive snapshot of
+    the DB lands under ``data/backups/pre-destructive/``."""
     db = db or DEFAULT_PORTFOLIO_DB
+    # We need the resolved pid for the snapshot subdir name. Open a
+    # short-lived read-only connection just for the lookup so VACUUM
+    # INTO doesn't fight an open write transaction.
+    probe = _connect(db)
+    pid = _resolve_pid(probe, portfolio_id)
+    probe.close()
+    snap_path = _pre_destructive_backup_safe(
+        db, op_name="reset-portfolio", target_id=pid)
     con = _connect(db)
-    pid = _resolve_pid(con, portfolio_id)
     before_p      = _snapshot_portfolio(con, pid)
     before_trades = _snapshot_trades(con, pid)
     ts = _now()
@@ -936,12 +990,15 @@ def reset_portfolio(starting_cash: float = DEFAULT_STARTING_CASH,
         (starting_cash, starting_cash, ts, pid),
     )
     after_p = _snapshot_portfolio(con, pid)
+    note = (f"wiped {len(before_trades)} trade(s); "
+            f"starting_cash {before_p['starting_cash']} → {starting_cash}")
+    if snap_path is not None:
+        note += f"; pre_destructive_snapshot={snap_path}"
     _audit(con, actor="user", op_type="portfolio.reset",
            target_kind="portfolio", target_id=pid,
            before={"portfolio": before_p, "trades": before_trades},
            after={"portfolio": after_p},
-           note=f"wiped {len(before_trades)} trade(s); "
-                f"starting_cash {before_p['starting_cash']} → {starting_cash}")
+           note=note)
     con.commit(); con.close()
     return get_portfolio(portfolio_id=pid, db=db)
 

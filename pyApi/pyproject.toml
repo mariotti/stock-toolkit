@@ -34,6 +34,7 @@ stock-ui        = "stock_toolkit.ui:main"
 stock-bootstrap = "stock_toolkit.bootstrap:main"
 stock-gap-fill  = "stock_toolkit.gap_fill:main"
 stock-sanity    = "stock_toolkit.sanity_cli:main"
+stock-backup    = "stock_toolkit.backup:main"
 
 # Auto-discover every stock_toolkit subpackage. The explicit list this
 # replaced silently dropped stock_toolkit.ui.tabs after the UI was split,

@@ -83,6 +83,8 @@ ruff check .                                  # lint (CI also runs this)
 | `tests/test_collector_units.py` | Budgets, retry/backoff, the safe_get wrapper. |
 | `tests/test_game.py`       | Game engine (`game.py`) + the Game UI render. Pattern is `GameTestCase` with a tmp `portfolio.db` and a tmp price DB. |
 | `tests/test_engine_rust.py`| Dispatcher for `stock-collect --engine rust` (`collector/engine.py`). Mocks `subprocess.run` + `shutil.which` — never spawns the real Rust binary. Covers binary discovery, source allow-list, argv shape, exit-code propagation. |
+| `tests/test_audit_log.py`  | v2.4.0 audit log: bootstrap markers, every game.py mutation, destructive recovery-source guarantee (full pre-state in `before_json`), v1→v2 migration audit, atomicity (failed op rolls back the audit row), reader API. |
+| `tests/test_backup.py`     | v2.4.1 `stock_toolkit.backup`: snapshot round-trip (`VACUUM INTO` opens as a working DB), manifest method per entry, rotation preserving pre-destructive snapshots, config opt-out, game-level integration (delete + reset hooks fire, audit row links the path, failure isolation). |
 | `tests/test_live_apis.py`  | **Network-touching** — only run on demand, NOT in CI. |
 
 **Fast iteration loop.** Run just one class:

@@ -31,6 +31,8 @@ python3 tests/test_ui.py                     # Streamlit dashboard via AppTest
 python3 tests/test_sources.py                # API fetchers against canned responses
 python3 tests/test_collector_units.py        # budgets, safe_get, historical orchestration
 python3 tests/test_engine_rust.py            # --engine rust dispatcher (binary discovery, argv, exit codes)
+python3 tests/test_audit_log.py              # v2.4.0 audit_log table + write-through
+python3 tests/test_backup.py                 # v2.4.1 stock-backup + pre-destructive auto-snapshot
 ```
 
 **Run live API integration tests (requires valid API keys in config.env):**
@@ -66,6 +68,17 @@ stock-bootstrap -s AAPL --range 2020-2024
 stock-gap-fill --dry-run         # show what would be re-fetched
 stock-gap-fill                   # fetch only the missing date ranges via yfinance
 ```
+
+**Backup the state directory (v2.4.1+):**
+```bash
+stock-backup                     # VACUUM INTO every live DB + copy JSON state → data/backups/<ts>/
+stock-backup --keep 7            # rotate: keep only the latest 7 manual snapshots
+stock-backup --list              # show all snapshots (manual + pre-destructive)
+stock-backup --dry-run           # preview, no writes
+```
+Pre-destructive snapshots are auto-taken before `delete_portfolio` / `reset_portfolio` and land
+in `data/backups/pre-destructive/` (never rotated). Opt-out: `AUTO_BACKUP_BEFORE_DESTRUCTIVE=false`
+in `config.env`.
 
 **Drive the Rust fetcher from Python (opt-in, v2.3.1+):**
 ```bash

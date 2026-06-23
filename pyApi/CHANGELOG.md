@@ -15,6 +15,76 @@ DB schemas are documented in [`SCHEMA.md`](SCHEMA.md).
 
 ---
 
+## 2.4.1 — `stock-backup` CLI + pre-destructive auto-snapshot
+
+Second slice of the audit + backup arc. v2.4.0 made every mutation
+visible; this release makes every mutation *recoverable* via two
+independent safety nets.
+
+### What's new
+
+- **New module `stock_toolkit/backup.py`** + entry point `stock-backup`.
+  Uses SQLite ``VACUUM INTO`` for live DBs (consistent snapshot
+  even with the DB open under WAL — `cp` of an open DB is NOT safe)
+  and `shutil.copy2` for the tiny JSON state files.
+- **Manual snapshots** land in `data/backups/<timestamp>/` and are
+  **rotated** (keep last 30 by default, `--keep N` to override).
+- **Pre-destructive auto-snapshots** land in
+  `data/backups/pre-destructive/<timestamp>-pre-<op>-portfolio-<id>/`
+  and are **never** rotated — destructive history outranks disk
+  pressure. Opt-out: `AUTO_BACKUP_BEFORE_DESTRUCTIVE=false` in
+  config.env.
+- Each destructive op (`delete_portfolio`, `reset_portfolio`) now
+  takes the snapshot *before* opening its write transaction, then
+  records the snapshot path inside the audit row's `note` field —
+  one click in the History view (v2.4.2) will reveal where to
+  recover from.
+- Backup failures are caught, logged to stderr, and **do not block
+  the destructive op**: the user explicitly asked for it, and the
+  audit log's `before_json` is still the second safety net. (Tested
+  end-to-end with a `RuntimeError("disk full")` injection.)
+- Each snapshot directory ships a `manifest.json` listing every file,
+  its source path, method (`VACUUM INTO` / `copy`), and byte size.
+
+### CLI
+
+```
+stock-backup                  # snapshot now + rotate to last 30
+stock-backup --keep 7         # keep just 7 manual snapshots
+stock-backup --list           # list everything, manual + pre-destructive
+stock-backup --dry-run        # show what would happen, no writes
+stock-backup --reason "tag"   # custom manifest tag
+```
+
+### Tests
+
+- **19 new backup tests** (`tests/test_backup.py`):
+  round-trip integrity (snapshot opens and reads identically),
+  manifest method per entry, missing-file tolerance, same-minute
+  collision handling, `list_snapshots` partitioning, `rotate`
+  preserves pre-destructive snapshots, config opt-out
+  (true/false/0/1/yes/no/on/off), game-level integration (delete +
+  reset hook fire, audit row links the path, opt-out path, failure
+  isolation).
+- All 38 game + 21 audit tests still green — no behavior drift on
+  the public surface.
+
+**Total: 421 Python tests** (was 402 → +19), all green. **Rust: 24**,
+unchanged.
+
+### Not yet (deliberately)
+
+- UI History tab — still slated for v2.4.2.
+- Restore CLI (`stock-backup --restore PATH`) — the layout is
+  trivial to restore by hand (`cp data/backups/.../portfolio.db
+  data/portfolio.db`), so this waits until v2.4.2 unless someone
+  actually needs it.
+- Auto-snapshot for collector ops (suppression, failure DB) — the
+  pattern is portable; will land in v2.5.x if the game's experience
+  validates it.
+
+No new pip / cargo deps.
+
 ## 2.4.0 — Game audit log
 
 First slice of the audit + backup work prompted by 2 paper-trading
