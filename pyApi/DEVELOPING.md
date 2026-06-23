@@ -140,13 +140,26 @@ push-mirror picks up the tag within ~5 minutes; GitHub Actions runs
 published as a GitHub Release **automatically** (commit `dc06e4c`
 wired this up).
 
-**Attaching the .exe to GitLab.** Release assets cap at ~100 MB on
-gitlab.com, the .exe is ~132 MB. Workaround: upload to the project's
-**Generic Package Registry**, then add a release link. See the shell
-loop at the bottom of any v1.14.2+ commit message — pulls the zip
-from the GitHub Release with `gh release download`, `curl PUT`s it
-into the package registry, then `curl POST`s a link onto the GitLab
-release.
+**Attaching the .exe to GitLab — use `bin/relay-windows-zip`.**
+Release assets cap at ~100 MB on gitlab.com; the .exe is ~140 MB.
+The workaround is "upload to the project's **Generic Package
+Registry**, then add a release link." The script bundles all three
+steps (download from GitHub, upload to the registry, link onto the
+GitLab release) into one idempotent call:
+
+```bash
+# After the GitHub Actions build for vX.Y.Z lands a .zip on the
+# GitHub release:
+pyApi/bin/relay-windows-zip vX.Y.Z
+```
+
+Idempotent — safe to re-run if a step failed. Already-linked
+releases return GitLab's "has already been taken" and the script
+exits cleanly. Pre-v2.4.3 releases used an ad-hoc bash loop; the
+script replaces it.
+
+`GH_REPO`, `GL_PROJECT`, `DOWNLOAD_DIR` env vars override the
+defaults if you ever fork the mirror layout.
 
 ---
 

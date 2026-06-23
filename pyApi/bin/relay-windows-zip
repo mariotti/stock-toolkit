@@ -1,0 +1,84 @@
+#!/usr/bin/env bash
+#
+# relay-windows-zip — pull a release's Windows .exe bundle from the
+# GitHub mirror and attach it to the matching GitLab release.
+#
+# Why a script:
+#   GitLab release assets cap at ~100 MB on gitlab.com; the .exe
+#   bundle is ~140 MB. So we upload it to the project's Generic
+#   Package Registry first, then add a release link pointing at
+#   that. Doing the three API calls (download / upload / link)
+#   by hand is error-prone — this script makes it one command
+#   that's safe to re-run.
+#
+# Usage:
+#   bin/relay-windows-zip vX.Y.Z
+#   bin/relay-windows-zip 2.4.3            # 'v' prefix optional
+#
+# Requirements:
+#   gh    — authenticated, can read mariotti/stock-toolkit
+#   glab  — authenticated, can write Mariotti/stock-toolkit
+#
+# Idempotent: if the asset is already in the Package Registry the
+# PUT just refreshes it; if the release link already exists GitLab
+# returns 400 and we keep going. Re-run after a botched relay.
+
+set -euo pipefail
+
+GH_REPO="${GH_REPO:-mariotti/stock-toolkit}"
+GL_PROJECT="${GL_PROJECT:-Mariotti/stock-toolkit}"
+GL_PROJECT_ENC="${GL_PROJECT//\//%2F}"
+PKG_NAME="stock-toolkit-windows"
+DOWNLOAD_DIR="${DOWNLOAD_DIR:-/tmp}"
+
+usage() {
+    echo "usage: $(basename "$0") vX.Y.Z" >&2
+    echo "       (looks up Windows .zip on GitHub $GH_REPO, attaches to GitLab $GL_PROJECT)" >&2
+    exit 64
+}
+
+[[ $# -eq 1 ]] || usage
+
+TAG="$1"
+TAG="${TAG#v}"           # 2.4.3       — used in package URL
+VTAG="v${TAG}"           # v2.4.3      — used as the GitLab release tag
+
+ZIP="StockToolkit-windows-x64-${TAG}.zip"
+LOCAL="${DOWNLOAD_DIR}/${ZIP}"
+
+# 1. Download from GitHub (skip if already cached).
+if [[ -f "$LOCAL" ]]; then
+    echo "[relay] using cached $LOCAL"
+else
+    echo "[relay] downloading $ZIP from GitHub $GH_REPO ..."
+    gh release download "$VTAG" -R "$GH_REPO" -p "$ZIP" \
+        --dir "$DOWNLOAD_DIR" --clobber
+fi
+
+# 2. Upload to GitLab Generic Package Registry.
+PKG_URL="projects/${GL_PROJECT_ENC}/packages/generic/${PKG_NAME}/${TAG}/${ZIP}"
+echo "[relay] uploading to GitLab Package Registry ..."
+glab api --method PUT "$PKG_URL" --input "$LOCAL" | tail -1
+
+# 3. Link onto the GitLab release. Already-linked → 400; treat
+# as a soft warning so re-runs don't fail.
+ASSET_URL="https://gitlab.com/api/v4/${PKG_URL}"
+LINK_RESP=$(glab api --method POST \
+    "projects/${GL_PROJECT_ENC}/releases/${VTAG}/assets/links" \
+    -f "name=🪟 Native Windows .exe bundle (no Docker, no Python required)" \
+    -f "url=${ASSET_URL}" \
+    -f "link_type=package" 2>&1 || true)
+
+if echo "$LINK_RESP" | grep -q '"id":'; then
+    LINK_ID=$(echo "$LINK_RESP" | python3 -c 'import sys,json; print(json.load(sys.stdin)["id"])')
+    echo "[relay] ✓ ${VTAG}: link id ${LINK_ID}"
+elif echo "$LINK_RESP" | grep -qi "has already been taken\|already exists"; then
+    echo "[relay] ✓ ${VTAG}: release link already in place (re-run, no change)"
+else
+    echo "[relay] ! ${VTAG}: link API response unrecognised:" >&2
+    echo "$LINK_RESP" >&2
+    exit 1
+fi
+
+echo "[relay] done. Release page:"
+echo "  https://gitlab.com/${GL_PROJECT}/-/releases/${VTAG}"

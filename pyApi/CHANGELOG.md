@@ -15,6 +15,56 @@ DB schemas are documented in [`SCHEMA.md`](SCHEMA.md).
 
 ---
 
+## 2.4.3 — Release flow: `bin/relay-windows-zip` (GitHub → GitLab)
+
+Docs-only release. Documents and automates the post-tag relay step
+that gets the GitHub-built Windows `.exe` bundle onto the matching
+GitLab release.
+
+### Why this exists
+
+GitLab release assets cap at ~100 MB on gitlab.com; the Windows
+`.exe` bundle is ~140 MB. The standard workaround — upload to the
+project's Generic Package Registry, then link it onto the release —
+is three API calls (`gh release download` → `glab api PUT` →
+`glab api POST .../assets/links`). For v2.3.0 through v2.4.2 we
+ran an ad-hoc bash loop by hand; this release replaces it with a
+script.
+
+### What's new
+
+- **`pyApi/bin/relay-windows-zip vX.Y.Z`** — one command that
+  downloads from `mariotti/stock-toolkit` (GitHub mirror), uploads
+  to `Mariotti/stock-toolkit`'s Package Registry, then adds a
+  release link with the same "🪟 Native Windows .exe bundle" label
+  the previous tags used.
+- **Idempotent.** Re-runs after a botched relay are safe — already-
+  linked releases produce GitLab's "has already been taken" and the
+  script exits cleanly. The PUT to the registry is a no-op refresh
+  if the file's already there.
+- **`pyApi/DEVELOPING.md` §3 "Release pipeline"** — replaces the
+  fragile "see the shell loop at the bottom of any v1.14.2+ commit
+  message" pointer with a real command pointing at the script.
+- **Env overrides** for forks / alt layouts: `GH_REPO`,
+  `GL_PROJECT`, `DOWNLOAD_DIR`. Defaults match this project.
+
+### Validation
+
+- Smoke-tested against `v2.4.2` (an already-attached release): the
+  script ran end-to-end and correctly hit the "already taken"
+  branch on the link API.
+
+### Not in scope
+
+- The script doesn't trigger or wait for the GitHub Actions build —
+  run it only after the build has published the `.zip` on the
+  GitHub release.
+- The CHANGELOG-and-script-only nature means no tests changed: **422
+  Python tests** (unchanged from v2.4.2), all green. **Rust: 24**,
+  unchanged.
+
+No new pip / cargo deps.
+
 ## 2.4.2 — Game page History expander (audit log + backup links)
 
 Final slice of the audit + backup arc. v2.4.0 made every mutation
