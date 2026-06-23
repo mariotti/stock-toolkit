@@ -13,9 +13,9 @@ from stock_toolkit.common import CONFIG_PATH, load_config
 from stock_toolkit.game import (
     GameError, SLIPPAGE_BPS,
     archive_portfolio, benchmark_history, buy, create_portfolio,
-    delete_portfolio, get_latest_price, init_portfolio, list_portfolios,
-    mark_to_market, rename_portfolio, reset_portfolio, sell,
-    set_active_portfolio, value_history,
+    delete_portfolio, get_audit_log, get_latest_price, init_portfolio,
+    list_portfolios, mark_to_market, rename_portfolio, reset_portfolio,
+    sell, set_active_portfolio, value_history,
 )
 from stock_toolkit.ui.icons import heading, icon
 from stock_toolkit.ui.theme import (
@@ -588,6 +588,16 @@ def render():
     st.markdown("---")
 
     # ─────────────────────────────────────────────────────────────────────
+    #  History — audit log of mutations on this DB (v2.4.2+)
+    # ─────────────────────────────────────────────────────────────────────
+    #  Reads from the v2.4.0 audit_log table; surfaces destructive
+    #  recovery sources (the snapshot path embedded in note +
+    #  the before_json snapshot of full pre-state).
+    _render_history(mtm)
+
+    st.markdown("---")
+
+    # ─────────────────────────────────────────────────────────────────────
     #  Settings — current strategy: rename / reset / archive / delete
     # ─────────────────────────────────────────────────────────────────────
     with st.expander(
@@ -649,6 +659,155 @@ def render():
         "Educational tool — not financial advice. Fills use the most "
         "recent close in your collected data; real markets move."
     )
+
+
+_OP_PREFIX_CHOICES = (
+    ("All operations",   None),
+    ("Portfolio ops",    "portfolio."),
+    ("Trade ops",        "trade."),
+    ("System / migrations", "system."),
+)
+
+
+def _render_history(mtm: dict) -> None:
+    """v2.4.2 — History expander: every audited mutation on this DB,
+    newest first, with click-to-expand detail showing before/after JSON
+    and the pre-destructive snapshot path (when present in the note)."""
+    import json
+    import re
+    from pathlib import Path as _Path
+
+    with st.expander(
+        f"{icon('audit_history')}  History (audit log)", expanded=False,
+    ):
+        st.caption(
+            "Every mutation on `portfolio.db` since v2.4.0 — user actions "
+            "and system events. Destructive ops (delete / reset) embed "
+            "the full pre-state in **before_json** and link to the "
+            "pre-destructive backup snapshot (v2.4.1+) so they remain "
+            "recoverable."
+        )
+
+        # Filter controls
+        f1, f2, f3 = st.columns([2, 2, 1])
+        with f1:
+            scope_label = st.selectbox(
+                "Scope",
+                ("Current strategy only", "All strategies in this DB"),
+                index=0, key="game_audit_scope",
+                help="'Current strategy only' includes trade rows on the "
+                     "active portfolio AND any portfolio-level row "
+                     "targeting it (rename, archive, etc.).",
+            )
+        with f2:
+            prefix_labels = [c[0] for c in _OP_PREFIX_CHOICES]
+            chosen = st.selectbox(
+                "Filter by operation kind",
+                prefix_labels, index=0, key="game_audit_prefix",
+            )
+            op_prefix = next(c[1] for c in _OP_PREFIX_CHOICES
+                             if c[0] == chosen)
+        with f3:
+            limit = st.selectbox(
+                "Show",
+                (50, 100, 250, 1000), index=0, key="game_audit_limit",
+                help="Max rows to load (newest first).",
+            )
+
+        portfolio_id = (mtm["id"]
+                        if scope_label == "Current strategy only" else None)
+        events = get_audit_log(
+            portfolio_id=portfolio_id, limit=limit, op_prefix=op_prefix,
+        )
+
+        if not events:
+            st.info(
+                "No audit rows match the current filter. "
+                "(Pre-v2.4.0 mutations are unaudited; they don't appear "
+                "here even if the underlying rows still exist.)"
+            )
+            return
+
+        # Compact table — full detail goes in per-row expanders below.
+        e_df = pd.DataFrame([
+            {
+                "When":   e["timestamp"][:19].replace("T", " "),
+                "Actor":  e["actor"],
+                "Op":     e["op_type"],
+                "Target": (f"{e['target_kind']}#{e['target_id']}"
+                          if e["target_kind"] else "—"),
+                "Note":   (e["note"] or "")[:80] + (
+                          "…" if e["note"] and len(e["note"]) > 80 else ""),
+            }
+            for e in events
+        ])
+        st.dataframe(e_df, width="stretch", hide_index=True)
+
+        # CSV export — same view, untruncated note column.
+        full_df = pd.DataFrame([
+            {
+                "id":         e["id"],
+                "timestamp":  e["timestamp"],
+                "actor":      e["actor"],
+                "op_type":    e["op_type"],
+                "target_kind": e["target_kind"] or "",
+                "target_id":  e["target_id"] if e["target_id"] is not None else "",
+                "note":       e["note"] or "",
+            }
+            for e in events
+        ])
+        st.download_button(
+            f"{icon('download')}  Download audit log (CSV)",
+            data=full_df.to_csv(index=False).encode("utf-8"),
+            file_name=f"audit_{mtm['name'].replace(' ', '_')}.csv",
+            mime="text/csv",
+            key="game_audit_csv",
+        )
+
+        # Per-row detail. Capped at 30 expanders so the page stays
+        # responsive on big logs — full data is still in the CSV.
+        st.caption(
+            f"Showing detail for the {min(len(events), 30)} newest of "
+            f"{len(events)} row(s) below. Use the CSV for the full set."
+        )
+        for e in events[:30]:
+            summary = (
+                f"`{e['op_type']}`  ·  {e['actor']}  ·  "
+                f"{e['timestamp'][:19].replace('T', ' ')}"
+            )
+            with st.expander(summary, expanded=False):
+                st.markdown(
+                    f"**Op:** `{e['op_type']}` · **Actor:** {e['actor']} · "
+                    f"**Target:** {e['target_kind'] or '—'} "
+                    f"id={e['target_id'] if e['target_id'] is not None else '—'}"
+                )
+                if e["note"]:
+                    st.markdown(f"**Note:** {e['note']}")
+                    # If the note carries a pre-destructive snapshot
+                    # path, make it discoverable in plain text — most
+                    # terminal copy-paste flows want the raw path.
+                    m = re.search(r"pre_destructive_snapshot=(\S+)", e["note"])
+                    if m:
+                        snap_path = _Path(m.group(1))
+                        exists = snap_path.exists()
+                        st.markdown(
+                            f"**Pre-destructive snapshot:** `{snap_path}` "
+                            f"({'✓ on disk' if exists else '✗ missing'})"
+                        )
+                        if exists:
+                            st.caption(
+                                "Restore by copying it back into place, e.g. "
+                                f"`cp '{snap_path / 'portfolio.db'}' "
+                                f"'{mtm.get('_db_path', 'data/portfolio.db')}'`"
+                            )
+                if e["before"] is not None:
+                    st.markdown("**Before** (pre-state — the recovery source):")
+                    st.code(json.dumps(e["before"], indent=2, default=str),
+                            language="json")
+                if e["after"] is not None:
+                    st.markdown("**After**:")
+                    st.code(json.dumps(e["after"], indent=2, default=str),
+                            language="json")
 
 
 if __name__ == "__main__":

@@ -748,6 +748,40 @@ class TestAdminSettingsRoundTrip(unittest.TestCase):
             self.assertEqual(cfg["SYMBOLS"], "AAPL")
 
 
+class TestGameHistoryExpanderRenders(unittest.TestCase):
+    """v2.4.2 — the Game page's History expander reads the audit_log
+    table and surfaces every mutation. Smoke-test that the expander +
+    its three filter selectboxes are present and the page renders
+    without exceptions (the underlying audit-log shape is covered in
+    detail by tests/test_audit_log.py)."""
+
+    def test_renders_with_audit_filters(self):
+        from streamlit.testing.v1 import AppTest as _AppTest
+
+        page = PKG_ROOT / "stock_toolkit" / "ui" / "pages" / "02_🎮_Game.py"
+        self.assertTrue(page.exists(), f"missing page file: {page}")
+
+        at = _AppTest.from_file(str(page), default_timeout=60)
+        at.run()
+        self.assertEqual([e.value for e in at.exception], [])
+
+        # All three history filters render as selectboxes with stable keys.
+        keys = [s.key for s in at.selectbox]
+        for k in ("game_audit_scope", "game_audit_prefix",
+                  "game_audit_limit"):
+            self.assertIn(k, keys, f"missing audit filter selectbox: {k}")
+
+        # The History expander label is on the expander element itself,
+        # not in the markdown stream.
+        expander_labels = "\n".join(e.label for e in at.expander)
+        self.assertIn("History (audit log)", expander_labels,
+                      "History expander label missing")
+        # The recovery-source caption appears in the captions stream.
+        captions = "\n".join(c.value for c in at.caption)
+        self.assertIn("Every mutation", captions,
+                      "History expander caption missing")
+
+
 class TestHelpPageRenders(unittest.TestCase):
     """Help page (❓) renders and contains the orientation sections.
 

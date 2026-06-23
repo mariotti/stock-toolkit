@@ -84,6 +84,7 @@ SEMANTIC: dict[str, str] = {
     "portfolio_chart":   "data",
     "compare":           "data",
     "trade_history":     "list",
+    "audit_history":     "list",
     "download":          "ingest",
     "outcome_stats":     "achievement",
     "new_strategy":      "add",

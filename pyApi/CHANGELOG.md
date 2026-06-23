@@ -15,6 +15,55 @@ DB schemas are documented in [`SCHEMA.md`](SCHEMA.md).
 
 ---
 
+## 2.4.2 — Game page History expander (audit log + backup links)
+
+Final slice of the audit + backup arc. v2.4.0 made every mutation
+visible (audit_log table). v2.4.1 made every destructive mutation
+recoverable (VACUUM INTO snapshot + audit `before_json`). v2.4.2
+surfaces both in the UI so you don't need a SQLite client to read
+them.
+
+### What's new
+
+- New **History** expander on the Game page, between "Trade history"
+  and "Settings". Reads via `get_audit_log()` — fully testable through
+  the same path Streamlit uses.
+- Three filter selectboxes:
+  - **Scope** — "Current strategy only" (joins trade-audits via FK)
+    vs "All strategies in this DB".
+  - **Operation kind** — All / Portfolio ops / Trade ops / System.
+  - **Show** — 50 / 100 / 250 / 1000 rows (newest first).
+- Compact table view: When, Actor, Op, Target, truncated Note.
+- Per-row expander (capped at 30 to keep the page responsive)
+  showing the full `before` / `after` JSON.
+- When the row's note carries `pre_destructive_snapshot=<path>`,
+  the path is surfaced as plain text with an existence check
+  (✓ on disk / ✗ missing) and a copy-paste restore hint:
+  `cp <snapshot>/portfolio.db data/portfolio.db`.
+- CSV download — full audit log with untruncated notes.
+
+### Tests
+
+- **1 new UI test** (`tests/test_ui.py::TestGameHistoryExpanderRenders`):
+  Renders the Game page through its production page-shim
+  (`pages/02_🎮_Game.py`) and asserts the History expander label,
+  caption, and all three filter selectbox keys are present.
+- Underlying audit-log behavior is already exhaustively covered by
+  `tests/test_audit_log.py` (21 tests). No duplication.
+
+**Total: 422 Python tests** (was 421 → +1), all green. **Rust: 24**,
+unchanged.
+
+### Arc complete
+
+| | v2.4.0 | v2.4.1 | v2.4.2 |
+|---|---|---|---|
+| Mutation visibility | ✅ audit_log table | ✅ unchanged | ✅ surfaced in UI |
+| Destructive recovery | `before_json` snapshot | + VACUUM INTO snapshot | + UI restore hint |
+| User-facing | API only | + `stock-backup` CLI | + Game page History |
+
+No new pip / cargo deps.
+
 ## 2.4.1 — `stock-backup` CLI + pre-destructive auto-snapshot
 
 Second slice of the audit + backup arc. v2.4.0 made every mutation
