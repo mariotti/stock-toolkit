@@ -15,6 +15,40 @@ DB schemas are documented in [`SCHEMA.md`](SCHEMA.md).
 
 ---
 
+## 2.3.1 — Python `stock-collect --engine rust` shim
+
+Visible payoff for the Rust foundation laid in v2.2.0 + v2.3.0:
+existing `stock-collect` users can opt in to the Rust fetcher per-run
+without rewriting their cron jobs.
+
+- New `--engine {python,rust}` flag on `stock-collect`. Default is
+  `python` (existing behaviour — no observable change for current
+  users). `--engine rust` subprocesses out to the Rust
+  `stock-fetcher` binary.
+- New `stock_toolkit/collector/engine.py` — the dispatcher. Owns
+  binary discovery (`STOCK_FETCHER_BIN` → `rust-fetcher/target/release/`
+  → `PATH`), the source allow-list (`RUST_SUPPORTED_SOURCES = {alphavantage}`
+  — grows as Rust modules ship), argv construction (Rust uses CSV
+  for `--sources` / `--symbols`), and exit-code surfacing.
+- Symbol resolution stays in Python: `SYMBOLS_IGNORE`,
+  DB-discovered extras, staleness-sort all flow through identically.
+  Rust sees the same watchlist Python would have used — no
+  divergence.
+- Honest fallback: if the Rust binary isn't built / on PATH /
+  pointed-to by env, the shim exits 127 with a friendly message
+  pointing at `rust-fetcher/README.md`. It *does not* silently fall
+  back to Python — `--engine rust` is an explicit opt-in.
+- Rejecting unsupported sources: `--engine rust --sources yfinance`
+  exits 2 with `"Rust currently supports: alphavantage"` instead of
+  invoking the binary and letting it fail mid-flight.
+
+13 new Python tests covering: env-override discovery, repo-layout
+discovery, PATH fallback, "binary missing" exit, unsupported-source
+rejection, argv shape, exit-code propagation, exec-time race. 381
+Python tests now (368 + 13), all green. Rust tests unchanged at 24.
+
+No new pip / cargo deps.
+
 ## 2.3.0 — Rust fetcher: token-bucket rate limiting
 
 Follow-on to v2.2.0. Adds the per-source rate limiter the architecture

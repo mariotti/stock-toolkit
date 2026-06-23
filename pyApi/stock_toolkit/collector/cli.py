@@ -8,6 +8,7 @@ from .db import (
     _sort_by_staleness, _symbols_from_db,
     csv_append_rows, db_insert_rows, load_existing_keys,
 )
+from .engine import RUST_SUPPORTED_SOURCES, run_rust
 from .failures import flush_failures, is_suppressed
 from .historical import run_historical
 from .plotting import PLOT_FIELDS, plot_gnuplot, plot_matplotlib
@@ -77,6 +78,24 @@ def main():
         choices=PLOT_FIELDS,
         help="Field to plot (default: close). Choices: " + ", ".join(PLOT_FIELDS),
     )
+    parser.add_argument(
+        "--engine",
+        choices=["python", "rust"],
+        default="python",
+        help=(
+            "Collection engine.\n"
+            "  python (default) — the in-process Python collector.\n"
+            "  rust             — subprocess out to the Rust `stock-fetcher`\n"
+            "                     binary. Faster, concurrent per-source.\n"
+            "                     Currently supports: "
+            + ", ".join(sorted(RUST_SUPPORTED_SOURCES))
+            + ".\n"
+            "                     Use --sources to restrict to those, and\n"
+            "                     build the binary with `cargo build --release`\n"
+            "                     in rust-fetcher/ first (or set\n"
+            "                     STOCK_FETCHER_BIN)."
+        ),
+    )
     args = parser.parse_args()
 
     # ── symbol resolution ─────────────────────────────────────────────────────
@@ -112,6 +131,22 @@ def main():
         # Sort so least-recently-updated symbols run first — ensures budget-limited
         # sources serve stale symbols before fresh ones when limits are hit mid-run
         symbols = _sort_by_staleness(symbols)
+
+    # ── Rust engine: subprocess to the Rust fetcher and return its exit code.
+    # Done *after* symbol resolution so cfg.SYMBOLS_IGNORE / DB-discovered
+    # symbols flow through identically — Rust sees the same watchlist Python
+    # would have used.
+    if args.engine == "rust":
+        log.info(
+            f"--engine rust → delegating to stock-fetcher "
+            f"(sources={args.sources or 'default'}, symbols={len(symbols)})"
+        )
+        rc = run_rust(args.sources or [], symbols, db=cfg.DB_PATH)
+        if rc != 0:
+            raise SystemExit(rc)
+        log.info("Rust fetcher finished cleanly.")
+        return
+
     use_csv    = args.csv
     plot_field = args.plot_data
     # sources filter — None means run all
