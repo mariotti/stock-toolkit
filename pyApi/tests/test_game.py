@@ -581,6 +581,77 @@ class TestStrategyComparisonGuard(GameTestCase):
         self.assertNotEqual(p1_totals, {10_000.0})
 
 
+class TestGameEdges(GameTestCase):
+    """Error paths + less-trodden helpers (rename/archive/delete/
+    benchmark/risk_stats)."""
+
+    def setUp(self):
+        super().setUp()
+        self.p = game.create_portfolio("Main", starting_cash=10_000.0,
+                                       db=self.port_db, activate=True)
+
+    def test_rename_to_empty_raises(self):
+        with self.assertRaises(game.GameError):
+            game.rename_portfolio(self.p["id"], "", db=self.port_db)
+
+    def test_rename_nonexistent_raises(self):
+        with self.assertRaises(game.GameError):
+            game.rename_portfolio(99999, "X", db=self.port_db)
+
+    def test_rename_duplicate_raises(self):
+        game.create_portfolio("Other", db=self.port_db, activate=False)
+        with self.assertRaises(game.GameError):
+            game.rename_portfolio(self.p["id"], "Other", db=self.port_db)
+
+    def test_rename_same_name_is_noop(self):
+        game.rename_portfolio(self.p["id"], "Main", db=self.port_db)
+
+    def test_archive_and_unarchive(self):
+        other = game.create_portfolio("Keep", db=self.port_db, activate=False)
+        game.archive_portfolio(self.p["id"], db=self.port_db)
+        names = [p["name"] for p in game.list_portfolios(db=self.port_db)]
+        self.assertNotIn("Main", names)
+        all_names = [p["name"] for p in
+                     game.list_portfolios(include_archived=True, db=self.port_db)]
+        self.assertIn("Main", all_names)
+        game.unarchive_portfolio(self.p["id"], db=self.port_db)
+        self.assertIn("Main", [p["name"] for p in
+                               game.list_portfolios(db=self.port_db)])
+        self.assertTrue(other)
+
+    def test_delete_portfolio(self):
+        victim = game.create_portfolio("Doomed", db=self.port_db, activate=False)
+        game.delete_portfolio(victim["id"], db=self.port_db)
+        ids = [p["id"] for p in
+               game.list_portfolios(include_archived=True, db=self.port_db)]
+        self.assertNotIn(victim["id"], ids)
+
+    def test_get_portfolio_unknown_returns_empty(self):
+        self.assertEqual(game.get_portfolio(portfolio_id=99999,
+                                            db=self.port_db), {})
+
+    def test_get_latest_price_unknown_symbol(self):
+        price, _ = game.get_latest_price("ZZZZ")
+        self.assertIsNone(price)
+
+    def test_benchmark_history(self):
+        import datetime
+        hist = game.benchmark_history(["AAPL", "MSFT"], 10_000.0,
+                                      datetime.date(2020, 1, 1))
+        self.assertIsInstance(hist, list)
+
+    def test_benchmark_history_no_symbols(self):
+        import datetime
+        self.assertEqual(
+            game.benchmark_history([], 10_000.0, datetime.date(2020, 1, 1)), [])
+
+    def test_risk_stats_after_trades(self):
+        game.buy("AAPL", 1_000.0, portfolio_id=self.p["id"], db=self.port_db)
+        game.sell("AAPL", portfolio_id=self.p["id"], db=self.port_db)
+        stats = game.risk_stats(portfolio_id=self.p["id"], db=self.port_db)
+        self.assertIsInstance(stats, dict)
+
+
 if __name__ == "__main__":
     runner = unittest.main(verbosity=2, exit=False)
     sys.exit(0 if runner.result.wasSuccessful() else 1)
