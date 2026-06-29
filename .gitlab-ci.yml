@@ -41,13 +41,26 @@ test:
       - .cache/pip
   before_script:
     - python -m pip install --upgrade pip
-    - pip install -e pyApi coverage
+    - pip install -e pyApi coverage codecov-cli
   script:
     - cd pyApi
     - coverage run --source=stock_toolkit -m unittest discover -s tests -v
     - coverage report
+    - coverage xml -o coverage.xml          # Cobertura for GitLab + Codecov
+    # Codecov upload — best-effort, never gate the build on Codecov being up.
+    # Needs CODECOV_TOKEN as a (masked) CI/CD variable on the project.
+    - codecovcli upload-process -t "$CODECOV_TOKEN" -f coverage.xml
+      || echo "[codecov] upload failed (non-fatal)"
   # surfaces the percentage on the pipeline/MR (parsed from `coverage report`)
   coverage: '/TOTAL.*\s(\d+%)/'
+  # A: native GitLab — inline coverage annotations on MR diffs.
+  artifacts:
+    when: always
+    expire_in: 1 week
+    reports:
+      coverage_report:
+        coverage_format: cobertura
+        path: pyApi/coverage.xml
 
 # Weekly scheduled run with NO pip cache: catches breakage from fresh
 # releases of dependencies (yfinance in particular is an unofficial

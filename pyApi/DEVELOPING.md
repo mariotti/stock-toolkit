@@ -245,7 +245,26 @@ invariants in one shot.
 Two pipelines, intentionally on different platforms:
 
 **GitLab CI** (`.gitlab-ci.yml`) — runs on every push to both GitLab
-remotes. Just the offline test suite + ruff. Free Linux runners.
+remotes. Free Linux runners. Four jobs in one `test` stage (parallel):
+`lint` (ruff), `test` (offline suite under `coverage`), `docs-test-count`
+(the `bin/update-test-counts --check` drift guard), and `test-latest-deps`
+(scheduled-only, no pip cache).
+
+**Coverage.** The `test` job runs the suite under `coverage`, then:
+- `coverage: '/TOTAL.*\s(\d+%)/'` extracts the % onto the pipeline/MR widget,
+- a **Cobertura** artifact (`coverage_report`) drives inline coverage
+  annotations on MR diffs (`<source>` resolves to `$CI_PROJECT_DIR/pyApi`,
+  so the `stock_toolkit/…` paths match), and
+- **Codecov** gets `coverage.xml` via `codecovcli upload-process` for the
+  badge + trend history. The upload is best-effort (`|| echo …`) so a
+  Codecov outage never reds the build.
+
+  One-time setup (not in code): enable the project on codecov.io and add
+  `CODECOV_TOKEN` as a **masked** CI/CD variable. The README badges point
+  at the public `Mariotti/stock-toolkit` project (they're plain image URLs,
+  so they also render on the GitHub mirror). Because GitHub here is a
+  read-only mirror, Codecov's PR comments only fire on GitLab MRs — the
+  GitHub side gets the badge only.
 
 **GitHub Actions** (`.github/workflows/build-windows-exe.yml`) —
 runs on tag pushes to the GitHub mirror. Three steps:

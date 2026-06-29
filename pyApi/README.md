@@ -1,5 +1,9 @@
 # Stock Data Toolkit
 
+[![pipeline status](https://gitlab.com/Mariotti/stock-toolkit/badges/main/pipeline.svg)](https://gitlab.com/Mariotti/stock-toolkit/-/commits/main)
+[![coverage report](https://gitlab.com/Mariotti/stock-toolkit/badges/main/coverage.svg)](https://gitlab.com/Mariotti/stock-toolkit/-/commits/main)
+[![codecov](https://codecov.io/gl/Mariotti/stock-toolkit/branch/main/graph/badge.svg)](https://codecov.io/gl/Mariotti/stock-toolkit)
+
 A Python package (`stock_toolkit`) for collecting, analysing, backtesting, and monitoring stock market data from multiple free (and optionally paid) APIs — with a browser-based Streamlit dashboard that brings it all together.
 
 ```
