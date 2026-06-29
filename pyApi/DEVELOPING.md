@@ -215,7 +215,7 @@ comments. Only add one when the WHY is non-obvious." Don't restate
 what the code does; explain the constraint that made it non-obvious.
 
 **Test count is meaningful.** Every release commit message includes
-the test count after the change (`+8 tests → 511 green`). When you
+the test count after the change (`+8 tests → 520 green`). When you
 add a behaviour, add the test that protects it.
 
 ---

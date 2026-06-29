@@ -263,6 +263,48 @@ class TestFMP(SourceTestCase):
         self.assertEqual(rows, [])
         self.assertIn("paid plan required (402)", failures[0][1])
 
+    # ── historical path: _hist_fmp ────────────────────────────────────────
+
+    def _dates(self):
+        import datetime
+        return datetime.date(2026, 1, 1), datetime.date(2026, 6, 1)
+
+    def test_hist_fmp_parses_list(self):
+        self.neutralise(fmp, safe_get=lambda *a, **k: self.EOD)
+        d0, d1 = self._dates()
+        rows = fmp._hist_fmp(["AAPL"], None, d0, d1, fresh_state())
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["close"], 101.5)
+        self.assertEqual(rows[0]["source"], "fmp")
+
+    def test_hist_fmp_legacy_wrapped(self):
+        self.neutralise(fmp, safe_get=lambda *a, **k: {"historical": self.EOD})
+        d0, d1 = self._dates()
+        rows = fmp._hist_fmp(["AAPL"], None, d0, d1, fresh_state())
+        self.assertEqual(len(rows), 1)
+
+    def test_hist_fmp_402_records_failure(self):
+        failures = self.neutralise(fmp, safe_get=lambda *a, **k: {"_error": 402})
+        d0, d1 = self._dates()
+        rows = fmp._hist_fmp(["AAPL"], None, d0, d1, fresh_state())
+        self.assertEqual(rows, [])
+        self.assertIn("paid plan required (402)", failures[0][1])
+
+    def test_hist_fmp_message_error(self):
+        failures = self.neutralise(fmp,
+                                   safe_get=lambda *a, **k: {"message": "bad key"})
+        d0, d1 = self._dates()
+        rows = fmp._hist_fmp(["AAPL"], None, d0, d1, fresh_state())
+        self.assertEqual(rows, [])
+        self.assertIn("bad key", failures[0][1])
+
+    def test_hist_fmp_empty_records_failure(self):
+        failures = self.neutralise(fmp, safe_get=lambda *a, **k: [])
+        d0, d1 = self._dates()
+        rows = fmp._hist_fmp(["AAPL"], None, d0, d1, fresh_state())
+        self.assertEqual(rows, [])
+        self.assertIn("empty response", failures[0][1])
+
 
 # ─────────────────────────────────────────────────────────────
 #  Twelve Data
@@ -312,6 +354,43 @@ class TestTwelveData(SourceTestCase):
         rows = twelvedata.fetch_twelvedata(["AAPL", "BAD"], fresh_state())
         self.assertEqual(len(rows), 1)
         self.assertEqual(failures[0][0], "BAD")
+
+    # ── historical path: _hist_twelvedata ─────────────────────────────────
+
+    def _dates(self):
+        import datetime
+        return datetime.date(2026, 1, 1), datetime.date(2026, 6, 1)
+
+    def test_hist_single_symbol_wrapped(self):
+        self.neutralise(twelvedata, safe_get=lambda *a, **k: dict(self.PAYLOAD))
+        d0, d1 = self._dates()
+        rows = twelvedata._hist_twelvedata(["AAPL"], None, d0, d1, fresh_state())
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["close"], 101.5)
+        self.assertEqual(rows[0]["interval"], "1d")
+
+    def test_hist_multi_symbol(self):
+        multi = {"AAPL": dict(self.PAYLOAD), "MSFT": dict(self.PAYLOAD)}
+        self.neutralise(twelvedata, safe_get=lambda *a, **k: multi)
+        d0, d1 = self._dates()
+        rows = twelvedata._hist_twelvedata(["AAPL", "MSFT"], None, d0, d1,
+                                           fresh_state())
+        self.assertEqual({r["symbol"] for r in rows}, {"AAPL", "MSFT"})
+
+    def test_hist_batch_error_breaks(self):
+        err = {"code": 429, "message": "limit", "status": "error"}
+        self.neutralise(twelvedata, safe_get=lambda *a, **k: err)
+        d0, d1 = self._dates()
+        rows = twelvedata._hist_twelvedata(["AAPL"], None, d0, d1, fresh_state())
+        self.assertEqual(rows, [])
+
+    def test_hist_skips_when_already_in_db(self):
+        # _hist_has_data True → symbol filtered out → empty, no fetch
+        self.neutralise(twelvedata, safe_get=lambda *a, **k: dict(self.PAYLOAD),
+                        _hist_has_data=lambda *a, **k: True)
+        d0, d1 = self._dates()
+        rows = twelvedata._hist_twelvedata(["AAPL"], None, d0, d1, fresh_state())
+        self.assertEqual(rows, [])
 
 
 # ─────────────────────────────────────────────────────────────
