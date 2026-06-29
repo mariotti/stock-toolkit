@@ -129,7 +129,7 @@ class TestPortfolioLifecycle(AuditTestCase):
 
     def test_archive_records_archive_and_active_rollover(self):
         a = game.create_portfolio("A", db=self.db)        # active
-        b = game.create_portfolio("B", db=self.db, activate=False)
+        game.create_portfolio("B", db=self.db, activate=False)
         # Archive the active one — should roll active over to B
         game.archive_portfolio(a["id"], db=self.db)
         ops = self._ops()
@@ -281,7 +281,7 @@ class TestInitPortfolioMarker(AuditTestCase):
 class TestReaders(AuditTestCase):
 
     def test_get_audit_log_returns_newest_first(self):
-        a = game.create_portfolio("A", db=self.db)
+        game.create_portfolio("A", db=self.db)
         game.create_portfolio("B", db=self.db, activate=False)
         log = game.get_audit_log(db=self.db)
         # Newest first → portfolio.create for B is more recent than A.

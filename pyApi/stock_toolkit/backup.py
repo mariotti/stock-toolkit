@@ -330,7 +330,7 @@ def main():
     if args.dry_run:
         print(f"[dry-run] Would snapshot to {BACKUPS_DIR / _now_slug()} "
               f"(reason={args.reason!r}).")
-        print(f"[dry-run] Files (each via VACUUM INTO or copy):")
+        print("[dry-run] Files (each via VACUUM INTO or copy):")
         for p in (*DEFAULT_DB_PATHS, *_JSON_STATE):
             mark = "exists" if p.exists() else "skipped (missing)"
             print(f"  - {p.name:<25} [{mark}]")
