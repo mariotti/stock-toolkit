@@ -93,6 +93,19 @@ ruff check .                                  # lint (CI also runs this)
 python3 -m unittest tests.test_game.TestRiskStats
 ```
 
+**Test-count figures stay fresh automatically.** The `Ran N tests`
+number in the README and the suite total in this file are kept in sync
+by `bin/update-test-counts`, which runs the canonical commands and
+rewrites the figures in place. CI runs it with `--check` (the
+`docs-test-count` job) and fails the pipeline if either drifted — so the
+counts can't silently rot the way `242` did. After adding tests, run it
+and commit the doc bump:
+
+```bash
+python3 bin/update-test-counts          # rewrite README + DEVELOPING
+python3 bin/update-test-counts --check  # what CI runs (exit 1 if stale)
+```
+
 **Streamlit AppTest pattern.** When a new sidebar page is added,
 register a `TestXPageRenders` class in `test_ui.py` that drives
 the shim through `AppTest.from_file(...)` and asserts

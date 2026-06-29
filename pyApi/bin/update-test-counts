@@ -1,0 +1,86 @@
+#!/usr/bin/env python3
+"""Keep the test-count figures in the docs in sync with reality.
+
+The numbers live inside code blocks (README's fenced "expected output",
+DEVELOPING's commit-message example), so HTML-comment markers can't be
+used — they'd render literally. Instead each target is anchored by the
+surrounding text via a regex with exactly one match per file.
+
+Counts come from *running* the canonical commands and parsing the
+`Ran N tests` line — NOT unittest's loader. That's deliberate:
+test_toolkit.py has a hand-picked __main__ suite, so only the real
+`Ran N` output matches what a developer sees (loader-counting disagrees
+by ~25 here).
+
+    toolkit -> python tests/test_toolkit.py          (its __main__ suite)
+    suite   -> python -m unittest discover -s tests   (full offline suite)
+
+Usage:
+    bin/update-test-counts            # rewrite the docs in place
+    bin/update-test-counts --check    # exit 1 if any figure is stale (CI)
+"""
+import os
+import re
+import subprocess
+import sys
+from pathlib import Path
+
+PKG = Path(__file__).resolve().parent.parent          # .../pyApi
+
+# key -> argv run from PKG; its `Ran N tests` line is the source of truth.
+CMDS = {
+    "toolkit": [sys.executable, "tests/test_toolkit.py"],
+    "suite":   [sys.executable, "-m", "unittest", "discover", "-s", "tests"],
+}
+
+# (doc, count-key, regex). The regex must have three groups: the text
+# before the number, the number, and the text after — and must match
+# exactly once in the file (asserted, so a doc edit that moves/dupes the
+# anchor fails loudly instead of silently patching the wrong place).
+TARGETS = [
+    ("README.md",     "toolkit", re.compile(r"(Ran )(\d+)( tests in)")),
+    ("DEVELOPING.md", "suite",   re.compile(r"(→ )(\d+)( green`)")),
+]
+
+_RAN = re.compile(r"^Ran (\d+) tests", re.M)
+
+
+def ran_count(cmd):
+    env = {**os.environ, "MPLBACKEND": "Agg"}   # headless for --plot paths
+    r = subprocess.run(cmd, cwd=PKG, env=env, capture_output=True, text=True)
+    m = _RAN.search(r.stderr) or _RAN.search(r.stdout)
+    if not m:
+        sys.exit(f"[test-counts] could not parse 'Ran N tests' from "
+                 f"{' '.join(cmd)}\n{r.stderr[-800:]}")
+    return m.group(1)
+
+
+def main():
+    check = "--check" in sys.argv
+    counts = {k: ran_count(c) for k, c in CMDS.items()}
+    print("[test-counts] " + ", ".join(f"{k}={v}" for k, v in counts.items()))
+
+    stale = []
+    for doc, key, pat in TARGETS:
+        path = PKG / doc
+        text = path.read_text()
+        hits = pat.findall(text)
+        if len(hits) != 1:
+            sys.exit(f"[test-counts] {doc}: expected 1 match for "
+                     f"{pat.pattern!r}, found {len(hits)} — fix the anchor")
+        new = pat.sub(lambda m: f"{m.group(1)}{counts[key]}{m.group(3)}", text)
+        if new != text:
+            stale.append(doc)
+            if not check:
+                path.write_text(new)
+                print(f"[test-counts] updated {doc} ({key}={counts[key]})")
+
+    if check and stale:
+        sys.exit(f"[test-counts] stale: {', '.join(stale)} — "
+                 f"run bin/update-test-counts and commit")
+    if not stale:
+        print("[test-counts] docs already in sync")
+
+
+if __name__ == "__main__":
+    main()

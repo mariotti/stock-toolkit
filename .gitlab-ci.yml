@@ -11,6 +11,21 @@ lint:
   script:
     - ruff check pyApi
 
+docs-test-count:
+  stage: test
+  image: python:3.12-slim
+  rules:
+    - if: $CI_PIPELINE_SOURCE != "schedule"
+  variables:
+    MPLBACKEND: Agg
+  before_script:
+    - python -m pip install --upgrade pip
+    - pip install -e pyApi
+  # Fails if the test-count figures in README/DEVELOPING drifted from the
+  # real `Ran N tests` output — the drift that let 242 rot to 148 unnoticed.
+  script:
+    - python pyApi/bin/update-test-counts --check
+
 test:
   stage: test
   image: python:3.12-slim
