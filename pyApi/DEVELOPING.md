@@ -110,8 +110,10 @@ A release is whatever's on `main` at a given `vX.Y.Z` tag.
 echo "1.17.0" > VERSION
 
 # 2. Build the two distributable shapes
-echo y | python3 make_dist.py --package toolkit  # → stock-toolkit-X.Y.Z.{tar.gz,zip}
-echo y | python3 make_dist.py --package app      # → stock-app-X.Y.Z.{tar.gz,zip}
+#    Files stage under dist/ (toolkit) and dist-app/ (app); the
+#    .tar.gz/.zip bundles for BOTH land in dist-bundles/.
+echo y | python3 make_dist.py --package toolkit  # → dist-bundles/stock-toolkit-X.Y.Z.{tar.gz,zip}
+echo y | python3 make_dist.py --package app      # → dist-bundles/stock-app-X.Y.Z.{tar.gz,zip}
 
 # 3. Commit + tag + push to BOTH GitLab remotes
 cd ..   # repo root
@@ -126,10 +128,10 @@ GIT_SSH_COMMAND="ssh -o IdentitiesOnly=yes -i ~/.ssh/gitlab_002" \
 glab release create vX.Y.Z -R Mariotti/stock_py_api \
     --name "vX.Y.Z — <title>" \
     --notes "..." \
-    "stock-toolkit-X.Y.Z.tar.gz#..." \
-    "stock-toolkit-X.Y.Z.zip#..." \
-    "stock-app-X.Y.Z.tar.gz#..." \
-    "stock-app-X.Y.Z.zip#..."
+    "dist-bundles/stock-toolkit-X.Y.Z.tar.gz#..." \
+    "dist-bundles/stock-toolkit-X.Y.Z.zip#..." \
+    "dist-bundles/stock-app-X.Y.Z.tar.gz#..." \
+    "dist-bundles/stock-app-X.Y.Z.zip#..."
 
 glab release create vX.Y.Z -R Mariotti/stock-toolkit ...
 ```
