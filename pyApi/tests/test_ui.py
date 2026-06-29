@@ -160,6 +160,36 @@ class TestAnalysisInteraction(unittest.TestCase):
         at.run()
         self.assertEqual([e.value for e in at.exception], [])
 
+    def test_every_analysis_tool_renders(self):
+        """Drive the 'Tool' radio through all 7 options — each renders a
+        different chart/table branch."""
+        tools = ["Summary", "Price (compare)", "Drawdown (compare)",
+                 "Correlation", "RSI", "Bollinger Bands", "Monte Carlo"]
+        for tool in tools:
+            with self.subTest(tool=tool):
+                at = run_app()
+                radio = [r for r in at.radio if r.key == "an_tool"]
+                self.assertTrue(radio, "an_tool radio not found")
+                radio[0].set_value(tool)
+                at.run()
+                self.assertEqual([e.value for e in at.exception], [],
+                                 f"exception rendering {tool}")
+
+
+class TestAlertsTabInteraction(unittest.TestCase):
+    """Clicking 'Check alerts' evaluates the default conditions against
+    the fixture DB and renders the results table (no network)."""
+
+    def test_check_alerts_renders_results(self):
+        at = run_app()
+        btn = [b for b in at.button if "Check alerts" in b.label]
+        self.assertTrue(btn, "Check alerts button not found")
+        btn[0].click()
+        at.run()
+        self.assertEqual([e.value for e in at.exception], [])
+        # results are stashed in session state and rendered
+        self.assertIn("alert_results", at.session_state)
+
 
 class TestBriefingCacheBreakpoints(unittest.TestCase):
     """Prompt-caching markers land on the first and last message only."""
