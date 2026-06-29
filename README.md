@@ -1,5 +1,9 @@
 # stock-toolkit
 
+[![pipeline status](https://gitlab.com/Mariotti/stock-toolkit/badges/main/pipeline.svg)](https://gitlab.com/Mariotti/stock-toolkit/-/commits/main)
+[![coverage report](https://gitlab.com/Mariotti/stock-toolkit/badges/main/coverage.svg)](https://gitlab.com/Mariotti/stock-toolkit/-/commits/main)
+[![codecov](https://codecov.io/gl/Mariotti/stock-toolkit/branch/main/graph/badge.svg)](https://codecov.io/gl/Mariotti/stock-toolkit)
+
 A self-hosted stock market data toolkit: collect OHLCV data from **7 free
 APIs**, analyse it with **11 statistical tools**, rank symbols with a
 **5-horizon investment score**, **backtest** strategies, get **alerts**, and
