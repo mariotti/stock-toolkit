@@ -49,7 +49,9 @@ test:
     - coverage xml -o coverage.xml          # Cobertura for GitLab + Codecov
     # Codecov upload — best-effort, never gate the build on Codecov being up.
     # Needs CODECOV_TOKEN as a (masked) CI/CD variable on the project.
-    - codecovcli upload-process -t "$CODECOV_TOKEN" -f coverage.xml
+    # --git-service gitlab is required: the CLI detects the *CI* but sends
+    # service=None for commit creation otherwise, which Codecov rejects.
+    - codecovcli upload-process -t "$CODECOV_TOKEN" --git-service gitlab -f coverage.xml
       || echo "[codecov] upload failed (non-fatal)"
   # surfaces the percentage on the pipeline/MR (parsed from `coverage report`)
   coverage: '/TOTAL.*\s(\d+%)/'
