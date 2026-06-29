@@ -109,6 +109,35 @@ def _fundamentals_to_summary(funda: dict) -> str:
     return "\n".join(lines)
 
 
+def _alerts_to_summary(alerts_ctx: dict) -> str:
+    """Format the per-symbol indicator context (RSI / Bollinger %B /
+    squeeze / change) as the CURRENT INDICATORS block Claude sees.
+
+    Resilient to partial data: a symbol that has only one of RSI / %B
+    still renders; a symbol with neither is skipped. ``change`` of
+    exactly 0.0% is reported (it is a real value, not "missing")."""
+    lines = []
+    for sym, ctx in alerts_ctx.items():
+        rsi = ctx.get("rsi14")
+        pb  = ctx.get("bbands_pct_b")
+        sq  = ctx.get("bbands_squeeze")
+        chg = ctx.get("change_pct")
+        if rsi is None and pb is None:
+            continue
+        parts = []
+        if rsi is not None:
+            parts.append(f"RSI={rsi:.0f}")
+        if pb is not None:
+            parts.append(f"%B={pb:.2f}")
+        line = f"  {sym}: " + ", ".join(parts)
+        if sq:
+            line += " ⚡SQUEEZE"
+        if chg is not None:
+            line += f", change={chg:+.1f}%"
+        lines.append(line)
+    return "\n".join(lines)
+
+
 def _briefing_trade_panel(scores: list) -> None:
     """Inline 'place a paper trade from this briefing' form, rendered
     below Claude's response. Pulls the symbols Claude actually saw
@@ -448,18 +477,7 @@ Keep responses concise and conversational."""
                 )
             news_block = format_for_prompt(sentiment) if sentiment else ""
 
-        alert_summary = []
-        for sym, ctx in alerts_ctx.items():
-            rsi = ctx.get("rsi14")
-            pb  = ctx.get("bbands_pct_b")
-            sq  = ctx.get("bbands_squeeze")
-            chg = ctx.get("change_pct")
-            if rsi is not None:
-                alert_summary.append(
-                    f"  {sym}: RSI={rsi:.0f}, %B={pb:.2f}"
-                    + (" ⚡SQUEEZE" if sq else "")
-                    + (f", change={chg:+.1f}%" if chg else "")
-                )
+        alert_block = _alerts_to_summary(alerts_ctx)
 
         return (
             f"Today's watchlist analysis — {brief_horizon} horizon\n"
@@ -468,7 +486,7 @@ Keep responses concise and conversational."""
             f"SCORES (ranked best→worst):\n{_scores_to_summary(scores)}\n\n"
             + (f"FUNDAMENTALS (valuation snapshot, yfinance):\n{funda_table}\n\n"
                if funda_table else "")
-            + "CURRENT INDICATORS:\n" + "\n".join(alert_summary) + "\n\n"
+            + "CURRENT INDICATORS:\n" + alert_block + "\n\n"
             + (f"NEWS SENTIMENT (pre-computed by Alpha Vantage; top-5 scored "
                f"symbols only):\n{news_block}\n\n"
                if news_block else "")

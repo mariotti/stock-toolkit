@@ -312,6 +312,127 @@ class TestFundamentals(unittest.TestCase):
         self.assertEqual(_fundamentals_to_summary({}), "")
 
 
+class TestAlertSummary(unittest.TestCase):
+    """The CURRENT INDICATORS block must survive partial indicator data.
+
+    Regression: the builder used to format %B and change unconditionally,
+    so a symbol with an RSI alert but no Bollinger %B (a None) raised
+    TypeError, and a real change of 0.0% was silently dropped by an
+    `if chg` truthiness check."""
+
+    def test_rsi_only_no_pct_b_does_not_crash(self):
+        from stock_toolkit.ui.tabs.briefing import _alerts_to_summary
+
+        out = _alerts_to_summary({
+            "AAPL": {"rsi14": 72.0, "bbands_pct_b": None,
+                     "bbands_squeeze": False, "change_pct": 1.3},
+        })
+        self.assertIn("AAPL", out)
+        self.assertIn("RSI=72", out)
+        self.assertNotIn("%B", out)
+        self.assertIn("change=+1.3%", out)
+
+    def test_pct_b_only_no_rsi(self):
+        from stock_toolkit.ui.tabs.briefing import _alerts_to_summary
+
+        out = _alerts_to_summary({
+            "MSFT": {"rsi14": None, "bbands_pct_b": 0.95,
+                     "bbands_squeeze": True, "change_pct": None},
+        })
+        self.assertIn("%B=0.95", out)
+        self.assertNotIn("RSI", out)
+        self.assertIn("⚡SQUEEZE", out)
+        self.assertNotIn("change", out)
+
+    def test_both_missing_skips_symbol(self):
+        from stock_toolkit.ui.tabs.briefing import _alerts_to_summary
+
+        out = _alerts_to_summary({
+            "NVDA": {"rsi14": None, "bbands_pct_b": None,
+                     "bbands_squeeze": False, "change_pct": 2.0},
+        })
+        self.assertEqual(out, "")
+
+    def test_zero_change_is_reported_not_dropped(self):
+        from stock_toolkit.ui.tabs.briefing import _alerts_to_summary
+
+        out = _alerts_to_summary({
+            "TSLA": {"rsi14": 50.0, "bbands_pct_b": 0.5,
+                     "bbands_squeeze": False, "change_pct": 0.0},
+        })
+        self.assertIn("change=+0.0%", out)
+
+    def test_empty_context_gives_empty_string(self):
+        from stock_toolkit.ui.tabs.briefing import _alerts_to_summary
+
+        self.assertEqual(_alerts_to_summary({}), "")
+
+
+class TestBriefingStateSummary(unittest.TestCase):
+    """The proposal-prompt snapshot of the Briefing paper-trading strategy.
+
+    Exercises the three branches of _briefing_state_summary against an
+    isolated portfolio.db: strategy not created yet, created but flat,
+    and created with an open position. Prices are stubbed so the test
+    needs no stock_data.db."""
+
+    def setUp(self):
+        from unittest import mock
+
+        import stock_toolkit.game as game
+        self._game = game
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        db = pathlib.Path(self._tmp.name) / "portfolio.db"
+
+        # Isolate the portfolio DB and stub the price feed (both buy()
+        # and mark_to_market() reference get_latest_price as a module
+        # global, so one patch covers both).
+        p_db = mock.patch.object(game, "DEFAULT_PORTFOLIO_DB", db)
+        p_px = mock.patch.object(game, "get_latest_price",
+                                 return_value=(100.0, "2026-06-29"))
+        p_db.start(); p_px.start()
+        self.addCleanup(p_db.stop)
+        self.addCleanup(p_px.stop)
+
+    def test_not_created_yet_returns_placeholder(self):
+        from stock_toolkit.ui.tabs.briefing import _briefing_state_summary
+
+        out = _briefing_state_summary()
+        self.assertIn("has not been created yet", out)
+
+    def test_created_but_flat_lists_no_positions(self):
+        from stock_toolkit.game import create_portfolio
+        from stock_toolkit.ui.tabs.briefing import (
+            BRIEFING_STRATEGY_NAME, _briefing_state_summary,
+        )
+
+        create_portfolio(BRIEFING_STRATEGY_NAME, starting_cash=10_000.0,
+                         activate=False)
+        out = _briefing_state_summary()
+        self.assertIn(BRIEFING_STRATEGY_NAME, out)
+        self.assertIn("Cash:", out)
+        self.assertIn("10,000.00", out)
+        self.assertIn("+0.00% from inception", out)
+        self.assertIn("Open positions: none", out)
+
+    def test_created_with_holding_renders_position_line(self):
+        from stock_toolkit.game import buy, create_portfolio
+        from stock_toolkit.ui.tabs.briefing import (
+            BRIEFING_STRATEGY_NAME, _briefing_state_summary,
+        )
+
+        rec = create_portfolio(BRIEFING_STRATEGY_NAME, starting_cash=10_000.0,
+                              activate=False)
+        buy("AAPL", 1_000.0, portfolio_id=rec["id"])
+        out = _briefing_state_summary()
+        self.assertIn("Open positions:", out)
+        self.assertNotIn("Open positions: none", out)
+        self.assertIn("AAPL", out)
+        self.assertIn("qty=", out)
+        self.assertIn("P/L=", out)
+
+
 class TestEmptyDatabase(unittest.TestCase):
     """With no DB at all the app warns instead of hanging.
 
