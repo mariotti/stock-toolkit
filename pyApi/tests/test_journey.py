@@ -346,6 +346,106 @@ class TestGameJourney(unittest.TestCase):
             self.assertIn("OK", r.stdout)
 
 
+class TestGameStrategyProfitJourney(unittest.TestCase):
+    """The 'human' journey a new user follows: create a named paper-
+    trading strategy, buy a stock, then *evaluate the result after the
+    price moves* — without waiting a real day. The price move is faked
+    with dedicated data: we append a higher daily bar to the live DB,
+    so the next mark-to-market sees a gain. Closing the position then
+    books a realised win in trade_stats.
+
+    Runs in a child process (fresh import → exercises schema migration
+    and the install) against an isolated STOCK_DIR, so it never touches
+    the developer's real portfolio.db or any network."""
+
+    def test_create_buy_pricemove_evaluate(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base = pathlib.Path(tmp)
+            (base / "config.env").write_text("SYMBOLS=AAPL\n")
+            # Dedicated price data: 20 daily bars around 200. STOCK_DIR is
+            # set so DATA_DIR == BASE_DIR (Docker rule) → live DB lives at
+            # BASE_DIR/stock_data.db.
+            db_path = base / "stock_data.db"
+            _seed_prices_db(db_path, "AAPL", n_bars=20, start_close=200.0)
+
+            script = textwrap.dedent("""\
+                import sys, sqlite3, os
+                from stock_toolkit.game import (
+                    create_portfolio, buy, sell, mark_to_market,
+                    trade_stats, list_portfolios, get_latest_price,
+                )
+
+                # 1. Create a NAMED strategy and make it active.
+                rec = create_portfolio("My First Strategy",
+                                       starting_cash=10_000.0, activate=True)
+                names = [p["name"] for p in list_portfolios()]
+                if "My First Strategy" not in names:
+                    print("FAIL: strategy not created", names,
+                          file=sys.stderr); sys.exit(1)
+
+                # 2. Buy the stock at today's price.
+                buy_price, _ = get_latest_price("AAPL")
+                buy("AAPL", 2_000.0, portfolio_id=rec["id"])
+                before = mark_to_market(portfolio_id=rec["id"])
+                if not (before["equity"] > 0 and before["cash"] < 10_000.0):
+                    print("FAIL: post-buy snapshot wrong", before,
+                          file=sys.stderr); sys.exit(1)
+
+                # 3. Simulate the NEXT DAY with dedicated data: append a new
+                #    bar ~25% higher. get_latest_price now returns it, so the
+                #    position is revalued upward — no real day elapses.
+                db = os.path.join(os.environ["STOCK_DIR"], "stock_data.db")
+                con = sqlite3.connect(db)
+                con.execute(
+                    "INSERT INTO prices (symbol, source, timestamp, interval,"
+                    " open, high, low, close, volume) VALUES"
+                    " ('AAPL','yfinance','2025-06-01T00:00:00+00:00','1d',"
+                    "  250,255,248,250,1000000)")
+                con.commit(); con.close()
+
+                new_price, _ = get_latest_price("AAPL")
+                if new_price <= buy_price:
+                    print("FAIL: price did not move up", buy_price, new_price,
+                          file=sys.stderr); sys.exit(1)
+
+                # 4. Evaluate the result: equity + total are now higher and
+                #    the strategy shows an unrealised gain.
+                after = mark_to_market(portfolio_id=rec["id"])
+                if not (after["equity"] > before["equity"]
+                        and after["total"] > before["total"]
+                        and after["total_return_pct"] > 0):
+                    print("FAIL: gain not reflected", before, after,
+                          file=sys.stderr); sys.exit(1)
+                if after["holdings"][0]["pnl"] <= 0:
+                    print("FAIL: holding P/L not positive",
+                          after["holdings"], file=sys.stderr); sys.exit(1)
+
+                # 5. Close the position → a realised WIN.
+                sell("AAPL", portfolio_id=rec["id"])
+                flat = mark_to_market(portfolio_id=rec["id"])
+                if flat["equity"] > 0.01:
+                    print("FAIL: not flat after sell", flat,
+                          file=sys.stderr); sys.exit(1)
+                stats = trade_stats(portfolio_id=rec["id"])
+                if stats["closed_count"] != 1 or stats["wins"] != 1:
+                    print("FAIL: expected exactly one winning trade", stats,
+                          file=sys.stderr); sys.exit(1)
+                if flat["total"] <= 10_000.0:
+                    print("FAIL: strategy did not end in profit", flat,
+                          file=sys.stderr); sys.exit(1)
+
+                print("OK", round(flat["total"], 2), stats["wins"])
+            """)
+            env = {**os.environ, "STOCK_DIR": str(base), "MPLBACKEND": "Agg"}
+            r = run([sys.executable, "-c", script], env=env, timeout=60)
+            self.assertEqual(
+                r.returncode, 0,
+                f"strategy profit journey failed (exit {r.returncode})\n"
+                f"stdout: {r.stdout[-700:]}\nstderr: {r.stderr[-700:]}",
+            )
+            self.assertIn("OK", r.stdout)
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 #  6. Briefing — offline parse + paper-trade flow with mocked Claude
 # ─────────────────────────────────────────────────────────────────────────────
