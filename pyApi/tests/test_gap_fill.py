@@ -57,6 +57,10 @@ class TestGapFill(unittest.TestCase):
         self.addCleanup(self.tmp.cleanup)
         self.db = pathlib.Path(self.tmp.name) / "stock_data.db"
         _make_gappy_db(self.db)
+        # main() exits early if CONFIG_PATH is missing — give it one so the
+        # test doesn't depend on a config.env existing in the dev tree.
+        self.config = pathlib.Path(self.tmp.name) / "config.env"
+        self.config.write_text("SYMBOLS=GAPPY\n")
 
     def test_dry_run_detects_without_writing(self):
         # dry-run must not fetch — guard by making _fetch_range explode.
@@ -90,6 +94,7 @@ class TestGapFill(unittest.TestCase):
 
     def test_main_dry_run(self):
         with mock.patch.object(gap_fill, "discover_dbs", return_value=[self.db]), \
+             mock.patch.object(gap_fill, "CONFIG_PATH", self.config), \
              mock.patch.object(gap_fill, "_fetch_range", return_value=[]):
             old = sys.argv
             sys.argv = ["stock-gap-fill", "--dry-run"]
@@ -103,6 +108,7 @@ class TestGapFill(unittest.TestCase):
             return [gap_fill.make_row(symbol, "yfinance", start, "1d",
                                       100, 101, 99, 100.0, 1000)]
         with mock.patch.object(gap_fill, "discover_dbs", return_value=[self.db]), \
+             mock.patch.object(gap_fill, "CONFIG_PATH", self.config), \
              mock.patch.object(gap_fill, "_fetch_range", side_effect=fake_fetch):
             old = sys.argv
             sys.argv = ["stock-gap-fill", "-s", "GAPPY"]
