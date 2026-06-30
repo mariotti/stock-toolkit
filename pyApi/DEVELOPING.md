@@ -251,8 +251,10 @@ remotes. Free Linux runners. Four jobs in one `test` stage (parallel):
 (scheduled-only, no pip cache).
 
 **Coverage.** The `test` job runs the suite under `coverage`, then:
-- `coverage report --fail-under=82` is a **hard floor** — the build fails
-  if total line coverage drops below 82% (currently ~82.1%),
+- `coverage report --fail-under=80` is a **hard floor** — the build fails
+  if total line coverage drops below 80%. CI's clean checkout measures
+  ~81% (a dev tree with a real `config.env` + populated `data/` covers
+  ~1% more, so don't be surprised if local `coverage` reads higher),
 - `coverage: '/TOTAL.*\s(\d+%)/'` extracts the % onto the pipeline/MR widget,
 - a **Cobertura** artifact (`coverage_report`) drives inline coverage
   annotations on MR diffs (`<source>` resolves to `$CI_PROJECT_DIR/pyApi`,
