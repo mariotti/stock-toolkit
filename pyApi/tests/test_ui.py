@@ -899,6 +899,51 @@ class TestAdminSettingsRoundTrip(unittest.TestCase):
             self.assertEqual(cfg["SYMBOLS"], "AAPL")
 
 
+class TestAdminInteraction(unittest.TestCase):
+    """Click the Admin page's offline buttons — watchlist/keys/settings
+    save, sanity check, and inventory summary/check. The network buttons
+    (Run collection / Bootstrap) are deliberately NOT clicked."""
+
+    PAGE = PKG_ROOT / "stock_toolkit" / "ui" / "pages" / "01_⚙️_Admin.py"
+
+    def _page(self):
+        from streamlit.testing.v1 import AppTest as _AppTest
+        at = _AppTest.from_file(str(self.PAGE), default_timeout=60)
+        at.run()
+        return at
+
+    def _click_and_check(self, by, value):
+        at = self._page()
+        if by == "key":
+            btns = [b for b in at.button if b.key == value]
+        else:
+            btns = [b for b in at.button if value in b.label]
+        if not btns:
+            self.skipTest(f"button {value} not present")
+        btns[0].click()
+        at.run()
+        self.assertEqual([e.value for e in at.exception], [],
+                         f"exception after clicking {value}")
+
+    def test_save_watchlist(self):
+        self._click_and_check("label", "Save watchlist")
+
+    def test_save_keys(self):
+        self._click_and_check("key", "adm_save_keys")
+
+    def test_save_settings(self):
+        self._click_and_check("key", "adm_save_settings")
+
+    def test_run_sanity(self):
+        self._click_and_check("key", "adm_run_sanity")
+
+    def test_inventory_summary(self):
+        self._click_and_check("label", "Summary")
+
+    def test_inventory_check_gaps(self):
+        self._click_and_check("label", "Check gaps")
+
+
 class TestGamePageInteraction(unittest.TestCase):
     """Drive the Game page forms: create a strategy, buy, then sell —
     covering the interaction branches (no network; prices from fixture)."""
