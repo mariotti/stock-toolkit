@@ -231,5 +231,44 @@ class TestRunAll(unittest.TestCase):
         ))
 
 
+class TestSanityCli(unittest.TestCase):
+    """Drive sanity_cli.main() in-process (the subprocess journey test in
+    test_journey.py exercises the same path, but coverage can't see across
+    a subprocess boundary)."""
+
+    def setUp(self):
+        import contextlib
+        import io
+        from stock_toolkit import sanity_cli
+        self.cli = sanity_cli
+        self._buf = io.StringIO()
+        self._redirect = contextlib.redirect_stdout(self._buf)
+
+    def _main(self, *args):
+        old = sys.argv
+        sys.argv = ["stock-sanity", *args]
+        try:
+            with self._redirect, self.assertRaises(SystemExit) as cm:
+                self.cli.main()
+            return cm.exception.code, self._buf.getvalue()
+        finally:
+            sys.argv = old
+
+    def test_human_output_exits_cleanly(self):
+        code, _ = self._main("--no-color")
+        self.assertIn(code, (0, 1))
+
+    def test_json_output_is_parseable(self):
+        import json
+        code, out = self._main("--json")
+        # the report dict is the last JSON object printed
+        parsed = json.loads(out)
+        self.assertIsInstance(parsed, dict)
+
+    def test_strict_mode(self):
+        code, _ = self._main("--strict", "--no-color")
+        self.assertIn(code, (0, 1))
+
+
 if __name__ == "__main__":
     unittest.main()

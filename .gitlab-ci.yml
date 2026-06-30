@@ -45,7 +45,8 @@ test:
   script:
     - cd pyApi
     - coverage run --source=stock_toolkit -m unittest discover -s tests -v
-    - coverage report
+    # Coverage floor: fail the build if total line coverage drops below 80%.
+    - coverage report --fail-under=80
     - coverage xml -o coverage.xml          # Cobertura for GitLab + Codecov
     # Codecov upload — best-effort, never gate the build on Codecov being up.
     # Needs CODECOV_TOKEN as a (masked) CI/CD variable on the project.

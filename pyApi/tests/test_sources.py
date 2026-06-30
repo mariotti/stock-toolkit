@@ -120,6 +120,39 @@ class TestFinnhub(SourceTestCase):
         self.assertEqual(rows[1]["close"], 1.5)
         self.assertEqual(rows[2]["volume"], 200)
 
+    # ── historical path: _hist_finnhub (paid-only) ───────────────────────
+
+    def _dates(self):
+        import datetime
+        return datetime.date(2026, 1, 1), datetime.date(2026, 6, 1)
+
+    def test_hist_skipped_on_free_tier(self):
+        self.neutralise(finnhub, safe_get=lambda *a, **k: {})
+        d0, d1 = self._dates()
+        with mock.patch.object(cfg, "FINNHUB_PAID", False):
+            rows = finnhub._hist_finnhub(["AAPL"], None, d0, d1, fresh_state())
+        self.assertEqual(rows, [])
+
+    def test_hist_paid_parses_candles(self):
+        candles = {"s": "ok", "t": [1718000000, 1718086400],
+                   "o": [1.0, 2.0], "h": [2.0, 3.0], "l": [0.5, 1.0],
+                   "c": [1.5, 2.5], "v": [100, 200]}
+        self.neutralise(finnhub, safe_get=lambda *a, **k: candles)
+        d0, d1 = self._dates()
+        with mock.patch.object(cfg, "FINNHUB_PAID", True):
+            rows = finnhub._hist_finnhub(["AAPL"], None, d0, d1, fresh_state())
+        self.assertEqual(len(rows), 2)
+        self.assertEqual(rows[0]["close"], 1.5)
+
+    def test_hist_no_data_records_failure(self):
+        failures = self.neutralise(finnhub,
+                                   safe_get=lambda *a, **k: {"s": "no_data"})
+        d0, d1 = self._dates()
+        with mock.patch.object(cfg, "FINNHUB_PAID", True):
+            rows = finnhub._hist_finnhub(["AAPL"], None, d0, d1, fresh_state())
+        self.assertEqual(rows, [])
+        self.assertEqual(failures[0][0], "AAPL")
+
 
 # ─────────────────────────────────────────────────────────────
 #  Alpha Vantage
@@ -170,6 +203,31 @@ class TestAlphaVantage(SourceTestCase):
             ["AAPL"], None, date(2026, 6, 11), date(2026, 6, 30), fresh_state())
         self.assertEqual(len(rows), 1)
         self.assertTrue(rows[0]["timestamp"].startswith("2026-06-11"))
+
+    def test_hist_paid_tier_adjusted_close(self):
+        adjusted = {"Time Series (Daily)": {
+            "2026-06-12": {"1. open": "100.0", "2. high": "102.0",
+                           "3. low": "99.0", "4. close": "101.0",
+                           "5. adjusted close": "101.5", "6. volume": "1000",
+                           "7. dividend amount": "0.0",
+                           "8. split coefficient": "1.0"},
+        }}
+        self.neutralise(alphavantage, safe_get=lambda *a, **k: adjusted)
+        with mock.patch.object(cfg, "ALPHAVANTAGE_PAID", True):
+            rows = alphavantage._hist_alphavantage(
+                ["AAPL"], None, date(2026, 6, 1), date(2026, 6, 30),
+                fresh_state())
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["close"], 101.5)   # adjusted close used
+
+    def test_hist_error_response_records_failure(self):
+        failures = self.neutralise(
+            alphavantage,
+            safe_get=lambda *a, **k: {"Note": "rate limit, try later"})
+        rows = alphavantage._hist_alphavantage(
+            ["AAPL"], None, date(2026, 6, 1), date(2026, 6, 30), fresh_state())
+        self.assertEqual(rows, [])
+        self.assertEqual(failures[0][0], "AAPL")
 
 
 # ─────────────────────────────────────────────────────────────
