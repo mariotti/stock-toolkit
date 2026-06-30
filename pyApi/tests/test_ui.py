@@ -899,6 +899,52 @@ class TestAdminSettingsRoundTrip(unittest.TestCase):
             self.assertEqual(cfg["SYMBOLS"], "AAPL")
 
 
+class TestGamePageInteraction(unittest.TestCase):
+    """Drive the Game page forms: create a strategy, buy, then sell —
+    covering the interaction branches (no network; prices from fixture)."""
+
+    PAGE = PKG_ROOT / "stock_toolkit" / "ui" / "pages" / "02_🎮_Game.py"
+
+    def _page(self):
+        from streamlit.testing.v1 import AppTest as _AppTest
+        at = _AppTest.from_file(str(self.PAGE), default_timeout=60)
+        at.run()
+        return at
+
+    def _click(self, at, key):
+        btn = [b for b in at.button if b.key == key]
+        self.assertTrue(btn, f"button {key} not found")
+        btn[0].click()
+        at.run()
+        return at
+
+    def test_create_buy_sell_flow(self):
+        import time
+        name = f"AppTestStrat{int(time.time() * 1000) % 100000}"
+
+        at = self._page()
+        # create + activate a fresh strategy
+        at.text_input(key="game_new_name").set_value(name)
+        at.number_input(key="game_new_cash").set_value(10_000.0)
+        at = self._click(at, "game_new_btn")
+        self.assertEqual([e.value for e in at.exception], [])
+
+        # buy: pick a symbol present in the fixture, set an amount, submit
+        buy_sym = [s for s in at.selectbox if s.key == "game_buy_sym"]
+        if buy_sym and buy_sym[0].options:
+            buy_sym[0].set_value(buy_sym[0].options[0])
+            amt = [n for n in at.number_input if n.key == "game_buy_amt"]
+            if amt:
+                amt[0].set_value(1_000.0)
+            at = self._click(at, "game_buy_btn")
+            self.assertEqual([e.value for e in at.exception], [])
+
+        # sell whatever is now held (if the sell form is present)
+        if [b for b in at.button if b.key == "game_sell_btn"]:
+            at = self._click(at, "game_sell_btn")
+            self.assertEqual([e.value for e in at.exception], [])
+
+
 class TestGameHistoryExpanderRenders(unittest.TestCase):
     """v2.4.2 — the Game page's History expander reads the audit_log
     table and surfaces every mutation. Smoke-test that the expander +
