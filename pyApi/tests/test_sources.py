@@ -387,6 +387,22 @@ class TestTwelveData(SourceTestCase):
         self.assertEqual(rows[0]["close"], 101.5)
         self.assertEqual(rows[0]["interval"], "1d")   # "1day" stored as "1d"
 
+    def test_hourly_fetch_path_runs_when_bar_stale(self):
+        # _hourly_bar_is_current False → the 1h fetch branch also runs.
+        self.neutralise(twelvedata,
+                        safe_get=lambda *a, **k: dict(self.PAYLOAD),
+                        _hourly_bar_is_current=lambda *a, **k: False)
+        rows = twelvedata.fetch_twelvedata(["AAPL"], fresh_state())
+        self.assertTrue(rows)
+
+    def test_per_symbol_non_dict_payload_skipped(self):
+        multi = {"AAPL": dict(self.PAYLOAD), "BAD": "oops not a dict"}
+        self.neutralise(twelvedata,
+                        safe_get=lambda *a, **k: multi,
+                        _hourly_bar_is_current=lambda *a, **k: True)
+        rows = twelvedata.fetch_twelvedata(["AAPL", "BAD"], fresh_state())
+        self.assertEqual({r["symbol"] for r in rows}, {"AAPL"})
+
     def test_multi_symbol_response(self):
         multi = {"AAPL": dict(self.PAYLOAD), "MSFT": dict(self.PAYLOAD)}
         self.neutralise(twelvedata,

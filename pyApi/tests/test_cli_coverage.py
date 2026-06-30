@@ -132,6 +132,48 @@ class TestInventoryCli(FixtureTestCase):
     def test_check_specific_symbol(self):
         _run_main(self.inv, "stock-inventory", ["--check", "-s", "AAPL"])
 
+    def _writable_db_copy(self):
+        import shutil
+        dst = self.tmp_dir / f"inv_copy_{id(self)}.db"
+        shutil.copy(self.db, dst)
+        return dst
+
+    def test_remove_with_allow_env_deletes(self):
+        import os
+        import sqlite3
+        from unittest import mock
+        copy = self._writable_db_copy()
+        with mock.patch.object(self.inv, "LIVE_DB", copy), \
+             mock.patch.dict(os.environ, {"STOCK_INV_REMOVE": "allow"}):
+            _run_main(self.inv, "stock-inventory", ["--remove", "AAPL"])
+        con = sqlite3.connect(copy)
+        n = con.execute(
+            "SELECT count(*) FROM prices WHERE symbol='AAPL'").fetchone()[0]
+        con.close()
+        self.assertEqual(n, 0, "AAPL should have been deleted")
+
+    def test_remove_prompt_cancelled(self):
+        import os
+        import sqlite3
+        from unittest import mock
+        copy = self._writable_db_copy()
+        env = {k: v for k, v in os.environ.items() if k != "STOCK_INV_REMOVE"}
+        with mock.patch.object(self.inv, "LIVE_DB", copy), \
+             mock.patch.dict(os.environ, env, clear=True), \
+             mock.patch("builtins.input", return_value="n"):
+            _run_main(self.inv, "stock-inventory", ["--remove", "AAPL"])
+        con = sqlite3.connect(copy)
+        n = con.execute(
+            "SELECT count(*) FROM prices WHERE symbol='AAPL'").fetchone()[0]
+        con.close()
+        self.assertGreater(n, 0, "cancelling the prompt must keep the data")
+
+    def test_remove_unknown_symbol(self):
+        import os
+        from unittest import mock
+        with mock.patch.dict(os.environ, {"STOCK_INV_REMOVE": "allow"}):
+            _run_main(self.inv, "stock-inventory", ["--remove", "ZZZZ"])
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -215,7 +215,7 @@ comments. Only add one when the WHY is non-obvious." Don't restate
 what the code does; explain the constraint that made it non-obvious.
 
 **Test count is meaningful.** Every release commit message includes
-the test count after the change (`+8 tests → 581 green`). When you
+the test count after the change (`+8 tests → 586 green`). When you
 add a behaviour, add the test that protects it.
 
 ---
@@ -251,8 +251,8 @@ remotes. Free Linux runners. Four jobs in one `test` stage (parallel):
 (scheduled-only, no pip cache).
 
 **Coverage.** The `test` job runs the suite under `coverage`, then:
-- `coverage report --fail-under=80` is a **hard floor** — the build fails
-  if total line coverage drops below 80% (currently ~82%),
+- `coverage report --fail-under=82` is a **hard floor** — the build fails
+  if total line coverage drops below 82% (currently ~82.1%),
 - `coverage: '/TOTAL.*\s(\d+%)/'` extracts the % onto the pipeline/MR widget,
 - a **Cobertura** artifact (`coverage_report`) drives inline coverage
   annotations on MR diffs (`<source>` resolves to `$CI_PROJECT_DIR/pyApi`,
