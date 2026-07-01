@@ -44,11 +44,13 @@ def render(selected_symbols, date_from_str, date_to_str):
 
     if st.button("▶  Run scoring", type="primary"):
         results = []
+        skipped = []
         progress = st.progress(0, text="Scoring symbols...")
         for i, sym in enumerate(selected_symbols):
             progress.progress((i + 1) / len(selected_symbols), text=f"Scoring {sym}…")
             df = get_prices(sym, date_from_str, date_to_str)
             if df.empty or len(df) < 10:
+                skipped.append(sym)
                 continue
 
             gran = profile["gran"]
@@ -63,6 +65,7 @@ def render(selected_symbols, date_from_str, date_to_str):
                 ).dropna(subset=["close"]).reset_index()
 
             if len(df_r) < 10:
+                skipped.append(sym)
                 continue
 
             raw = {
@@ -83,14 +86,26 @@ def render(selected_symbols, date_from_str, date_to_str):
         progress.empty()
         results.sort(key=lambda x: x["score"], reverse=True)
         st.session_state["score_results"] = results
+        st.session_state["score_skipped"] = skipped
+        st.session_state["score_ran"] = True
 
     results = st.session_state.get("score_results", [])
     if not results:
-        st.markdown(
-            "<div style='padding:2rem;text-align:center;color:#8ba0b4'>"
-            "Select symbols and horizon, then click <b>Run scoring</b>."
-            "</div>", unsafe_allow_html=True
-        )
+        skipped = st.session_state.get("score_skipped", [])
+        if st.session_state.get("score_ran") and skipped:
+            st.warning(
+                f"None of the {len(skipped)} selected symbol(s) had enough "
+                f"bars for the **{horizon}** horizon over "
+                f"{date_from_str} → {date_to_str}. "
+                "Widen the date range (try the **5Y** or **Max** preset) "
+                "or choose a shorter horizon."
+            )
+        else:
+            st.markdown(
+                "<div style='padding:2rem;text-align:center;color:#8ba0b4'>"
+                "Select symbols and horizon, then click <b>Run scoring</b>."
+                "</div>", unsafe_allow_html=True
+            )
     else:
         # ── bar chart ──────────────────────────────────────────────────────────
         st.plotly_chart(score_bar_chart(results),

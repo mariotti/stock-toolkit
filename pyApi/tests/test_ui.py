@@ -181,6 +181,31 @@ class TestScoreInteraction(unittest.TestCase):
         scored = {r["symbol"] for r in results}
         self.assertIn("AAPL", scored)
 
+    def test_default_range_gives_real_scores(self):
+        # Regression: a too-short default date range (the 1Y sidebar preset)
+        # left every symbol below the horizon's min_bars, so score_symbol
+        # applied a -30 thin-data penalty and all scores collapsed to ~1.
+        # The default range must be wide enough to produce meaningful scores.
+        results = self.at.session_state["score_results"]
+        self.assertGreater(
+            max(r["score"] for r in results), 10,
+            "all scores near-zero → default date range too short for horizon")
+
+
+class TestScoreRangeWarning(unittest.TestCase):
+    """A date range too short for the horizon warns instead of silently
+    returning penalised/empty results."""
+
+    def test_one_month_range_warns_not_silent(self):
+        at = run_app(date_preset="1M")          # ~21 daily bars
+        click_button(at, "Run scoring")
+        self.assertEqual([e.value for e in at.exception], [])
+        self.assertFalse(at.session_state["score_results"],
+                         "1M can't satisfy the quarter horizon")
+        warns = " ".join(w.value for w in at.warning).lower()
+        self.assertIn("enough", warns,
+                      "expected a 'not enough bars' warning for the short range")
+
 
 class TestBacktestInteraction(unittest.TestCase):
     """Clicking 'Run backtest' runs the default strategy on the first symbol."""

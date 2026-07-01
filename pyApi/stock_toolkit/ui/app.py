@@ -113,9 +113,13 @@ def _date_range():
     lo = lo or date(2015, 1, 1)
     hi = hi or pd.Timestamp("today").date()
 
+    # Default to a wide window: the scoring horizons need years of bars
+    # (quarter→60 weekly, year→100 weekly, life→120 monthly), so a short
+    # default silently penalises every score. 5Y (clamped to available data)
+    # restores the old ~3-year default's behaviour.
     preset = st.segmented_control(
         "Range", ["1M", "3M", "6M", "YTD", "1Y", "5Y", "Max", "Custom"],
-        default="1Y", key="date_preset",
+        default="5Y", key="date_preset",
     )
     if preset == "Custom":
         default_from, _ = _preset_range("1Y", lo, hi)
