@@ -11,6 +11,7 @@ The app opens at http://localhost:8501
 """
 
 import sys
+from datetime import date
 from pathlib import Path
 import warnings
 warnings.filterwarnings("ignore")
@@ -29,7 +30,7 @@ except ImportError:
     st.stop()
 
 try:
-    from stock_toolkit.ui.helpers import get_all_symbols
+    from stock_toolkit.ui.helpers import get_all_symbols, get_data_date_range
     from stock_toolkit.ui.tabs import (
         alerts as tabs_alerts,
         analysis as tabs_analysis,
@@ -54,6 +55,80 @@ setup_page("Stock Toolkit")
 #  SIDEBAR
 # ─────────────────────────────────────────────
 
+DEFAULT_SYMS = ["AAPL", "GOOGL", "MSFT", "CSMIB.MI", "TSLA", "ENEL.MI"]
+
+
+def _preset_range(preset, lo, hi):
+    """Map a preset label to a (from, to) date pair, clamped to [lo, hi]."""
+    if preset == "Max":
+        return lo, hi
+    if preset == "YTD":
+        return max(lo, date(hi.year, 1, 1)), hi
+    months = {"1M": 1, "3M": 3, "6M": 6, "1Y": 12, "5Y": 60}.get(preset, 12)
+    frm = (pd.Timestamp(hi) - pd.DateOffset(months=months)).date()
+    return max(lo, frm), hi
+
+
+def _symbol_picker(all_symbols):
+    """Scrollable checkbox list with a filter + Select-all/Clear.
+
+    Selection lives in per-symbol checkbox session_state (keys
+    ``symcb_<SYMBOL>``) so it survives reruns and tab switches. Buttons
+    pre-seed those keys before the checkboxes render — the standard
+    Streamlit pattern that avoids the value=/session_state conflict.
+    """
+    if not st.session_state.get("_sym_init"):
+        defaults = [s for s in DEFAULT_SYMS if s in all_symbols] or all_symbols[:6]
+        for s in all_symbols:
+            st.session_state[f"symcb_{s}"] = s in defaults
+        st.session_state["_sym_init"] = True
+
+    flt = st.text_input("Filter symbols", key="sym_filter",
+                        placeholder="🔍  Filter…", label_visibility="collapsed")
+    shown = ([s for s in all_symbols if flt.lower() in s.lower()]
+             if flt else all_symbols)
+
+    c1, c2 = st.columns(2)
+    if c1.button("Select all", use_container_width=True):
+        for s in shown:
+            st.session_state[f"symcb_{s}"] = True
+    if c2.button("Clear", use_container_width=True):
+        for s in shown:
+            st.session_state[f"symcb_{s}"] = False
+
+    with st.container(height=280):
+        if not shown:
+            st.caption("No symbols match the filter.")
+        for s in shown:
+            st.checkbox(s, key=f"symcb_{s}")
+
+    selected = [s for s in all_symbols if st.session_state.get(f"symcb_{s}")]
+    st.caption(f"**{len(selected)}** selected")
+    return selected
+
+
+def _date_range():
+    """Quick-range presets + a data-bounded calendar (Custom mode)."""
+    lo, hi = get_data_date_range()
+    lo = lo or date(2015, 1, 1)
+    hi = hi or pd.Timestamp("today").date()
+
+    preset = st.segmented_control(
+        "Range", ["1M", "3M", "6M", "YTD", "1Y", "5Y", "Max", "Custom"],
+        default="1Y", key="date_preset",
+    )
+    if preset == "Custom":
+        default_from, _ = _preset_range("1Y", lo, hi)
+        rng = st.date_input("Dates", value=(default_from, hi),
+                            min_value=lo, max_value=hi, key="date_range")
+        if isinstance(rng, (tuple, list)) and len(rng) == 2:
+            return rng[0], rng[1]
+        return default_from, hi
+    frm, to = _preset_range(preset or "1Y", lo, hi)
+    st.caption(f"{frm}  →  {to}")
+    return frm, to
+
+
 with st.sidebar:
     from stock_toolkit.ui.icons import icon as _ic
     st.markdown(f"### {_ic('app.icon')} Stock Toolkit")
@@ -64,18 +139,10 @@ with st.sidebar:
         st.warning("No data found. Run `stock_collector.py` first.")
         selected_symbols = []
     else:
-        default = [s for s in ["AAPL","GOOGL","MSFT","CSMIB.MI","TSLA","ENEL.MI"]
-                   if s in all_symbols] or all_symbols[:6]
-        selected_symbols = st.multiselect(
-            "Symbols", all_symbols, default=default,
-            help="Select symbols to analyse across all tabs"
-        )
+        selected_symbols = _symbol_picker(all_symbols)
 
     st.markdown("---")
-    date_from = st.date_input("From", value=pd.Timestamp("2023-01-01"),
-                               help="Start of the analysis period")
-    date_to   = st.date_input("To",   value=pd.Timestamp("today"),
-                               help="End of the analysis period")
+    date_from, date_to = _date_range()
     date_from_str = str(date_from)
     date_to_str   = str(date_to)
 

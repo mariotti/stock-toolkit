@@ -78,31 +78,79 @@ class TestDashboardRenders(unittest.TestCase):
         self.assertEqual(len(self.at.tabs), 6)
 
     def test_sidebar_lists_fixture_symbols(self):
-        ms = self.at.sidebar.multiselect
-        self.assertEqual(len(ms), 1)
+        # the picker renders one checkbox per symbol (key symcb_<SYM>)
+        keys = {c.key for c in self.at.sidebar.checkbox}
         for sym in SYMBOLS:
-            self.assertIn(sym, ms[0].options)
+            self.assertIn(f"symcb_{sym}", keys)
 
     def test_default_selection_non_empty(self):
-        self.assertTrue(self.at.sidebar.multiselect[0].value)
+        # some symbols are pre-checked on first load so the tabs have data
+        checked = [c for c in self.at.sidebar.checkbox if c.value]
+        self.assertTrue(checked, "expected some symbols selected by default")
 
     def test_no_error_boxes(self):
         self.assertEqual([e.value for e in self.at.error], [])
 
 
+def _checkbox(at, key):
+    got = [c for c in at.sidebar.checkbox if c.key == key]
+    assert got, f"checkbox {key} not found in sidebar"
+    return got[0]
+
+
 class TestSidebarInteraction(unittest.TestCase):
-    """Changing the symbol selection re-runs the app cleanly."""
+    """Driving the checkbox picker re-runs the app cleanly."""
 
     def test_single_symbol_selection(self):
         at = run_app()
-        at.sidebar.multiselect[0].set_value(["AAPL"]).run()
+        click_button(at, "Clear")                       # start from empty
+        _checkbox(at, "symcb_AAPL").set_value(True).run()
         self.assertEqual([e.value for e in at.exception], [])
+        checked = [c.key for c in at.sidebar.checkbox if c.value]
+        self.assertEqual(checked, ["symcb_AAPL"])       # exactly one active
 
     def test_empty_selection_stops_with_hint(self):
         at = run_app()
-        at.sidebar.multiselect[0].set_value([]).run()
+        click_button(at, "Clear")                       # unchecks every symbol
         self.assertEqual([e.value for e in at.exception], [])
+        checked = [c for c in at.sidebar.checkbox if c.value]
+        self.assertEqual(checked, [])
         self.assertTrue(at.info, "expected the 'select at least one symbol' hint")
+
+
+class TestSidebarSymbolPicker(unittest.TestCase):
+    """The filter + Select-all/Clear behaviour of the checkbox picker."""
+
+    def test_filter_narrows_the_visible_checkboxes(self):
+        at = run_app()
+        [t for t in at.sidebar.text_input
+         if t.key == "sym_filter"][0].set_value("AAPL").run()
+        keys = {c.key for c in at.sidebar.checkbox}
+        self.assertIn("symcb_AAPL", keys)
+        self.assertNotIn("symcb_MSFT", keys)   # filtered out of the list
+
+    def test_select_all_checks_every_symbol(self):
+        at = run_app()
+        click_button(at, "Select all")
+        boxes = at.sidebar.checkbox
+        self.assertTrue(boxes)
+        self.assertTrue(all(c.value for c in boxes))
+
+
+class TestSidebarDateRange(unittest.TestCase):
+    """Preset ranges + the Custom calendar."""
+
+    def test_max_preset_spans_full_data_range(self):
+        # fixture data starts 2022-01-03 → the Max caption reflects it
+        at = run_app(date_preset="Max")
+        caps = " ".join(c.value for c in at.sidebar.caption)
+        self.assertIn("2022-01-03", caps)
+
+    def test_custom_preset_reveals_bounded_calendar(self):
+        at = run_app(date_preset="Custom")
+        self.assertEqual([e.value for e in at.exception], [])
+        rng = [d for d in at.date_input if d.key == "date_range"]
+        self.assertTrue(rng, "Custom mode should show the date_range calendar")
 
 
 def click_button(at, label_part):

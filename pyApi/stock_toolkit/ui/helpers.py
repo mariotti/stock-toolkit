@@ -40,6 +40,40 @@ def get_prices(symbol, date_from, date_to):
         return pd.DataFrame()
 
 
+@st.cache_data(ttl=300)
+def get_data_date_range():
+    """(min_date, max_date) of daily bars across every price DB.
+
+    Used to bound the sidebar calendar so a user can't pick an empty
+    period. Returns (None, None) when there's no data on disk.
+    """
+    import sqlite3
+
+    lo = hi = None
+    try:
+        dbs = ss.discover_dbs()
+    except Exception:
+        return (None, None)
+    for db in dbs:
+        try:
+            con = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+            row = con.execute(
+                "SELECT MIN(timestamp), MAX(timestamp) FROM prices"
+            ).fetchone()
+            con.close()
+        except Exception:
+            continue
+        if row and row[0] and row[1]:
+            d0 = pd.to_datetime(row[0], utc=True, errors="coerce")
+            d1 = pd.to_datetime(row[1], utc=True, errors="coerce")
+            if pd.isna(d0) or pd.isna(d1):
+                continue
+            d0, d1 = d0.date(), d1.date()
+            lo = d0 if lo is None else min(lo, d0)
+            hi = d1 if hi is None else max(hi, d1)
+    return (lo, hi)
+
+
 @st.cache_data(ttl=3600, show_spinner=False)
 def get_fundamentals(symbols: tuple) -> dict:
     """Cached wrapper around stock_toolkit.fundamentals.fetch_fundamentals."""
