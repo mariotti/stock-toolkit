@@ -209,6 +209,33 @@ class TestScoreRangeWarning(unittest.TestCase):
                       "warning must clarify the prices aren't missing")
 
 
+class TestBriefingRangeWarning(unittest.TestCase):
+    """Briefing over a too-short range explains it's a history-length issue
+    — regression: it used to say 'No data found. Run stock_collector.py'
+    even though the prices were present."""
+
+    def _preview(self, at):
+        btn = [b for b in at.button if "Preview" in b.label]
+        self.assertTrue(btn, "Preview prompt button not found")
+        btn[0].click()
+        at.run()
+        return at
+
+    def test_short_range_says_not_missing_data(self):
+        at = self._preview(run_app(date_preset="1M"))
+        warns = " ".join(w.value for w in at.warning).lower()
+        self.assertIn("not missing data", warns,
+                      "briefing must not imply the prices are gone")
+        self.assertNotIn("stock_collector", warns,
+                         "the misleading 'run stock_collector' message is gone")
+
+    def test_default_range_builds_prompt(self):
+        at = self._preview(run_app())            # default 5Y range
+        self.assertEqual([e.value for e in at.exception], [])
+        self.assertTrue(at.session_state["brief_prompt"],
+                        "briefing prompt should build over the default range")
+
+
 class TestBacktestInteraction(unittest.TestCase):
     """Clicking 'Run backtest' runs the default strategy on the first symbol."""
 

@@ -248,11 +248,13 @@ def render(selected_symbols, date_from_str, date_to_str):
         profile = ss.HORIZON_PROFILES[horizon]
         scores  = []
         alerts_ctx = {}
+        had_prices = 0   # symbols that had usable price data in the window
 
         for sym in symbols:
             df = get_prices(sym, date_from_str, date_to_str)
             if df.empty or len(df) < 10:
                 continue
+            had_prices += 1
 
             gran = profile["gran"]
             try:
@@ -292,7 +294,7 @@ def render(selected_symbols, date_from_str, date_to_str):
                 alerts_ctx[sym] = sal.build_context(df_a)
 
         scores.sort(key=lambda x: x["score"], reverse=True)
-        return scores, alerts_ctx
+        return scores, alerts_ctx, had_prices
 
 
     def _call_claude(messages: list, system: str) -> str:
@@ -514,7 +516,7 @@ Keep responses concise and conversational."""
 
     if do_generate or do_preview:
         with st.spinner("Running 7-step analysis on all symbols…"):
-            scores, alerts_ctx = _build_context(
+            scores, alerts_ctx, had_prices = _build_context(
                 selected_symbols, date_from_str, date_to_str,
                 brief_horizon, mc_paths=500
             )
@@ -524,7 +526,26 @@ Keep responses concise and conversational."""
         }
 
         if not scores:
-            st.warning("No data found. Run stock_collector.py first.")
+            if had_prices:
+                # prices exist — the window is just too short for the horizon
+                needed = {
+                    "week": "~6 weeks", "month": "~3 months",
+                    "quarter": "~1 year", "year": "~2 years",
+                    "life": "~10 years",
+                }.get(brief_horizon, "a longer history")
+                st.warning(
+                    f"**This is not missing data.** Your prices for "
+                    f"{date_from_str} → {date_to_str} are there, but the "
+                    f"briefing scores the **{brief_horizon}** horizon, which "
+                    f"needs about **{needed}** of history. Widen the sidebar "
+                    f"range (try **5Y** or **Max**), then Generate again."
+                )
+            else:
+                st.warning(
+                    "No price data for the selected symbols in this range. "
+                    "Collect data first (Admin → Collect, or run "
+                    "`stock-collect`)."
+                )
             st.stop()
 
         user_msg = _assemble_prompt(scores, alerts_ctx)
