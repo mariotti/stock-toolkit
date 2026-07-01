@@ -203,8 +203,10 @@ class TestScoreRangeWarning(unittest.TestCase):
         self.assertFalse(at.session_state["score_results"],
                          "1M can't satisfy the quarter horizon")
         warns = " ".join(w.value for w in at.warning).lower()
-        self.assertIn("enough", warns,
-                      "expected a 'not enough bars' warning for the short range")
+        self.assertIn("history", warns,
+                      "expected a 'needs a longer history' warning")
+        self.assertIn("not missing price data", warns,
+                      "warning must clarify the prices aren't missing")
 
 
 class TestBacktestInteraction(unittest.TestCase):

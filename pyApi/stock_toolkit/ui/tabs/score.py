@@ -93,12 +93,18 @@ def render(selected_symbols, date_from_str, date_to_str):
     if not results:
         skipped = st.session_state.get("score_skipped", [])
         if st.session_state.get("score_ran") and skipped:
+            needed = {
+                "week": "~6 weeks", "month": "~3 months", "quarter": "~1 year",
+                "year": "~2 years", "life": "~10 years",
+            }.get(horizon, "a longer history")
             st.warning(
-                f"None of the {len(skipped)} selected symbol(s) had enough "
-                f"bars for the **{horizon}** horizon over "
-                f"{date_from_str} → {date_to_str}. "
-                "Widen the date range (try the **5Y** or **Max** preset) "
-                "or choose a shorter horizon."
+                f"**This is not missing price data.** Your prices for "
+                f"{date_from_str} → {date_to_str} are there (see the Analysis "
+                f"tab) — the **{horizon}** score just needs about **{needed}** "
+                f"of history to compute, and this window is too short, so all "
+                f"{len(skipped)} symbol(s) were skipped.\n\n"
+                "→ Pick the **5Y** or **Max** range preset (or a shorter "
+                "horizon), then **Run scoring** again."
             )
         else:
             st.markdown(
