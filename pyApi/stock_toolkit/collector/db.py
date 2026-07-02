@@ -13,26 +13,60 @@ from .config import log
 
 def _symbols_from_db() -> list[str]:
     """
-    Return symbols from the live DB that have at least 2 daily bars.
-    The threshold filters out symbols that were tried once and returned
-    nothing useful (e.g. bare 'ENI' instead of 'ENI.MI') — a single
-    stale row is not enough to keep a symbol in the collection loop.
-    Returns an empty list if the DB does not exist yet.
+    Return symbols with at least 2 daily bars across the live DB AND the
+    historical/bootstrap DBs (``cfg.HIST_DIR/*.db``). Scanning the
+    historicals too means a ticker you bootstrapped but never collected
+    into the live DB (e.g. an EU name only in ``stock_data_all.db``) still
+    stays in the collection loop instead of ageing out forever.
+
+    The 2-bar threshold filters out symbols tried once that returned nothing
+    useful (e.g. bare 'ENI' instead of 'ENI.MI'). Empty list if no DB yet.
     """
-    if not cfg.DB_PATH.exists():
-        return []
-    try:
-        import sqlite3 as _sq
-        con = _sq.connect(cfg.DB_PATH)
+    import sqlite3 as _sq
+
+    dbs = []
+    if cfg.DB_PATH.exists():
+        dbs.append(cfg.DB_PATH)
+    if cfg.HIST_DIR.exists():
+        dbs += sorted(cfg.HIST_DIR.glob("*.db"))
+
+    found: set[str] = set()
+    for db in dbs:
+        try:
+            con = _sq.connect(f"file:{db}?mode=ro", uri=True)
+        except _sq.OperationalError:
+            con = _sq.connect(db)
         try:
             rows = con.execute(
                 """SELECT symbol FROM prices WHERE interval='1d'
-                   GROUP BY symbol HAVING COUNT(*) >= 2
-                   ORDER BY symbol"""
+                   GROUP BY symbol HAVING COUNT(*) >= 2"""
             ).fetchall()
+            found.update(r[0] for r in rows)
+        except _sq.OperationalError:
+            pass
         finally:
             con.close()
-        return [r[0] for r in rows]
+    return sorted(found)
+
+
+def _symbols_from_portfolios() -> list[str]:
+    """
+    Symbols traded in any Game portfolio, so an open position never ages out
+    of the collection loop and its valuation stays current. Read-only; empty
+    list if there's no portfolio DB yet.
+    """
+    import sqlite3 as _sq
+
+    db = getattr(cfg, "PORTFOLIO_DB", None)
+    if db is None or not db.exists():
+        return []
+    try:
+        con = _sq.connect(f"file:{db}?mode=ro", uri=True)
+        try:
+            rows = con.execute("SELECT DISTINCT symbol FROM trades").fetchall()
+        finally:
+            con.close()
+        return sorted({r[0] for r in rows if r[0]})
     except Exception:
         return []
 

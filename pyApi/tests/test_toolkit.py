@@ -612,6 +612,51 @@ class TestCollectorDedup(FixtureTestCase):
         for s in ["MSFT", "ENEL.MI", "CSMIB.MI"]:
             self.assertIn(s, merged)
 
+    def test_symbols_from_db_includes_historical(self):
+        """A ticker only in the historical/bootstrap DBs (not the live DB)
+        is still discovered — so bootstrapped names don't age out."""
+        hist_dir = self.tmp_dir / "hist_for_test"
+        hist_dir.mkdir(exist_ok=True)
+        hdb = hist_dir / "stock_data_all.db"
+        con = sqlite3.connect(hdb)
+        con.execute("CREATE TABLE prices (symbol TEXT, source TEXT, "
+                    "timestamp TEXT, interval TEXT, close REAL, "
+                    "UNIQUE(symbol, source, timestamp))")
+        for i in range(3):   # >= 2 daily bars so it passes the threshold
+            con.execute("INSERT INTO prices VALUES ('LDO.MI','yfinance',?,'1d',5.0)",
+                        (f"2020-03-0{i+1}T00:00:00+00:00",))
+        con.commit(); con.close()
+        old_hist = self.sc.cfg.HIST_DIR
+        self.sc.cfg.HIST_DIR = hist_dir
+        try:
+            syms = self.sc._symbols_from_db()
+        finally:
+            self.sc.cfg.HIST_DIR = old_hist
+        self.assertIn("LDO.MI", syms, "historical-only symbol not discovered")
+        self.assertIn("AAPL", syms, "live symbol dropped when scanning historical")
+
+    def test_symbols_from_portfolios_returns_traded(self):
+        """Symbols traded in a Game portfolio are returned (kept in the loop
+        so held positions stay priced); missing DB → empty."""
+        pdb = self.tmp_dir / "pf_for_test.db"
+        con = sqlite3.connect(pdb)
+        con.execute("CREATE TABLE trades (id INTEGER PRIMARY KEY, "
+                    "portfolio_id INT, timestamp TEXT, symbol TEXT, side TEXT, "
+                    "qty REAL, price REAL, fill_price REAL, cash_delta REAL, note TEXT)")
+        for sym in ("NVDA", "LDO.MI"):
+            con.execute("INSERT INTO trades (symbol, side, qty, price, fill_price, "
+                        "cash_delta) VALUES (?, 'buy', 1, 1, 1, -1)", (sym,))
+        con.commit(); con.close()
+        old_pf = getattr(self.sc.cfg, "PORTFOLIO_DB", None)
+        self.sc.cfg.PORTFOLIO_DB = pdb
+        try:
+            held = self.sc._symbols_from_portfolios()
+            self.assertEqual(set(held), {"NVDA", "LDO.MI"})
+            self.sc.cfg.PORTFOLIO_DB = self.tmp_dir / "no_such_pf.db"
+            self.assertEqual(self.sc._symbols_from_portfolios(), [])
+        finally:
+            self.sc.cfg.PORTFOLIO_DB = old_pf
+
 
 
 # ─────────────────────────────────────────────────────────────

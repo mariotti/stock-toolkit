@@ -179,6 +179,9 @@ MATPLOTLIB_DIR = OUTPUT_DIR / _cfg.get("MATPLOT_DIR",  "matplot")
 # stock_data.db and the bootstrap historicals live in clearly distinct
 # folders. common._auto_migrate() handles the rename for upgrades.
 HIST_DIR       = OUTPUT_DIR / _cfg.get("HIST_DIR",     "historical")
+# The Game portfolio DB — read (never written) by the collector so symbols
+# you hold stay in the collection loop even if they're not in SYMBOLS.
+PORTFOLIO_DB   = OUTPUT_DIR / "portfolio.db"
 FAILURES_DB_PATH     = OUTPUT_DIR / _cfg.get("FAILURES_DB",     "stock_failures.db")
 FAILURES_REPORT_PATH = OUTPUT_DIR / _cfg.get("FAILURES_REPORT", "stock_failures_report.csv")
 

@@ -5,7 +5,7 @@ import argparse
 from . import config as cfg
 from .config import log
 from .db import (
-    _sort_by_staleness, _symbols_from_db,
+    _sort_by_staleness, _symbols_from_db, _symbols_from_portfolios,
     csv_append_rows, db_insert_rows, load_existing_keys,
 )
 from .engine import RUST_SUPPORTED_SOURCES, run_rust
@@ -102,8 +102,11 @@ def main():
     # Priority:
     #   1. -s / --symbol flag  → explicit override, use exactly that symbol
     #      (cfg.SYMBOLS_IGNORE still applies even with -s)
-    #   2. No flag             → config cfg.SYMBOLS ∪ symbols already in the DB,
-    #      minus anything in cfg.SYMBOLS_IGNORE
+    #   2. No flag             → SYMBOLS (cold-start seed) ∪ symbols in ANY DB
+    #      (live + historical/bootstrap) ∪ symbols held in a Game portfolio,
+    #      minus anything in cfg.SYMBOLS_IGNORE. SYMBOLS just seeds the first
+    #      run; after that the universe grows from what's on disk and what you
+    #      own, so a bootstrapped or bought ticker never ages out.
     if args.symbol:
         sym = args.symbol.upper()
         if sym in cfg.SYMBOLS_IGNORE:
@@ -111,22 +114,23 @@ def main():
             return
         symbols = [sym]
     else:
-        db_syms  = _symbols_from_db()
-        cfg_syms = [s for s in cfg.SYMBOLS if s not in cfg.SYMBOLS_IGNORE]
-        # merge, preserve config order first, then any DB-only extras
-        seen     = set(cfg_syms)
-        symbols  = list(cfg_syms) + [s for s in db_syms
-                                      if s not in seen
-                                      and s not in cfg.SYMBOLS_IGNORE]
+        db_syms   = _symbols_from_db()
+        pf_syms   = _symbols_from_portfolios()
+        cfg_syms  = [s for s in cfg.SYMBOLS if s not in cfg.SYMBOLS_IGNORE]
+        # merge, preserve config order first, then DB/portfolio extras
+        seen      = set(cfg_syms)
+        extras_in = [s for s in (db_syms + pf_syms)
+                     if s not in seen and s not in cfg.SYMBOLS_IGNORE]
+        # de-dupe extras while preserving first-seen order
+        extras    = list(dict.fromkeys(extras_in))
+        symbols   = list(cfg_syms) + extras
         if cfg.SYMBOLS_IGNORE:
-            blocked = [s for s in (list(cfg.SYMBOLS) + db_syms) if s in cfg.SYMBOLS_IGNORE]
+            blocked = [s for s in (list(cfg.SYMBOLS) + db_syms + pf_syms)
+                       if s in cfg.SYMBOLS_IGNORE]
             if blocked:
                 log.info(f"Symbols blocked by cfg.SYMBOLS_IGNORE: {sorted(set(blocked))}")
-        if db_syms:
-            extras = [s for s in db_syms
-                      if s not in set(cfg.SYMBOLS) and s not in cfg.SYMBOLS_IGNORE]
-            if extras:
-                log.info(f"Symbols from DB not in config (kept): {extras}")
+        if extras:
+            log.info(f"Symbols from DB / portfolios not in config (kept): {extras}")
 
         # Sort so least-recently-updated symbols run first — ensures budget-limited
         # sources serve stale symbols before fresh ones when limits are hit mid-run

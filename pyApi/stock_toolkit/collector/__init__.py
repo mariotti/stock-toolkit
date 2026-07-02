@@ -23,6 +23,7 @@ from .db import (                                      # noqa: F401
     make_row, db_connect, db_insert_rows, dedup_key,
     load_existing_keys, csv_append_rows,
     _to_timestamp, _infer_interval, _sort_by_staleness, _symbols_from_db,
+    _symbols_from_portfolios,
     _hist_has_data, _live_has_today, _quote_is_fresh, _hourly_bar_is_current,
 )
 from .failures import record_failure, is_suppressed, flush_failures  # noqa: F401
