@@ -1079,6 +1079,22 @@ class TestGamePageInteraction(unittest.TestCase):
 
     PAGE = PKG_ROOT / "stock_toolkit" / "ui" / "pages" / "02_🎮_Game.py"
 
+    def setUp(self):
+        # Isolate the portfolio DB explicitly. Under `unittest discover`,
+        # another module can import stock_toolkit.common before test_ui sets
+        # STOCK_DIR, locking DATA_DIR to the dev tree — which would make these
+        # create/buy/sell forms write into the developer's real portfolio.db.
+        import tempfile
+        from unittest import mock
+        from stock_toolkit import game
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        p = mock.patch.object(
+            game, "DEFAULT_PORTFOLIO_DB",
+            pathlib.Path(self._tmp.name) / "portfolio.db")
+        p.start()
+        self.addCleanup(p.stop)
+
     def _page(self):
         from streamlit.testing.v1 import AppTest as _AppTest
         at = _AppTest.from_file(str(self.PAGE), default_timeout=60)
