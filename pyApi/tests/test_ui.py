@@ -236,6 +236,33 @@ class TestBriefingRangeWarning(unittest.TestCase):
                         "briefing prompt should build over the default range")
 
 
+class TestScoreBacktestUI(unittest.TestCase):
+    """The self-validating 'Does this score predict returns?' section in
+    the Score tab drives stock_toolkit.score_validation and renders the
+    verdict without exceptions."""
+
+    def _run_bt(self, at):
+        btn = [b for b in at.button if "Run score backtest" in b.label]
+        self.assertTrue(btn, "score-backtest button not found")
+        btn[0].click()
+        at.run()
+        return at
+
+    def test_backtest_runs_clean_and_stores_result(self):
+        at = self._run_bt(run_app())
+        self.assertEqual([e.value for e in at.exception], [])
+        self.assertIn("score_bt", at.session_state)
+        self.assertIn("verdict", at.session_state["score_bt"])
+
+    def test_short_lookback_produces_observations(self):
+        # 2-year lookback fits the ~3-year fixture → the walk-forward
+        # actually scores something (the empty path is the 5y default).
+        at = run_app(score_bt_lookback=2, score_bt_rebal=3)
+        at = self._run_bt(at)
+        self.assertEqual([e.value for e in at.exception], [])
+        self.assertGreater(at.session_state["score_bt"]["n_obs"], 0)
+
+
 class TestBacktestInteraction(unittest.TestCase):
     """Clicking 'Run backtest' runs the default strategy on the first symbol."""
 

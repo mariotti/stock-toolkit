@@ -158,4 +158,73 @@ def render(selected_symbols, date_from_str, date_to_str):
                 f"different exchange families → likely low correlation"
             )
 
+    # ── self-validation: does this score actually predict returns? ────────────
+    st.markdown("---")
+    with st.expander("🔬  Does this score predict returns?  (walk-forward backtest)"):
+        st.caption(
+            "Scores every selected symbol as-of many past dates — using only "
+            "the data available then — and measures the **real forward return** "
+            "afterwards. A score worth trusting shows a positive, statistically "
+            "significant Information Coefficient (IC). This is the honest check "
+            "on whether the ranking above is predictive or just plausible-looking."
+        )
+        bcol1, bcol2 = st.columns(2)
+        bt_lookback = bcol1.select_slider(
+            "History per score (years)", [2, 3, 5, 10], value=5,
+            key="score_bt_lookback")
+        bt_rebal = bcol2.select_slider(
+            "Rebalance every (months)", [3, 6, 12], value=6,
+            key="score_bt_rebal")
+        if len(selected_symbols) < 4:
+            st.info("Pick at least ~4 symbols in the sidebar for a meaningful "
+                    "cross-sectional test (more symbols = more reliable).")
+        if st.button("🔬  Run score backtest", key="score_bt_run"):
+            from stock_toolkit.score_validation import run_score_backtest
+            with st.spinner("Walk-forward scoring across history… (can take a minute)"):
+                st.session_state["score_bt"] = run_score_backtest(
+                    selected_symbols, horizon,
+                    lookback_years=bt_lookback, rebalance_months=bt_rebal,
+                    mc_paths=200)
+
+        res = st.session_state.get("score_bt")
+        if res:
+            if res["n_obs"] == 0:
+                st.warning(res["verdict"])
+            else:
+                signal = ("significant signal" in res["verdict"].lower()
+                          and "wrong way" not in res["verdict"].lower())
+                (st.success if signal else st.warning)(res["verdict"])
+                b1, b2, b3, b4 = st.columns(4)
+                b1.metric("Mean IC", f"{res['mean_ic']:+.3f}")
+                b2.metric("t-stat", f"{res['ic_tstat']:+.2f}")
+                b3.metric("Dates IC>0", f"{res['pct_positive_ic']:.0f}%")
+                b4.metric("Observations", f"{res['n_obs']}")
+                st.caption(
+                    f"{res['n_dates']} rebalance dates · {res['n_symbols']} "
+                    f"symbols · forward window {res['forward_bars']} trading "
+                    "days.  Rule of thumb: IC ~0.05 modest, ~0.10 strong; "
+                    "|t| > 2 to be real.")
+                terc = res["tercile_returns"]
+                if all(v is not None for v in terc.values()):
+                    import plotly.graph_objects as go
+                    fig = go.Figure(go.Bar(
+                        x=["Low score", "Mid", "High score"],
+                        y=[terc["low"] * 100, terc["mid"] * 100,
+                           terc["high"] * 100],
+                        text=[f"{terc[k] * 100:+.2f}%"
+                              for k in ("low", "mid", "high")],
+                        textposition="outside",
+                    ))
+                    fig.update_layout(
+                        title="Forward return by score tercile "
+                              "(vs each date's average)",
+                        yaxis_title="avg forward return %", height=300)
+                    st.plotly_chart(fig, width='stretch',
+                                    config={"displayModeBar": False})
+                    if res["high_minus_low"] is not None:
+                        st.caption(
+                            "High-minus-low spread: "
+                            f"**{res['high_minus_low'] * 100:+.2f}%** — positive "
+                            "means top-scored beat bottom-scored.")
+
 
