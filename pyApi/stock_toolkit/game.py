@@ -1158,11 +1158,17 @@ def value_history(portfolio_id: int = None, db: Path = None) -> list:
             except sqlite3.OperationalError:
                 con = sqlite3.connect(d)
             try:
+                # Load the FULL daily close history (not just >= start): a
+                # position whose most recent bar predates the portfolio (stale
+                # data — e.g. an EU ticker not collected recently) must still
+                # be valued by forward-filling its last known close, exactly
+                # like mark_to_market's get_latest_price. Filtering by start
+                # dropped such holdings to £0 for the whole curve.
                 rows = con.execute(
                     "SELECT timestamp, close FROM prices "
                     "WHERE symbol = ? AND interval = '1d' "
-                    "AND timestamp >= ? ORDER BY timestamp",
-                    (sym, start.isoformat()),
+                    "ORDER BY timestamp",
+                    (sym,),
                 ).fetchall()
             except sqlite3.OperationalError:
                 rows = []

@@ -652,6 +652,34 @@ class TestGameEdges(GameTestCase):
         self.assertIsInstance(stats, dict)
 
 
+class TestValueHistoryReconciles(GameTestCase):
+    """The value-over-time curve's last point must equal mark_to_market.
+
+    Regression: value_history only loaded price bars dated >= the
+    portfolio's creation date, so a holding whose most recent bar predated
+    the portfolio (stale data — e.g. an EU ticker not collected recently)
+    was valued at 0 for the ENTIRE curve. The graph then read far below the
+    headline return. The fixture prices are dated 2026-06-12 while the
+    portfolio is created 'now' (later), so this reproduces the trigger.
+    """
+
+    def test_stale_priced_holding_valued_and_reconciles(self):
+        game.init_portfolio(starting_cash=10_000.0, db=self.port_db)
+        game.buy("AAPL", 2_000.0, db=self.port_db)      # priced at 200
+
+        mtm = game.mark_to_market(db=self.port_db)
+        vh  = game.value_history(db=self.port_db)
+        self.assertTrue(vh, "expected a value history")
+        last = vh[-1]
+
+        # the AAPL position must contribute equity, not be zeroed out
+        self.assertGreater(last["equity"], 0.0,
+                           "stale-priced holding was dropped to £0")
+        # and the last curve point must match the headline total
+        self.assertAlmostEqual(last["total"], mtm["total"], places=2,
+                               msg="value_history last point != mark_to_market")
+
+
 if __name__ == "__main__":
     runner = unittest.main(verbosity=2, exit=False)
     sys.exit(0 if runner.result.wasSuccessful() else 1)
