@@ -11,9 +11,10 @@ import streamlit as st
 
 from stock_toolkit.common import CONFIG_PATH, load_config
 from stock_toolkit.game import (
-    GameError, SLIPPAGE_BPS,
+    GameError, SLIPPAGE_BPS, STALE_PRICE_DAYS,
     archive_portfolio, benchmark_history, buy, create_portfolio,
-    delete_portfolio, get_audit_log, get_latest_price, init_portfolio,
+    days_since_bar, delete_portfolio, get_audit_log, get_latest_price,
+    init_portfolio,
     list_portfolios, mark_to_market, rename_portfolio, reset_portfolio,
     sell, set_active_portfolio, value_history,
 )
@@ -269,6 +270,16 @@ def render():
                 st.warning(f"No price for `{sym_buy}` — run `stock-collect` "
                            "or `stock-bootstrap` first.")
             else:
+                age = days_since_bar(as_of)
+                if age is not None and age > STALE_PRICE_DAYS:
+                    st.warning(
+                        f"⚠️  Latest price for `{sym_buy}` is **{age} days old** "
+                        f"({as_of[:10]}) — it doesn't look like it's being "
+                        "collected. This trade (and its future valuation) will "
+                        "sit on a **stale price** that won't move until you add "
+                        f"`{sym_buy}` to your watchlist (**Admin → Watchlist**, "
+                        "or `SYMBOLS` in config.env) and run a collection."
+                    )
                 fill_buy = price * (1 + SLIPPAGE_BPS / 10000.0)
                 max_cash = float(mtm["cash"])
                 # Sizing helper — picks how the cash amount is decided:

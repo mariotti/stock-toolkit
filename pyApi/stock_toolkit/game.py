@@ -53,7 +53,7 @@ __all__ = [
     "init_portfolio", "get_portfolio", "reset_portfolio",
     # trades + positions
     "buy", "sell", "get_trades", "get_positions",
-    "get_latest_price",
+    "get_latest_price", "days_since_bar", "STALE_PRICE_DAYS",
     # analytics
     "mark_to_market", "trade_stats", "value_history",
     "benchmark_history", "risk_stats",
@@ -876,6 +876,25 @@ def get_latest_price(symbol: str) -> tuple:
                 and (best[1] is None or row[1] > best[1])):
             best = (float(row[0]), row[1])
     return best
+
+
+# A daily-collected symbol is at most ~3 days old even across a weekend;
+# beyond this its price is stale — likely not in the collection watchlist.
+STALE_PRICE_DAYS = 5
+
+
+def days_since_bar(as_of: str | None) -> int | None:
+    """Calendar days between today and an ISO price-bar timestamp, or None
+    when there's no usable timestamp. Used to flag stale (uncollected)
+    symbols so a paper trade isn't entered on a price that will never move.
+    """
+    if not as_of:
+        return None
+    try:
+        d = datetime.date.fromisoformat(str(as_of)[:10])
+    except ValueError:
+        return None
+    return (datetime.date.today() - d).days
 
 
 # ─────────────────────────────────────────────────────────────────────────────

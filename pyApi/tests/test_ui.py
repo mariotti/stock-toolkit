@@ -1134,6 +1134,17 @@ class TestGamePageInteraction(unittest.TestCase):
             at = self._click(at, "game_sell_btn")
             self.assertEqual([e.value for e in at.exception], [])
 
+    def test_stale_price_warning_in_buy_form(self):
+        # the fixture's latest bar is many days old (> STALE_PRICE_DAYS), so
+        # the buy form must warn that the symbol isn't being collected rather
+        # than let you trade silently on a frozen price.
+        from stock_toolkit import game
+        game.init_portfolio(starting_cash=10_000.0)   # patched temp DB
+        at = self._page()
+        warns = " ".join(w.value for w in at.warning)
+        self.assertIn("days old", warns)
+        self.assertIn("watchlist", warns)
+
 
 class TestGameHistoryExpanderRenders(unittest.TestCase):
     """v2.4.2 — the Game page's History expander reads the audit_log

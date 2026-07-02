@@ -680,6 +680,27 @@ class TestValueHistoryReconciles(GameTestCase):
                                msg="value_history last point != mark_to_market")
 
 
+class TestDaysSinceBar(unittest.TestCase):
+    """days_since_bar backs the 'symbol isn't being collected' guard."""
+
+    def test_today_is_zero(self):
+        import datetime
+        today = datetime.date.today().isoformat() + "T00:00:00+00:00"
+        self.assertEqual(game.days_since_bar(today), 0)
+
+    def test_old_bar_is_positive_and_large(self):
+        self.assertGreater(game.days_since_bar("2020-01-01T00:00:00+00:00"), 1000)
+
+    def test_none_and_garbage_return_none(self):
+        self.assertIsNone(game.days_since_bar(None))
+        self.assertIsNone(game.days_since_bar(""))
+        self.assertIsNone(game.days_since_bar("not-a-date"))
+
+    def test_threshold_is_a_small_positive_int(self):
+        self.assertIsInstance(game.STALE_PRICE_DAYS, int)
+        self.assertGreater(game.STALE_PRICE_DAYS, 0)
+
+
 if __name__ == "__main__":
     runner = unittest.main(verbosity=2, exit=False)
     sys.exit(0 if runner.result.wasSuccessful() else 1)
