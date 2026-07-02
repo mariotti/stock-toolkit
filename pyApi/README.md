@@ -1232,7 +1232,7 @@ python3 -m pytest tests/test_toolkit.py::TestBacktest -v
 
 Expected output:
 ```
-Ran 150 tests in ~3s
+Ran 151 tests in ~3s
 OK
 ```
 

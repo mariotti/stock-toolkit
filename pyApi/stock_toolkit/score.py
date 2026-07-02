@@ -481,9 +481,13 @@ def score_symbol(sym: dict, weights: dict | None = None,
         notes.append(f"sharpe={sharpe:.2f} → {pts:.1f}/{WEIGHTS['sharpe']}")
 
     # ── 2. Calmar (0–20) ─────────────────────────────────────────────────────
+    # Calmar = annual return / max drawdown. Real assets sit around 0.3–2
+    # (empirically p50≈0.4, p90≈1.2, rarely >3), so the old /20 divisor left
+    # even the best asset with ~2 of 20 points — the component was dead.
+    # Full marks at Calmar 3 ("excellent"), mirroring Sharpe's /2 threshold.
     calmar = dd.get("calmar")
     if calmar is not None:
-        pts = min(float(calmar) / 20.0, 1.0) * w["calmar"]
+        pts = min(float(calmar) / 3.0, 1.0) * w["calmar"]
         pts = max(pts, 0)
         total += pts
         notes.append(f"calmar={calmar:.2f} → {pts:.1f}/{WEIGHTS['calmar']}")

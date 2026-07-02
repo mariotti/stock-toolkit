@@ -888,6 +888,26 @@ class TestScoreSteps(FixtureTestCase):
         self.assertIsInstance(notes, list)
         self.assertGreater(len(notes), 0)
 
+    def test_calmar_calibration(self):
+        """Calmar scores against a realistic range: full marks at 3
+        ('excellent'), half at 1.5, zero at/under 0. Regression guard on the
+        old /20 divisor that left real assets (Calmar ~0.3–2) with ~2 of 20
+        points, making the component effectively dead."""
+        w = dict(self.ss.HORIZON_PROFILES["year"]["weights"])   # calmar = 20
+
+        def calmar_points(cal):
+            # only the drawdown/calmar component is present → isolates it
+            return self.ss.score_symbol(
+                {"drawdown": {"calmar": cal}}, weights=w, min_bars=0)[0]
+
+        self.assertAlmostEqual(calmar_points(3.0), 20.0, delta=0.1)   # full
+        self.assertAlmostEqual(calmar_points(1.5), 10.0, delta=0.1)   # half
+        self.assertAlmostEqual(calmar_points(6.0), 20.0, delta=0.1)   # capped
+        self.assertEqual(calmar_points(0.0), 0.0)
+        self.assertEqual(calmar_points(-1.0), 0.0)                    # floored
+        # a realistic 'good' Calmar (~1) must now contribute materially
+        self.assertGreater(calmar_points(1.0), 5.0)
+
     def test_score_all_horizons(self):
         """All five horizons must produce a valid score without crashing."""
         for horizon, profile in self.ss.HORIZON_PROFILES.items():
