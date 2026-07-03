@@ -1134,6 +1134,25 @@ class TestGamePageInteraction(unittest.TestCase):
             at = self._click(at, "game_sell_btn")
             self.assertEqual([e.value for e in at.exception], [])
 
+    def test_create_strategy_with_broker(self):
+        # v2.6 — the New-strategy form has a broker picker and the choice
+        # is persisted on the created portfolio; the header captions the
+        # active strategy's fee model.
+        from stock_toolkit import game
+        at = self._page()
+        sel = [s for s in at.selectbox if s.key == "game_new_broker"]
+        self.assertTrue(sel, "broker selectbox missing from create form")
+        # AppTest surfaces the format_func labels, not the raw keys
+        self.assertTrue(any("Yuh" in o for o in sel[0].options))
+        at.text_input(key="game_new_name").set_value("BrokeredStrat")
+        sel[0].set_value("yuh")
+        at = self._click(at, "game_new_btn")
+        self.assertEqual([e.value for e in at.exception], [])
+        brokers = {p["name"]: p["broker"] for p in game.list_portfolios()}
+        self.assertEqual(brokers.get("BrokeredStrat"), "yuh")
+        caps = " ".join(c.value for c in at.caption)
+        self.assertIn("Broker:", caps, "header must caption the fee model")
+
     def test_stale_price_warning_in_buy_form(self):
         # the fixture's latest bar is many days old (> STALE_PRICE_DAYS), so
         # the buy form must warn that the symbol isn't being collected rather

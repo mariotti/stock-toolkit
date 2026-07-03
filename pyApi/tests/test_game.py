@@ -760,6 +760,87 @@ class TestFeeRoundTrip(GameTestCase):
         self.assertAlmostEqual(st["realized_pnl"], -rt_cost, places=6)
 
 
+class TestBrokerFees(GameTestCase):
+    """v2.6 broker fee models: last-known per-broker schedules applied on
+    top of market slippage. 'plain' (the default) charges nothing, so all
+    pre-existing behavior — and TestFeeRoundTrip above — is unchanged."""
+
+    def test_trade_fee_components(self):
+        # plain: always zero
+        self.assertEqual(game.trade_fee("plain", 1000, 5, "AAPL"), 0.0)
+        # yuh US: 0.5% + 0.95% FX
+        self.assertAlmostEqual(game.trade_fee("yuh", 1000, 5, "AAPL"),
+                               5.0 + 9.5, places=9)
+        # yuh minimum kicks in on tiny trades (commission max(0.5%, 1))
+        self.assertAlmostEqual(game.trade_fee("yuh", 100, 1, "NESN.SW"),
+                               1.0, places=9)   # .SW = CHF → no FX
+        # ibkr per-share with min ... small qty → the $1 minimum
+        self.assertAlmostEqual(game.trade_fee("ibkr", 1000, 10, "AAPL"),
+                               1.0 + 0.0003 * 1000, places=9)
+        # ibkr max cap: 1% of value on a huge share count
+        self.assertAlmostEqual(game.trade_fee("ibkr", 100, 10_000, "AAPL"),
+                               0.01 * 100 + 0.0003 * 100, places=9)
+        # unknown broker falls back to plain (no fees)
+        self.assertEqual(game.trade_fee("nope", 1000, 5, "AAPL"), 0.0)
+
+    def test_fx_only_on_non_chf_symbols(self):
+        chf = game.trade_fee("yuh", 1000, 5, "NESN.SW")
+        usd = game.trade_fee("yuh", 1000, 5, "AAPL")
+        eur = game.trade_fee("yuh", 1000, 5, "ENEL.MI")
+        self.assertAlmostEqual(usd - chf, 9.5, places=9)
+        self.assertAlmostEqual(eur, usd, places=9)
+
+    def test_create_persists_broker_and_validates(self):
+        rec = game.create_portfolio("AtYuh", db=self.port_db, broker="yuh")
+        self.assertEqual(rec["broker"], "yuh")
+        self.assertEqual(game.mark_to_market(db=self.port_db)["broker"], "yuh")
+        with self.assertRaises(game.GameError):
+            game.create_portfolio("Bad", db=self.port_db, broker="madeup")
+
+    def test_default_broker_is_plain(self):
+        game.init_portfolio(starting_cash=10_000.0, db=self.port_db)
+        self.assertEqual(game.get_portfolio(db=self.port_db)["broker"],
+                         "plain")
+
+    def test_migration_adds_columns(self):
+        # _connect on a fresh DB (created by init above patterns) must
+        # leave broker/fee columns present
+        game.init_portfolio(starting_cash=1_000.0, db=self.port_db)
+        con = sqlite3.connect(self.port_db)
+        pf = {r[1] for r in con.execute("PRAGMA table_info(portfolios)")}
+        tr = {r[1] for r in con.execute("PRAGMA table_info(trades)")}
+        con.close()
+        self.assertIn("broker", pf)
+        self.assertIn("fee", tr)
+
+    def test_yuh_round_trip_costs_real_money(self):
+        """Flat-price round trip on a US symbol at Yuh: both legs pay
+        0.5% commission + 0.95% FX on top of 2×10 bps slippage — ≈3%,
+        not the plain broker's ≈0.2%. Invariants must still hold."""
+        game.create_portfolio("Yuh", starting_cash=10_000.0,
+                              db=self.port_db, broker="yuh")
+        out = game.buy("AAPL", 1_000.0, db=self.port_db)   # AAPL = 200
+        self.assertGreater(out["fee"], 14.0)               # ~14.3 CHF
+        # invariant: qty × all-in fill == spend, to the cent
+        self.assertAlmostEqual(out["qty"] * out["fill_price"], 1_000.0,
+                               places=6)
+
+        sold = game.sell("AAPL", db=self.port_db)
+        self.assertGreater(sold["fee"], 13.0)
+        self.assertAlmostEqual(sold["qty"] * sold["fill_price"],
+                               sold["proceeds"], places=6)
+
+        mtm = game.mark_to_market(db=self.port_db)
+        loss = 10_000.0 - mtm["total"]
+        self.assertGreater(loss, 25.0,   "Yuh round trip must cost ~3%")
+        self.assertLess(loss, 40.0)
+        # honesty: booked as a fee loss, and fees are on the trade rows
+        st = game.trade_stats(db=self.port_db)
+        self.assertEqual(st["losses"], 1)
+        trades = game.get_trades(db=self.port_db)
+        self.assertTrue(all(t["fee"] > 0 for t in trades))
+
+
 if __name__ == "__main__":
     runner = unittest.main(verbosity=2, exit=False)
     sys.exit(0 if runner.result.wasSuccessful() else 1)

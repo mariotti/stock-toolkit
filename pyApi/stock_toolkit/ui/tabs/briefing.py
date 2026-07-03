@@ -393,12 +393,15 @@ Keep responses concise and conversational."""
             }[h],
             key="brief_horizon"
         )
-        brief_broker = st.selectbox(
-            "Broker (for fee context)",
-            ["Yuh (0.5% + FX)", "Interactive Brokers (~$0.35)",
-             "Saxo Bank (0.08%)", "DEGIRO (~€1.75)", "Other"],
-            key="brief_broker"
-        )
+        # The broker is no longer a free-floating dropdown: proposals are
+        # executed in the Briefing strategy, so the fee context Claude
+        # reasons about is that portfolio's actual fee model.
+        from stock_toolkit.game import BROKERS as _BROKERS
+        _rec = _briefing_strategy_record()
+        brief_broker = _BROKERS[
+            (_rec or {}).get("broker", "plain")]["label"]
+        st.caption(f"Broker: **{brief_broker}** (from the Briefing "
+                   "strategy — its trades pay these fees)")
         brief_budget = st.number_input(
             "Available budget (CHF)", min_value=100, max_value=100000,
             value=500, step=100, key="brief_budget"

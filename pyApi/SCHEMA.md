@@ -61,7 +61,8 @@ CREATE TABLE portfolios (
     cash           REAL    NOT NULL,
     created_at     TEXT    NOT NULL,
     last_reset_at  TEXT    NOT NULL,
-    archived_at    TEXT
+    archived_at    TEXT,
+    broker         TEXT    NOT NULL DEFAULT 'plain'  -- fee model key (v2.6)
 );
 
 CREATE TABLE trades (
@@ -72,9 +73,13 @@ CREATE TABLE trades (
     side         TEXT    NOT NULL CHECK (side IN ('buy', 'sell')),
     qty          REAL    NOT NULL,
     price        REAL    NOT NULL,    -- mid-market quote at trade time
-    fill_price   REAL    NOT NULL,    -- price after slippage
+    fill_price   REAL    NOT NULL,    -- all-in effective price: slippage +
+                                      -- broker fee folded in, so qty ×
+                                      -- fill_price == |cash_delta| (v2.6;
+                                      -- pre-2.6 rows: slippage only)
     cash_delta   REAL    NOT NULL,    -- signed: negative for buys
-    note         TEXT                 -- free text (see v1.7)
+    note         TEXT,                -- free text (see v1.7)
+    fee          REAL    NOT NULL DEFAULT 0  -- broker fee paid (v2.6)
 );
 
 CREATE TABLE meta (

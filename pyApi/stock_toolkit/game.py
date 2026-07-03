@@ -54,6 +54,8 @@ __all__ = [
     # trades + positions
     "buy", "sell", "get_trades", "get_positions",
     "get_latest_price", "days_since_bar", "STALE_PRICE_DAYS",
+    # broker fee models (v2.6+)
+    "BROKERS", "trade_fee",
     # analytics
     "mark_to_market", "trade_stats", "value_history",
     "benchmark_history", "risk_stats",
@@ -65,6 +67,92 @@ SLIPPAGE_BPS = 10                                # 10 bps = 0.10%
 SLIPPAGE     = SLIPPAGE_BPS / 10000.0
 DEFAULT_PORTFOLIO_DB = _PORTFOLIO_DB_PATH
 DEFAULT_STARTING_CASH = 10_000.0
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  Broker fee models
+#
+#  Each portfolio is "at" a broker; buy/sell apply that broker's commission
+#  and FX markup on top of market slippage. Profiles are LAST-KNOWN
+#  snapshots (see as_of), deliberately approximate — the point is realistic
+#  orders of magnitude, not a live fee feed. "plain" is the zero-fee
+#  default so pre-existing portfolios keep meaning what they meant.
+#
+#  Supported fee components (a superset of common retail structures):
+#    commission_fixed      flat amount per order
+#    commission_pct        fraction of trade value        (e.g. 0.005 = 0.5%)
+#    commission_per_share  amount per share
+#    commission_min/max    clamp on the commission (max 0 = no cap;
+#                          max as fraction<1 = cap at that share of value)
+#    fx_pct                markup on trade value when the symbol trades in
+#                          a non-CHF currency (inferred from the suffix)
+#
+#  Currency note: the game is CHF-denominated and currency-naive — fee
+#  minimums quoted in USD are treated at ≈parity with CHF.
+# ─────────────────────────────────────────────────────────────────────────────
+
+BROKERS = {
+    "plain": {
+        "label": "Plain (no fees)",
+        "as_of": None,
+        "commission_fixed": 0.0, "commission_pct": 0.0,
+        "commission_per_share": 0.0, "commission_min": 0.0,
+        "commission_max": 0.0, "fx_pct": 0.0,
+    },
+    "yuh": {
+        "label": "Yuh (0.5% min 1, FX 0.95%)",
+        "as_of": "2026-07",
+        "commission_fixed": 0.0, "commission_pct": 0.005,
+        "commission_per_share": 0.0, "commission_min": 1.0,
+        "commission_max": 0.0, "fx_pct": 0.0095,
+    },
+    "ibkr": {
+        "label": "Interactive Brokers fixed (0.005/sh min 1 max 1%, FX 0.03%)",
+        "as_of": "2026-07",
+        "commission_fixed": 0.0, "commission_pct": 0.0,
+        "commission_per_share": 0.005, "commission_min": 1.0,
+        "commission_max": 0.01,        # 1% of trade value
+        "fx_pct": 0.0003,
+    },
+    "swissquote": {
+        # approximation of the tiered CHF 9–190 schedule
+        "label": "Swissquote (~0.2% min 9 max 190, FX 0.95%)",
+        "as_of": "2026-07",
+        "commission_fixed": 0.0, "commission_pct": 0.002,
+        "commission_per_share": 0.0, "commission_min": 9.0,
+        "commission_max": 190.0, "fx_pct": 0.0095,
+    },
+}
+
+# Symbol-suffix → trading currency (home = CHF). Suffixless = US/USD.
+_SUFFIX_CURRENCY = {
+    "SW": "CHF", "MI": "EUR", "DE": "EUR", "PA": "EUR", "AS": "EUR",
+    "L": "GBP",
+}
+
+
+def _symbol_currency(symbol: str) -> str:
+    sym = symbol.upper()
+    if "." not in sym:
+        return "USD"
+    return _SUFFIX_CURRENCY.get(sym.rsplit(".", 1)[1], "USD")
+
+
+def trade_fee(broker: str, trade_value: float, qty: float,
+              symbol: str) -> float:
+    """Total per-order fee for `broker`: clamped commission + FX markup."""
+    b = BROKERS.get(broker) or BROKERS["plain"]
+    commission = (b["commission_fixed"]
+                  + b["commission_pct"] * trade_value
+                  + b["commission_per_share"] * qty)
+    if commission > 0 or b["commission_min"] > 0:
+        commission = max(commission, b["commission_min"])
+    cap = b["commission_max"]
+    if cap:
+        cap_abs = cap * trade_value if cap < 1 else cap
+        commission = min(commission, cap_abs)
+    fx = b["fx_pct"] * trade_value if _symbol_currency(symbol) != "CHF" else 0.0
+    return commission + fx
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -228,6 +316,14 @@ def _connect(db: Path) -> sqlite3.Connection:
     cols = {r[1] for r in con.execute("PRAGMA table_info(trades)").fetchall()}
     if "note" not in cols:
         con.execute("ALTER TABLE trades ADD COLUMN note TEXT")
+    # v2.6 schema bump: per-trade broker fee + per-portfolio broker.
+    if "fee" not in cols:
+        con.execute("ALTER TABLE trades ADD COLUMN fee REAL NOT NULL DEFAULT 0")
+    pf_cols = {r[1] for r in
+               con.execute("PRAGMA table_info(portfolios)").fetchall()}
+    if "broker" not in pf_cols:
+        con.execute("ALTER TABLE portfolios ADD COLUMN broker TEXT "
+                    "NOT NULL DEFAULT 'plain'")
     if migrated_v1:
         _audit(con, actor="system",
                op_type="system.schema_migrate.v1_to_v2",
@@ -322,9 +418,9 @@ def _pre_destructive_backup_safe(db: Path, *, op_name: str,
 
 
 _PORTFOLIO_COLS = ("id", "name", "starting_cash", "cash", "created_at",
-                   "last_reset_at", "archived_at")
+                   "last_reset_at", "archived_at", "broker")
 _TRADE_COLS     = ("id", "portfolio_id", "timestamp", "symbol", "side", "qty",
-                   "price", "fill_price", "cash_delta", "note")
+                   "price", "fill_price", "cash_delta", "note", "fee")
 
 
 def _snapshot_portfolio(con: sqlite3.Connection, pid: int) -> dict | None:
@@ -478,22 +574,24 @@ def list_portfolios(include_archived: bool = False, db: Path = None) -> list:
     con = _connect(db)
     where = "" if include_archived else " WHERE archived_at IS NULL"
     rows = con.execute(
-        f"SELECT id, name, starting_cash, cash, created_at, last_reset_at, "
-        f"archived_at FROM portfolios{where} ORDER BY id"
+        f"SELECT {', '.join(_PORTFOLIO_COLS)} FROM portfolios{where} "
+        f"ORDER BY id"
     ).fetchall()
     con.close()
-    keys = ("id", "name", "starting_cash", "cash", "created_at",
-            "last_reset_at", "archived_at")
-    return [dict(zip(keys, r)) for r in rows]
+    return [_row_to_dict(r, _PORTFOLIO_COLS) for r in rows]
 
 
 def create_portfolio(name: str,
                      starting_cash: float = DEFAULT_STARTING_CASH,
                      db: Path = None,
                      activate: bool = True,
+                     broker: str = "plain",
                      _actor: str = "user",
                      _audit_note: str = None) -> dict:
     """Create a new portfolio. Optionally make it the active one.
+
+    ``broker`` picks the fee model (see BROKERS) every buy/sell in this
+    portfolio pays; "plain" charges nothing beyond market slippage.
 
     Private hooks ``_actor`` and ``_audit_note`` let internal callers
     (e.g. ``init_portfolio``'s auto-create-Default path) override the
@@ -504,14 +602,17 @@ def create_portfolio(name: str,
         raise GameError("Portfolio name must be non-empty.")
     if starting_cash <= 0:
         raise GameError("Starting cash must be positive.")
+    if broker not in BROKERS:
+        raise GameError(
+            f"Unknown broker {broker!r}. Options: {', '.join(BROKERS)}.")
     db = db or DEFAULT_PORTFOLIO_DB
     con = _connect(db)
     ts = _now()
     try:
         cur = con.execute(
             "INSERT INTO portfolios (name, starting_cash, cash, created_at, "
-            "last_reset_at) VALUES (?, ?, ?, ?, ?)",
-            (name, starting_cash, starting_cash, ts, ts),
+            "last_reset_at, broker) VALUES (?, ?, ?, ?, ?, ?)",
+            (name, starting_cash, starting_cash, ts, ts, broker),
         )
     except sqlite3.IntegrityError as e:
         con.close()
@@ -725,22 +826,13 @@ def get_portfolio(portfolio_id: int = None, db: Path = None) -> dict:
     con = _connect(db)
     pid = _resolve_pid(con, portfolio_id)
     row = con.execute(
-        "SELECT id, name, starting_cash, cash, created_at, last_reset_at, "
-        "archived_at FROM portfolios WHERE id = ?",
+        f"SELECT {', '.join(_PORTFOLIO_COLS)} FROM portfolios WHERE id = ?",
         (pid,),
     ).fetchone()
     con.close()
     if not row:
         return {}
-    return {
-        "id":            row[0],
-        "name":          row[1],
-        "starting_cash": row[2],
-        "cash":          row[3],
-        "created_at":    row[4],
-        "last_reset_at": row[5],
-        "archived_at":   row[6],
-    }
+    return _row_to_dict(row, _PORTFOLIO_COLS)
 
 
 def get_trades(portfolio_id: int = None, db: Path = None) -> list:
@@ -757,14 +849,15 @@ def get_trades(portfolio_id: int = None, db: Path = None) -> list:
     pid = _resolve_pid(con, portfolio_id)
     rows = con.execute(
         "SELECT id, timestamp, symbol, side, qty, price, fill_price, "
-        "cash_delta, note FROM trades WHERE portfolio_id = ? ORDER BY id",
+        "cash_delta, note, fee FROM trades WHERE portfolio_id = ? "
+        "ORDER BY id",
         (pid,),
     ).fetchall()
     con.close()
     return [
         {"id": r[0], "timestamp": r[1], "symbol": r[2], "side": r[3],
          "qty": r[4], "price": r[5], "fill_price": r[6], "cash_delta": r[7],
-         "note": r[8] or ""}
+         "note": r[8] or "", "fee": r[9] or 0.0}
         for r in rows
     ]
 
@@ -902,16 +995,17 @@ def days_since_bar(as_of: str | None) -> int | None:
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _record_trade(con, pid, *, symbol, side, qty, price, fill_price,
-                  cash_delta, note=None):
+                  cash_delta, note=None, fee=0.0):
     cash_before = con.execute(
         "SELECT cash FROM portfolios WHERE id = ?", (pid,)
     ).fetchone()[0]
     cur = con.execute(
         "INSERT INTO trades (portfolio_id, timestamp, symbol, side, qty, "
-        "price, fill_price, cash_delta, note) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "price, fill_price, cash_delta, note, fee) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (pid, _now(), symbol.upper(), side, float(qty), float(price),
          float(fill_price), float(cash_delta),
-         (note or "").strip() or None),
+         (note or "").strip() or None, float(fee)),
     )
     trade_id = cur.lastrowid
     con.execute("UPDATE portfolios SET cash = cash + ? WHERE id = ?",
@@ -938,25 +1032,45 @@ def buy(symbol: str, cash_amount: float,
         raise GameError(
             f"No price for {symbol.upper()} in stock_data.db. "
             "Run stock-collect or stock-bootstrap first.")
-    fill_price = price * (1 + SLIPPAGE)
-    qty        = cash_amount / fill_price
+    mkt_fill = price * (1 + SLIPPAGE)
 
     db = db or DEFAULT_PORTFOLIO_DB
     con = _connect(db)
     pid = _resolve_pid(con, portfolio_id)
-    cash = con.execute(
-        "SELECT cash FROM portfolios WHERE id = ?", (pid,)
-    ).fetchone()[0]
+    row = con.execute(
+        "SELECT cash, broker FROM portfolios WHERE id = ?", (pid,)
+    ).fetchone()
+    cash, broker = row[0], row[1]
     if cash_amount > cash + 1e-6:
         con.close()
         raise GameError(
             f"Insufficient cash: have {cash:.2f}, need {cash_amount:.2f}.")
+
+    # Broker fee comes out of the amount: shares are bought with what's
+    # left. Fee depends on the invested value (pct/per-share), which
+    # depends on the fee — a couple of fixed-point rounds settle it.
+    fee = 0.0
+    for _ in range(3):
+        invested = cash_amount - fee
+        if invested <= 0:
+            con.close()
+            raise GameError(
+                f"Amount {cash_amount:.2f} doesn't cover the "
+                f"{BROKERS[broker]['label']} fees ({fee:.2f}).")
+        fee = trade_fee(broker, invested, invested / mkt_fill, symbol)
+    invested = cash_amount - fee
+    qty = invested / mkt_fill
+    # Recorded fill is all-in (slippage + fees), so qty × fill_price ==
+    # |cash_delta| stays exact and cost basis / stats include fees.
+    fill_price = cash_amount / qty
+
     _record_trade(con, pid, symbol=symbol, side="buy", qty=qty,
                   price=price, fill_price=fill_price,
-                  cash_delta=-cash_amount, note=note)
+                  cash_delta=-cash_amount, note=note, fee=fee)
     con.commit(); con.close()
     return {"symbol": symbol.upper(), "qty": qty, "price": price,
-            "fill_price": fill_price, "as_of": as_of, "spent": cash_amount}
+            "fill_price": fill_price, "as_of": as_of,
+            "spent": cash_amount, "fee": fee}
 
 
 def sell(symbol: str, qty: float = None,
@@ -976,18 +1090,27 @@ def sell(symbol: str, qty: float = None,
     price, as_of = get_latest_price(symbol)
     if price is None:
         raise GameError(f"No price for {symbol.upper()}.")
-    fill_price = price * (1 - SLIPPAGE)
-    proceeds   = qty * fill_price
+    gross = qty * price * (1 - SLIPPAGE)
 
     db = db or DEFAULT_PORTFOLIO_DB
     con = _connect(db)
     pid = _resolve_pid(con, portfolio_id)
+    broker = con.execute(
+        "SELECT broker FROM portfolios WHERE id = ?", (pid,)
+    ).fetchone()[0]
+    # Fee never exceeds proceeds (a min-fee on a micro-sell can't push
+    # cash negative). Recorded fill is all-in: qty × fill == cash_delta.
+    fee = min(trade_fee(broker, gross, qty, symbol), gross)
+    proceeds   = gross - fee
+    fill_price = proceeds / qty
+
     _record_trade(con, pid, symbol=symbol, side="sell", qty=qty,
                   price=price, fill_price=fill_price,
-                  cash_delta=+proceeds, note=note)
+                  cash_delta=+proceeds, note=note, fee=fee)
     con.commit(); con.close()
     return {"symbol": symbol.upper(), "qty": qty, "price": price,
-            "fill_price": fill_price, "as_of": as_of, "proceeds": proceeds}
+            "fill_price": fill_price, "as_of": as_of,
+            "proceeds": proceeds, "fee": fee}
 
 
 def reset_portfolio(starting_cash: float = DEFAULT_STARTING_CASH,
@@ -1060,6 +1183,7 @@ def mark_to_market(portfolio_id: int = None, db: Path = None) -> dict:
     return {
         "id":               p["id"],
         "name":             p["name"],
+        "broker":           p.get("broker", "plain"),
         "cash":             p["cash"],
         "equity":           equity,
         "total":            total,

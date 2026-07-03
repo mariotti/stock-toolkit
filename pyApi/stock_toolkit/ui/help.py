@@ -100,9 +100,12 @@ def render() -> None:
 - **Source priority.** When multiple APIs have data for the same
   symbol, the score / backtest engines pick **alphavantage > fmp >
   yfinance** > others. Override with `--source` on the CLI.
-- **Slippage and commissions** are modelled in the Game and Backtest.
-  Default is 10 bps (0.1 %) each side — realistic for retail brokers
-  with marketable orders. Edit in code or pass flags on the CLI.
+- **Slippage and broker fees.** Every Game trade pays 10 bps (0.1 %)
+  market slippage each side, plus the fee model of the strategy's
+  **broker** (picked at creation): *Plain* charges nothing extra, while
+  e.g. *Yuh* charges 0.5 % (min 1) + 0.95 % FX on non-CHF symbols —
+  last-known schedules, deliberately approximate. A flat round trip at
+  Yuh loses ~3 %, so churning is expensive there, just like real life.
 - **Paper-trade notes.** Every Game trade can carry a free-text note
   ("why I bought"). Claude's proposals auto-archive its reason as the
   note. The Outcome stats panel reads notes back so future-you can

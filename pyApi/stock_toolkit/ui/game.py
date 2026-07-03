@@ -11,12 +11,12 @@ import streamlit as st
 
 from stock_toolkit.common import CONFIG_PATH, load_config
 from stock_toolkit.game import (
-    GameError, SLIPPAGE_BPS, STALE_PRICE_DAYS,
+    BROKERS, GameError, SLIPPAGE_BPS, STALE_PRICE_DAYS,
     archive_portfolio, benchmark_history, buy, create_portfolio,
     days_since_bar, delete_portfolio, get_audit_log, get_latest_price,
     init_portfolio,
     list_portfolios, mark_to_market, rename_portfolio, reset_portfolio,
-    sell, set_active_portfolio, value_history,
+    sell, set_active_portfolio, trade_fee, value_history,
 )
 from stock_toolkit.ui.icons import heading, icon
 from stock_toolkit.ui.theme import (
@@ -103,10 +103,20 @@ def render():
                 "Starting cash", min_value=100.0, max_value=10_000_000.0,
                 value=10_000.0, step=1000.0, key="game_new_cash",
             )
+            new_broker = st.selectbox(
+                "Broker (fee model)", list(BROKERS),
+                format_func=lambda k: BROKERS[k]["label"],
+                key="game_new_broker",
+                help="Every buy/sell in this strategy pays this broker's "
+                     "commission + FX markup (last-known schedules, "
+                     "approximate). 'Plain' charges nothing beyond the "
+                     "10 bps market slippage.",
+            )
             if st.button("Create & activate", type="primary",
                          key="game_new_btn", disabled=not new_name.strip()):
                 try:
-                    create_portfolio(new_name, starting_cash=float(new_cash))
+                    create_portfolio(new_name, starting_cash=float(new_cash),
+                                     broker=new_broker)
                     st.success(f"Created strategy {new_name!r}.")
                     st.rerun()
                 except GameError as e:
@@ -117,6 +127,9 @@ def render():
     # ─────────────────────────────────────────────────────────────────────
     #  Header — value, equity, cash, total return
     # ─────────────────────────────────────────────────────────────────────
+    st.caption(f"Broker: **{BROKERS[mtm['broker']]['label']}**"
+               + (f"  ·  fee schedule as of {BROKERS[mtm['broker']]['as_of']}"
+                  if BROKERS[mtm["broker"]]["as_of"] else ""))
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("Total value", _money(mtm["total"]),
               delta=f"{_money(mtm['total_pnl'])} ({_pct(mtm['total_return_pct'])})")
@@ -327,11 +340,15 @@ def render():
                         f"capped at {_money(max_cash)} available cash)"
                     )
                 if amount > 0 and fill_buy > 0:
-                    shares = amount / fill_buy
+                    est_fee = trade_fee(mtm["broker"], amount, amount / fill_buy,
+                                        sym_buy)
+                    shares = (amount - est_fee) / fill_buy
+                    fee_txt = (f" · broker fee ≈ **{_money(est_fee)}**"
+                               if est_fee > 0 else "")
                     st.caption(
                         f"Last close: `{_money(price)}` as of {as_of[:10]} · "
-                        f"fill `{_money(fill_buy)}` (+{SLIPPAGE_BPS} bps) → "
-                        f"≈ **{shares:.4f}** shares"
+                        f"fill `{_money(fill_buy)}` (+{SLIPPAGE_BPS} bps)"
+                        f"{fee_txt} → ≈ **{shares:.4f}** shares"
                     )
                 buy_note = st.text_input(
                     "Why? (optional note — your thesis for this trade)",
@@ -555,6 +572,9 @@ def render():
             "Shares":     t_df["qty"].map(lambda v: f"{v:.4f}"),
             "Close":      t_df["price"].map(_money),
             "Fill":       t_df["fill_price"].map(_money),
+            "Fee":        t_df.get("fee", pd.Series(dtype=float))
+                              .fillna(0.0)
+                              .map(lambda v: _money(v) if v else "—"),
             "Cash Δ":     t_df["cash_delta"].map(_money),
             "Note":       t_df["note"].fillna(""),
         })
