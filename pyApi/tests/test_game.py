@@ -833,6 +833,46 @@ class TestBrokerFees(GameTestCase):
         self.assertIn("broker", pf)
         self.assertIn("fee", tr)
 
+    def test_set_broker_on_empty_strategy(self):
+        rec = game.create_portfolio("Empty", db=self.port_db)   # plain
+        game.set_broker(rec["id"], "yuh", db=self.port_db)
+        self.assertEqual(
+            game.get_portfolio(portfolio_id=rec["id"],
+                               db=self.port_db)["broker"], "yuh")
+        with self.assertRaises(game.GameError):
+            game.set_broker(rec["id"], "madeup", db=self.port_db)
+
+    def test_set_broker_on_running_strategy_keeps_history(self):
+        """Broker transfer semantics: prior trades keep the fees they
+        paid; only future trades pay the new schedule; audited."""
+        rec = game.create_portfolio("Running", starting_cash=10_000.0,
+                                    db=self.port_db)             # plain
+        game.buy("AAPL", 1_000.0, db=self.port_db)
+        t_before = game.get_trades(db=self.port_db)[0]
+        self.assertEqual(t_before["fee"], 0.0)                   # plain
+
+        game.set_broker(rec["id"], "yuh", db=self.port_db)
+
+        # past trade untouched — same fill, same zero fee
+        t_after = game.get_trades(db=self.port_db)[0]
+        self.assertEqual(t_after["fill_price"], t_before["fill_price"])
+        self.assertEqual(t_after["fee"], 0.0)
+        # future trade pays Yuh fees
+        out = game.buy("AAPL", 1_000.0, db=self.port_db)
+        self.assertGreater(out["fee"], 14.0)
+        # the switch is in the audit log, noting the prior trades
+        events = [e for e in game.get_audit_log(db=self.port_db)
+                  if e["op_type"] == "portfolio.set_broker"]
+        self.assertEqual(len(events), 1)
+        self.assertIn("1 prior trade", events[0]["note"])
+
+    def test_set_broker_same_broker_is_noop(self):
+        rec = game.create_portfolio("Same", db=self.port_db)
+        game.set_broker(rec["id"], "plain", db=self.port_db)     # no-op
+        events = [e for e in game.get_audit_log(db=self.port_db)
+                  if e["op_type"] == "portfolio.set_broker"]
+        self.assertEqual(events, [])
+
     def test_yuh_round_trip_costs_real_money(self):
         """Flat-price round trip on a US symbol at Yuh: both legs pay
         0.5% commission + 0.95% FX on top of 2×10 bps slippage — ≈3%,

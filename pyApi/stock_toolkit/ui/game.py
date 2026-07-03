@@ -16,7 +16,7 @@ from stock_toolkit.game import (
     days_since_bar, delete_portfolio, get_audit_log, get_latest_price,
     init_portfolio,
     list_portfolios, mark_to_market, rename_portfolio, reset_portfolio,
-    sell, set_active_portfolio, trade_fee, value_history,
+    sell, set_active_portfolio, set_broker, trade_fee, value_history,
 )
 from stock_toolkit.ui.icons import heading, icon
 from stock_toolkit.ui.theme import (
@@ -658,6 +658,28 @@ def render():
             try:
                 rename_portfolio(mtm["id"], ren.strip())
                 st.success(f"Renamed to {ren.strip()!r}.")
+                st.rerun()
+            except GameError as e:
+                st.error(str(e))
+
+        st.markdown("---")
+        st.markdown("**Broker (fee model)**")
+        broker_keys = list(BROKERS)
+        new_bk = st.selectbox(
+            "Move this strategy to", broker_keys,
+            index=broker_keys.index(mtm["broker"]),
+            format_func=lambda k: BROKERS[k]["label"],
+            key="game_set_broker",
+            help="Like a real broker transfer: past trades keep the fees "
+                 "they paid; only future trades pay the new schedule. "
+                 "The switch is recorded in the audit log.",
+        )
+        if st.button("Change broker", key="game_set_broker_btn",
+                     disabled=(new_bk == mtm["broker"])):
+            try:
+                set_broker(mtm["id"], new_bk)
+                st.success(f"Now at {BROKERS[new_bk]['label']} — future "
+                           "trades pay this schedule.")
                 st.rerun()
             except GameError as e:
                 st.error(str(e))

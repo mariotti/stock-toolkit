@@ -55,7 +55,7 @@ __all__ = [
     "buy", "sell", "get_trades", "get_positions",
     "get_latest_price", "days_since_bar", "STALE_PRICE_DAYS",
     # broker fee models (v2.6+)
-    "BROKERS", "trade_fee",
+    "BROKERS", "trade_fee", "set_broker",
     # analytics
     "mark_to_market", "trade_stats", "value_history",
     "benchmark_history", "risk_stats",
@@ -683,6 +683,41 @@ def rename_portfolio(portfolio_id: int, new_name: str,
     _audit(con, actor="user", op_type="portfolio.rename",
            target_kind="portfolio", target_id=portfolio_id,
            before={"name": before["name"]}, after={"name": after["name"]})
+    con.commit(); con.close()
+
+
+def set_broker(portfolio_id: int, broker: str, db: Path = None) -> None:
+    """Move a strategy to a different broker fee model.
+
+    Applies to FUTURE trades only — past trades keep the fees they
+    actually paid (folded into their recorded fills), so history is
+    never rewritten; this mirrors a real-life broker transfer. The
+    switch is audited, noting how many trades predate it.
+    """
+    if broker not in BROKERS:
+        raise GameError(
+            f"Unknown broker {broker!r}. Options: {', '.join(BROKERS)}.")
+    db = db or DEFAULT_PORTFOLIO_DB
+    con = _connect(db)
+    before = _snapshot_portfolio(con, portfolio_id)
+    if before is None:
+        con.close()
+        raise GameError(f"No portfolio with id {portfolio_id}.")
+    if before.get("broker", "plain") == broker:
+        con.close()
+        return
+    n_prior = con.execute(
+        "SELECT COUNT(*) FROM trades WHERE portfolio_id = ?",
+        (portfolio_id,),
+    ).fetchone()[0]
+    con.execute("UPDATE portfolios SET broker = ? WHERE id = ?",
+                (broker, portfolio_id))
+    _audit(con, actor="user", op_type="portfolio.set_broker",
+           target_kind="portfolio", target_id=portfolio_id,
+           before={"broker": before.get("broker", "plain")},
+           after={"broker": broker},
+           note=(f"{n_prior} prior trade(s) keep the fees they paid; "
+                 "the new fee model applies to future trades only."))
     con.commit(); con.close()
 
 
