@@ -76,6 +76,11 @@ def render(selected_symbols, date_from_str, date_to_str):
                 "drawdown":   ss.step_drawdown(df_r),
                 "entry":      ss.step_entry_timing(df_r),
                 "montecarlo": ss.step_montecarlo(df_r, mc_paths, profile["mc_bars"]),
+                # daily bars, not resampled — mirrors the CLI. Without
+                # these two, score_symbol silently awards 0 of their
+                # 16-22 points and UI scores diverge from stock-score.
+                "momentum":   ss.step_momentum(df),
+                "hurst":      ss.step_hurst(df),
             }
             score, notes = ss.score_symbol(raw, weights=w,
                                             min_bars=profile["min_bars"])
@@ -124,6 +129,8 @@ def render(selected_symbols, date_from_str, date_to_str):
             dd = r.get("drawdown",   {})
             en = r.get("entry",      {})
             mc = r.get("montecarlo", {})
+            mom = r.get("momentum", {})
+            hu  = r.get("hurst",    {})
             rows.append({
                 "Symbol":   r["symbol"],
                 "Score":    f"{r['score']:.1f}",
@@ -136,6 +143,10 @@ def render(selected_symbols, date_from_str, date_to_str):
                 "P(gain)":  f"{mc['prob_gain']:.0f}%" if mc.get("prob_gain") else "—",
                 "P50":      fmt_val(mc.get("p50")),
                 "P5":       fmt_val(mc.get("p5")),
+                "Mom 12-1": (f"{mom['mom_12_1']:+.1f}%"
+                             if mom.get("mom_12_1") is not None else "—"),
+                "Hurst":    (f"{hu['hurst']:.2f}"
+                             if hu.get("hurst") is not None else "—"),
             })
         st.dataframe(pd.DataFrame(rows), width='stretch', hide_index=True)
 

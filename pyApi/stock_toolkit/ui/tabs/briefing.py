@@ -403,6 +403,12 @@ def render(selected_symbols, date_from_str, date_to_str):
                 "entry":      ss.step_entry_timing(df_r),
                 "montecarlo": ss.step_montecarlo(df_r, mc_paths,
                                                    profile["mc_bars"]),
+                # daily bars, not resampled — mirrors the CLI. Without
+                # these two, score_symbol silently awards 0 of their
+                # 16-22 points and UI scores diverge from stock-score.
+                "momentum":   ss.step_momentum(df),
+                "hurst":      ss.step_hurst(df),
+                "as_of":      str(df["timestamp"].iloc[-1])[:10],
             }
             score, notes = ss.score_symbol(
                 raw, weights=profile["weights"],
@@ -464,13 +470,17 @@ def render(selected_symbols, date_from_str, date_to_str):
 
     def _scores_to_summary(scores: list) -> str:
         """Convert score dicts to a compact text table for the prompt."""
-        lines = ["Symbol   Score  Sharpe  Calmar  Vol     MaxDD    RSI   %B    P(gain)"]
-        lines.append("─" * 70)
+        lines = ["Symbol   Score  Sharpe  Calmar  Vol     MaxDD    RSI   %B    "
+                 "P(gain)  Mom12-1   Hurst  Data-asof"]
+        lines.append("─" * 96)
         for r in scores:
             s  = r.get("summary",    {})
             dd = r.get("drawdown",   {})
             en = r.get("entry",      {})
             mc = r.get("montecarlo", {})
+            mom = r.get("momentum",  {})
+            hu  = r.get("hurst",     {})
+            m12 = mom.get("mom_12_1")
             lines.append(
                 f"{r['symbol']:<9}"
                 f"{r['score']:>5.1f}  "
@@ -480,7 +490,11 @@ def render(selected_symbols, date_from_str, date_to_str):
                 f"{dd.get('max_dd', 0):>6.1f}%  "
                 f"{en.get('rsi14', 0) or 0:>4.0f}  "
                 f"{en.get('pct_b', 0) or 0:>5.2f}  "
-                f"{mc.get('prob_gain', 0):>5.1f}%"
+                f"{mc.get('prob_gain', 0):>5.1f}%  "
+                + (f"{m12:>+7.1f}%  " if m12 is not None else "      —  ")
+                + (f"{hu['hurst']:>5.2f}  " if hu.get("hurst") is not None
+                   else "    —  ")
+                + f"{r.get('as_of', '?')}"
             )
         return "\n".join(lines)
 

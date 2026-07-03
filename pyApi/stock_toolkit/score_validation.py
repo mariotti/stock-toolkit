@@ -129,6 +129,10 @@ def run_score_backtest(
                 "drawdown":   ss.step_drawdown(df_r),
                 "entry":      ss.step_entry_timing(df_r),
                 "montecarlo": ss.step_montecarlo(df_r, mc_paths, prof["mc_bars"]),
+                # daily bars, mirrors the CLI — otherwise the backtest
+                # validates a partial score missing momentum + hurst
+                "momentum":   ss.step_momentum(df),
+                "hurst":      ss.step_hurst(df),
             }
             score, _ = ss.score_symbol(raw, weights=weights, min_bars=min_bars)
 

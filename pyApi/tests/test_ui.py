@@ -181,6 +181,21 @@ class TestScoreInteraction(unittest.TestCase):
         scored = {r["symbol"] for r in results}
         self.assertIn("AAPL", scored)
 
+    def test_all_nine_components_are_computed(self):
+        # Regression: the UI passed only 5 of the 9 raw blocks, so
+        # score_symbol silently awarded 0 for momentum + hurst (16-22 of
+        # 100 points dead) and UI scores diverged from the stock-score CLI.
+        r = self.at.session_state["score_results"][0]
+        self.assertIn("momentum", r)
+        self.assertIn("hurst", r)
+        self.assertIsNotNone(r["momentum"].get("mom_12_1"),
+                             "momentum must be computed on the daily bars")
+        self.assertIsNotNone(r["hurst"].get("hurst"),
+                             "hurst must be computed on the daily bars")
+        notes = " ".join(r.get("notes", []))
+        self.assertIn("momentum", notes, "momentum points must be awarded")
+        self.assertIn("hurst", notes, "hurst points must be awarded")
+
     def test_default_range_gives_real_scores(self):
         # Regression: a too-short default date range (the 1Y sidebar preset)
         # left every symbol below the horizon's min_bars, so score_symbol
@@ -240,6 +255,10 @@ class TestBriefingRangeWarning(unittest.TestCase):
                       "prompt must spell out the broker's fee mechanics")
         self.assertIn("predictive edge", prompt,
                       "prompt must carry the score-reliability caveat")
+        # all 9 score components + data freshness reach Claude
+        self.assertIn("Mom12-1", prompt)
+        self.assertIn("Hurst", prompt)
+        self.assertIn("Data-asof", prompt)
 
 
 class TestBriefingBrokerSelector(unittest.TestCase):
