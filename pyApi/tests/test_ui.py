@@ -236,6 +236,37 @@ class TestBriefingRangeWarning(unittest.TestCase):
                         "briefing prompt should build over the default range")
 
 
+class TestBriefingBrokerSelector(unittest.TestCase):
+    """The Briefing tab's broker selector is wired to the Briefing
+    strategy's real fee model (broker transfer, not prompt decoration)."""
+
+    def setUp(self):
+        import tempfile
+        from unittest import mock
+        from stock_toolkit import game
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        p = mock.patch.object(
+            game, "DEFAULT_PORTFOLIO_DB",
+            pathlib.Path(self._tmp.name) / "portfolio.db")
+        p.start()
+        self.addCleanup(p.stop)
+        self.game = game
+
+    def test_changing_selector_transfers_the_strategy(self):
+        self.game.create_portfolio("Briefing strategy",
+                                   starting_cash=10_000, activate=False)
+        at = run_app()
+        sel = [s for s in at.selectbox if s.key == "brief_broker_key"]
+        self.assertTrue(sel, "briefing broker selector missing")
+        sel[0].set_value("yuh")
+        at.run()
+        self.assertEqual([e.value for e in at.exception], [])
+        rec = [p for p in self.game.list_portfolios(include_archived=True)
+               if p["name"] == "Briefing strategy"][0]
+        self.assertEqual(rec["broker"], "yuh")
+
+
 class TestScoreBacktestUI(unittest.TestCase):
     """The self-validating 'Does this score predict returns?' section in
     the Score tab drives stock_toolkit.score_validation and renders the

@@ -393,15 +393,35 @@ Keep responses concise and conversational."""
             }[h],
             key="brief_horizon"
         )
-        # The broker is no longer a free-floating dropdown: proposals are
-        # executed in the Briefing strategy, so the fee context Claude
-        # reasons about is that portfolio's actual fee model.
-        from stock_toolkit.game import BROKERS as _BROKERS
+        # The broker is the Briefing STRATEGY's fee model, not free-floating
+        # prompt decoration: proposals execute in that portfolio and pay
+        # these fees. Changing it here is a real broker transfer (past
+        # trades keep their fees; audited). Before the strategy exists,
+        # the choice is remembered and applied at creation.
+        from stock_toolkit.game import (
+            BROKERS as _BROKERS, set_broker as _set_broker,
+        )
         _rec = _briefing_strategy_record()
-        brief_broker = _BROKERS[
-            (_rec or {}).get("broker", "plain")]["label"]
-        st.caption(f"Broker: **{brief_broker}** (from the Briefing "
-                   "strategy — its trades pay these fees)")
+        _bkeys = list(_BROKERS)
+        _cur = ((_rec or {}).get("broker")
+                or st.session_state.get("brief_broker_choice", "plain"))
+        _choice = st.selectbox(
+            "Broker (fee model)", _bkeys, index=_bkeys.index(_cur),
+            format_func=lambda k: _BROKERS[k]["label"],
+            key="brief_broker_key",
+            help="The Briefing strategy's broker — its trades pay these "
+                 "fees, and Claude reasons with them. Changing it works "
+                 "like a broker transfer: past trades keep the fees they "
+                 "paid; only future trades pay the new schedule.",
+        )
+        if _rec and _choice != _rec.get("broker", "plain"):
+            _set_broker(_rec["id"], _choice)
+            st.rerun()
+        st.session_state["brief_broker_choice"] = _choice
+        if not _rec:
+            st.caption("Applied when the strategy is created on the "
+                       "first confirmed trade.")
+        brief_broker = _BROKERS[_choice]["label"]
         brief_budget = st.number_input(
             "Available budget (CHF)", min_value=100, max_value=100000,
             value=500, step=100, key="brief_budget"
@@ -740,6 +760,8 @@ Keep responses concise and conversational."""
                                     BRIEFING_STRATEGY_NAME,
                                     starting_cash=start_cash,
                                     activate=False,
+                                    broker=st.session_state.get(
+                                        "brief_broker_choice", "plain"),
                                 )
                             except _GameError as e:
                                 st.error(f"Couldn't create strategy: {e}")
