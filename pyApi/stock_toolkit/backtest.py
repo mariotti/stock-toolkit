@@ -20,14 +20,17 @@ Install dependencies:
 """
 
 import argparse
-import sqlite3
 import sys
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
 
-from stock_toolkit.common import LIVE_DB, HIST_DIR, NoDataError
+from stock_toolkit.common import (
+    LIVE_DB, HIST_DIR, NoDataError, SOURCE_PRIORITY,
+    discover_price_dbs as _discover_price_dbs,
+    load_daily_prices as _load_daily_prices,
+)
 
 # Public API — frozen from 2.x. Indicator helpers (_rsi, _sma, _bbands,
 # _macd) are deliberately not exported; consumers should pull them from
@@ -40,75 +43,21 @@ __all__ = [
     "Backtester",
 ]
 
-SOURCE_PRIORITY = [
-    "alphavantage", "fmp", "yfinance",
-    "finnhub", "twelvedata", "polygon", "marketstack",
-]
-
 # ─────────────────────────────────────────────
-#  DATA LOADING  (mirrors stock_analysis.py)
+#  DATA LOADING  (shared impl in stock_toolkit.common)
 # ─────────────────────────────────────────────
 
 def discover_dbs() -> list[Path]:
-    dbs = []
-    if LIVE_DB.exists():
-        dbs.append(LIVE_DB)
-    if HIST_DIR.exists():
-        dbs += sorted(HIST_DIR.glob("*.db"))
-    if not dbs:
-        raise NoDataError("No databases found. Run the collector first.")
-    return dbs
+    return _discover_price_dbs(LIVE_DB, HIST_DIR, required=True)
 
 
 def load_prices(symbol: str, date_from: str | None, date_to: str | None,
                 source: str | None) -> pd.DataFrame:
     """Load daily close prices for a single symbol, sorted by date."""
-    dbs = discover_dbs()
-    frames = []
-    for db in dbs:
-        try:
-            con = sqlite3.connect(db)
-            df  = pd.read_sql(
-                "SELECT timestamp, source, open, high, low, close, volume "
-                "FROM prices WHERE symbol=? AND interval='1d' ORDER BY timestamp",
-                con, params=[symbol.upper()]
-            )
-            con.close()
-            if not df.empty:
-                frames.append(df)
-        except Exception:
-            pass
-
-    if not frames:
-        raise NoDataError(f"No daily data found for {symbol}.")
-
-    df = pd.concat(frames, ignore_index=True)
-    df["timestamp"] = pd.to_datetime(df["timestamp"], format="mixed", utc=True,
-                                     errors="coerce")
-    df = df.dropna(subset=["timestamp", "close"])
-    for col in ["open", "high", "low", "close", "volume"]:
-        df[col] = pd.to_numeric(df[col], errors="coerce")
-
-    # source dedup
-    if source:
-        df = df[df["source"] == source]
-    else:
-        prio = {s: i for i, s in enumerate(SOURCE_PRIORITY)}
-        df["_p"] = df["source"].map(lambda s: prio.get(s, 99))
-        df = df.sort_values("_p").drop_duplicates(subset=["timestamp"], keep="first")
-        df = df.drop(columns=["_p"])
-
-    df = df.sort_values("timestamp").reset_index(drop=True)
-
-    if date_from:
-        df = df[df["timestamp"] >= pd.Timestamp(date_from, tz="UTC")]
-    if date_to:
-        df = df[df["timestamp"] <= pd.Timestamp(date_to, tz="UTC")]
-
-    if df.empty:
-        raise NoDataError(f"No data for {symbol} in the requested range.")
-
-    return df.reset_index(drop=True)
+    return _load_daily_prices(symbol, date_from, date_to,
+                              dbs=discover_dbs(),
+                              source_priority=SOURCE_PRIORITY,
+                              source=source, strict=True)
 
 
 # ─────────────────────────────────────────────

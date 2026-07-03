@@ -41,8 +41,11 @@ __all__ = [
     "HIST_DIR",
     "PORTFOLIO_DB",
     "NoDataError",
+    "SOURCE_PRIORITY",
     "load_config",
     "update_config_value",
+    "discover_price_dbs",
+    "load_daily_prices",
 ]
 
 if os.environ.get("STOCK_DIR"):
@@ -272,3 +275,105 @@ _auto_migrate(DATA_DIR)
 LIVE_DB      = DATA_DIR / "stock_data.db"
 HIST_DIR     = DATA_DIR / "historical"
 PORTFOLIO_DB = DATA_DIR / "portfolio.db"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  Shared data access — the ONE place that knows how price DBs are found and
+#  daily bars are loaded. analysis/score/backtest/alerts/inventory keep thin
+#  module-level wrappers (their names are frozen public API, and tests patch
+#  each module's LIVE_DB/HIST_DIR), but the logic lives here so a data-layout
+#  change can't silently miss one of five hand-copied variants again.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Preferred source per (symbol, timestamp) when several APIs supplied the same
+# bar. Higher in the list wins.
+SOURCE_PRIORITY = [
+    "alphavantage",
+    "fmp",
+    "yfinance",
+    "finnhub",
+    "twelvedata",
+    "polygon",
+    "marketstack",
+]
+
+
+def discover_price_dbs(live_db, hist_dir, *, extra_dir=None,
+                       required=False) -> list:
+    """All readable price DBs: the live DB plus every ``*.db`` under the
+    historical dir (or ``extra_dir``, which replaces it). With ``required``
+    an empty result raises NoDataError instead of returning ``[]``."""
+    dbs = []
+    if live_db.exists():
+        dbs.append(live_db)
+    hist = extra_dir or hist_dir
+    if hist.exists():
+        dbs += sorted(hist.glob("*.db"))
+    if required and not dbs:
+        raise NoDataError(
+            f"No database files found.\n"
+            f"  Looked for: {live_db}\n"
+            f"  And:        {hist}/*.db\n"
+            f"  Run the collector first to collect data."
+        )
+    return dbs
+
+
+def load_daily_prices(symbol, date_from, date_to, *, dbs,
+                      source_priority=None, source=None, strict=False):
+    """Daily bars for one symbol across ``dbs``, deduplicated per timestamp
+    by source priority (or filtered to a single ``source``), clipped to the
+    date range. ``strict`` raises NoDataError on no-data / empty-range;
+    otherwise an empty DataFrame is returned."""
+    import sqlite3
+
+    import pandas as pd
+
+    frames = []
+    for db in dbs:
+        try:
+            con = sqlite3.connect(db)
+            df = pd.read_sql(
+                "SELECT timestamp, source, open, high, low, close, volume "
+                "FROM prices WHERE symbol=? AND interval='1d' "
+                "ORDER BY timestamp",
+                con, params=[symbol.upper()]
+            )
+            con.close()
+            if not df.empty:
+                frames.append(df)
+        except Exception:
+            pass
+
+    if not frames:
+        if strict:
+            raise NoDataError(f"No daily data found for {symbol}.")
+        return pd.DataFrame()
+
+    df = pd.concat(frames, ignore_index=True)
+    df["timestamp"] = pd.to_datetime(df["timestamp"], format="mixed",
+                                     utc=True, errors="coerce")
+    df = df.dropna(subset=["timestamp", "close"])
+    for col in ["open", "high", "low", "close", "volume"]:
+        df[col] = pd.to_numeric(df[col], errors="coerce")
+
+    if source:
+        df = df[df["source"] == source]
+    else:
+        prio = {s: i for i, s in enumerate(source_priority or SOURCE_PRIORITY)}
+        df["_p"] = df["source"].map(lambda s: prio.get(s, 99))
+        df = (df.sort_values("_p")
+                .drop_duplicates(subset=["timestamp"], keep="first")
+                .drop(columns=["_p"]))
+
+    df = df.sort_values("timestamp").reset_index(drop=True)
+
+    if date_from:
+        df = df[df["timestamp"] >= pd.Timestamp(date_from, tz="UTC")]
+    if date_to:
+        df = df[df["timestamp"] <= pd.Timestamp(date_to, tz="UTC")]
+    df = df.reset_index(drop=True)
+
+    if strict and df.empty:
+        raise NoDataError(f"No data for {symbol} in the requested range.")
+    return df

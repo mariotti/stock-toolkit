@@ -29,23 +29,14 @@ from pathlib import Path
 import pandas as pd
 import numpy as np
 
-from stock_toolkit.common import LIVE_DB, HIST_DIR, NoDataError
+from stock_toolkit.common import (
+    LIVE_DB, HIST_DIR, NoDataError,
+    SOURCE_PRIORITY, discover_price_dbs as _discover_price_dbs,
+)
 
 # ─────────────────────────────────────────────
 #  CONSTANTS
 # ─────────────────────────────────────────────
-
-# Source preference when multiple APIs have the same (symbol, date).
-# Earlier in the list = higher priority.
-SOURCE_PRIORITY = [
-    "alphavantage",   # exchange-licensed, adjusted closes
-    "fmp",            # 30+ year history, rich fundamentals
-    "yfinance",       # broad coverage, unofficial
-    "finnhub",        # real-time strong
-    "twelvedata",     # good multi-asset
-    "polygon",        # US equities, limited free history
-    "marketstack",    # wide exchange coverage
-]
 
 # pandas resample offset aliases (pandas ≥ 2.2 uses ME/QE/YE)
 _GRAN_ALIAS = {
@@ -122,19 +113,7 @@ def ann_factor(gran: str) -> float:
 
 def discover_dbs() -> list[Path]:
     """Return all readable .db files: live DB + historical DBs in ./data/."""
-    dbs = []
-    if LIVE_DB.exists():
-        dbs.append(LIVE_DB)
-    if HIST_DIR.exists():
-        dbs += sorted(HIST_DIR.glob("*.db"))
-    if not dbs:
-        raise NoDataError(
-            f"No database files found.\n"
-            f"  Looked for: {LIVE_DB}\n"
-            f"  And:        {HIST_DIR}/*.db\n"
-            f"  Run the collector first to collect data."
-        )
-    return dbs
+    return _discover_price_dbs(LIVE_DB, HIST_DIR, required=True)
 
 
 def load_raw(dbs: list[Path], symbols: list[str] | None = None) -> pd.DataFrame:

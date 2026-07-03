@@ -20,18 +20,14 @@ import sqlite3
 import sys
 from pathlib import Path
 
-from stock_toolkit.common import LIVE_DB, HIST_DIR
+from stock_toolkit.common import (
+    LIVE_DB, HIST_DIR, discover_price_dbs as _discover_price_dbs,
+)
 
 # ── helpers ───────────────────────────────────────────────────────────────────
 
 def discover_dbs(extra_dir: Path | None = None) -> list[Path]:
-    dbs = []
-    if LIVE_DB.exists():
-        dbs.append(LIVE_DB)
-    hist = extra_dir or HIST_DIR
-    if hist.exists():
-        dbs += sorted(hist.glob("*.db"))
-    return dbs
+    return _discover_price_dbs(LIVE_DB, HIST_DIR, extra_dir=extra_dir)
 
 
 def query_db(db: Path, symbol_filter: list[str] | None) -> list[dict]:

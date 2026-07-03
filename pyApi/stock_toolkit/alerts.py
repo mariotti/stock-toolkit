@@ -45,7 +45,8 @@ import pandas as pd
 # ─────────────────────────────────────────────
 
 from stock_toolkit.common import (
-    CONFIG_PATH, DATA_DIR, HIST_DIR, LIVE_DB, load_config,
+    CONFIG_PATH, DATA_DIR, HIST_DIR, LIVE_DB, SOURCE_PRIORITY, load_config,
+    discover_price_dbs as _discover_price_dbs,
 )
 
 # Public API — frozen from 2.x. Indicator helpers (_rsi, _sma, _ema)
@@ -62,25 +63,15 @@ __all__ = [
 
 STATE_PATH = DATA_DIR / ".alerts_state.json"
 
-SOURCE_PRIORITY = [
-    "alphavantage", "fmp", "yfinance",
-    "finnhub", "twelvedata", "polygon", "marketstack",
-]
-
 _cfg = load_config(CONFIG_PATH)
 
 
 # ─────────────────────────────────────────────
-#  DATA LOADING
+#  DATA LOADING  (shared impl in stock_toolkit.common)
 # ─────────────────────────────────────────────
 
 def discover_dbs() -> list[Path]:
-    dbs = []
-    if LIVE_DB.exists():
-        dbs.append(LIVE_DB)
-    if HIST_DIR.exists():
-        dbs += sorted(HIST_DIR.glob("*.db"))
-    return dbs
+    return _discover_price_dbs(LIVE_DB, HIST_DIR)
 
 
 def load_series(symbol: str, n_bars: int = 250) -> pd.DataFrame:

@@ -48,12 +48,11 @@ import pandas as pd
 
 warnings.filterwarnings("ignore")
 
-from stock_toolkit.common import LIVE_DB, HIST_DIR, NoDataError
-
-SOURCE_PRIORITY = [
-    "alphavantage", "fmp", "yfinance",
-    "finnhub", "twelvedata", "polygon", "marketstack",
-]
+from stock_toolkit.common import (
+    LIVE_DB, HIST_DIR, NoDataError, SOURCE_PRIORITY,
+    discover_price_dbs as _discover_price_dbs,
+    load_daily_prices as _load_daily_prices,
+)
 
 # ─────────────────────────────────────────────
 #  HORIZON PROFILES
@@ -127,14 +126,7 @@ PENALTY = {
 # ─────────────────────────────────────────────
 
 def discover_dbs() -> list[Path]:
-    dbs = []
-    if LIVE_DB.exists():
-        dbs.append(LIVE_DB)
-    if HIST_DIR.exists():
-        dbs += sorted(HIST_DIR.glob("*.db"))
-    if not dbs:
-        raise NoDataError("No databases found. Run the collector first.")
-    return dbs
+    return _discover_price_dbs(LIVE_DB, HIST_DIR, required=True)
 
 
 def list_all_symbols() -> list[str]:
@@ -156,43 +148,9 @@ def list_all_symbols() -> list[str]:
 def load_prices(symbol: str, date_from: str | None,
                 date_to: str | None) -> pd.DataFrame:
     """Load daily bars for a single symbol, deduplicated by source priority."""
-    dbs    = discover_dbs()
-    frames = []
-    for db in dbs:
-        try:
-            con = sqlite3.connect(db)
-            df  = pd.read_sql(
-                "SELECT timestamp, source, open, high, low, close, volume "
-                "FROM prices WHERE symbol=? AND interval='1d' ORDER BY timestamp",
-                con, params=[symbol.upper()]
-            )
-            con.close()
-            if not df.empty:
-                frames.append(df)
-        except Exception:
-            pass
-
-    if not frames:
-        return pd.DataFrame()
-
-    df = pd.concat(frames, ignore_index=True)
-    df["timestamp"] = pd.to_datetime(df["timestamp"], format="mixed",
-                                      utc=True, errors="coerce")
-    df = df.dropna(subset=["timestamp", "close"])
-    for col in ["open", "high", "low", "close", "volume"]:
-        df[col] = pd.to_numeric(df[col], errors="coerce")
-
-    prio = {s: i for i, s in enumerate(SOURCE_PRIORITY)}
-    df["_p"] = df["source"].map(lambda s: prio.get(s, 99))
-    df = df.sort_values("_p").drop_duplicates(subset=["timestamp"], keep="first")
-    df = df.drop(columns=["_p"]).sort_values("timestamp").reset_index(drop=True)
-
-    if date_from:
-        df = df[df["timestamp"] >= pd.Timestamp(date_from, tz="UTC")]
-    if date_to:
-        df = df[df["timestamp"] <= pd.Timestamp(date_to, tz="UTC")]
-
-    return df.reset_index(drop=True)
+    return _load_daily_prices(symbol, date_from, date_to,
+                              dbs=discover_dbs(),
+                              source_priority=SOURCE_PRIORITY)
 
 
 # ─────────────────────────────────────────────
