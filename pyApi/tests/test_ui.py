@@ -232,8 +232,14 @@ class TestBriefingRangeWarning(unittest.TestCase):
     def test_default_range_builds_prompt(self):
         at = self._preview(run_app())            # default 5Y range
         self.assertEqual([e.value for e in at.exception], [])
-        self.assertTrue(at.session_state["brief_prompt"],
+        prompt = at.session_state["brief_prompt"]
+        self.assertTrue(prompt,
                         "briefing prompt should build over the default range")
+        # v2.6 enrichments: fee mechanics + score-honesty caveat
+        self.assertIn("FEES", prompt,
+                      "prompt must spell out the broker's fee mechanics")
+        self.assertIn("predictive edge", prompt,
+                      "prompt must carry the score-reliability caveat")
 
 
 class TestBriefingBrokerSelector(unittest.TestCase):
@@ -621,6 +627,53 @@ class TestBriefingStateSummary(unittest.TestCase):
         self.assertIn("AAPL", out)
         self.assertIn("qty=", out)
         self.assertIn("P/L=", out)
+        # v2.6: entry price + holding age on every open position
+        self.assertIn("entry=", out)
+        self.assertIn("held=", out)
+
+    def test_closed_trades_feed_back_with_notes(self):
+        # v2.6 — the learning loop: past outcomes + their notes are shown
+        # back to Claude so proposal N+1 can improve on proposal N.
+        from stock_toolkit.game import buy, create_portfolio, sell
+        from stock_toolkit.ui.tabs.briefing import (
+            BRIEFING_STRATEGY_NAME, _briefing_state_summary,
+        )
+
+        rec = create_portfolio(BRIEFING_STRATEGY_NAME, starting_cash=10_000.0,
+                               activate=False)
+        buy("AAPL", 1_000.0, portfolio_id=rec["id"])
+        sell("AAPL", portfolio_id=rec["id"],
+             note="[Claude] cutting the flat position")
+        out = _briefing_state_summary()
+        self.assertIn("Closed trades: 1", out)
+        self.assertIn("Most recent outcomes", out)
+        self.assertIn("cutting the flat position", out)
+        # flat round trip at slippage-only broker → a small realized loss
+        self.assertIn("losses 1", out)
+
+
+class TestBriefingFeesSummary(unittest.TestCase):
+    """_fees_to_summary spells out the broker's real cost mechanics."""
+
+    def test_plain_says_no_fees(self):
+        from stock_toolkit.ui.tabs.briefing import _fees_to_summary
+        out = _fees_to_summary("plain", 500)
+        self.assertIn("no broker fees", out)
+
+    def test_yuh_states_per_side_roundtrip_and_minimum(self):
+        from stock_toolkit.ui.tabs.briefing import _fees_to_summary
+        out = _fees_to_summary("yuh", 500)
+        self.assertIn("1.45% per side", out)
+        self.assertIn("round trip", out.lower())
+        self.assertIn("3.1%", out)                 # 2×(1.45+0.1)
+        self.assertIn("Minimum fee", out)
+        self.assertIn("200", out)                  # min 1 / 0.5% floor
+
+    def test_degiro_uses_eur_home_wording(self):
+        from stock_toolkit.ui.tabs.briefing import _fees_to_summary
+        out = _fees_to_summary("degiro", 500)
+        self.assertIn("non-EUR", out)
+        self.assertIn("EUR-listed", out)
 
 
 class TestEmptyDatabase(unittest.TestCase):

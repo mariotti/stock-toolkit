@@ -53,14 +53,70 @@ def _briefing_strategy_record():
     return None
 
 
+def _position_opened_dates(trades: list) -> dict:
+    """{symbol: date-str} when the CURRENT position was opened — i.e. the
+    buy that took the symbol's net qty from flat to >0 most recently."""
+    import collections
+    qty = collections.defaultdict(float)
+    opened = {}
+    for t in trades:
+        sym = t["symbol"]
+        if t["side"] == "buy":
+            if qty[sym] <= 1e-9:
+                opened[sym] = t["timestamp"][:10]
+            qty[sym] += t["qty"]
+        else:
+            qty[sym] -= t["qty"]
+            if qty[sym] <= 1e-9:
+                opened.pop(sym, None)
+    return opened
+
+
+def _closed_trades(trades: list, limit: int = 8) -> list:
+    """FIFO-matched realized P&L events (same matching as trade_stats),
+    newest last, keeping the sell's date and note so Claude can learn
+    from what actually happened. Returns dicts:
+    {date, symbol, pnl, pnl_pct, note}."""
+    import collections
+    pos = collections.defaultdict(lambda: {"qty": 0.0, "avg": 0.0})
+    events = []
+    for t in trades:
+        p = pos[t["symbol"]]
+        if t["side"] == "buy":
+            new_qty = p["qty"] + t["qty"]
+            p["avg"] = ((p["qty"] * p["avg"] + t["qty"] * t["fill_price"])
+                        / new_qty if new_qty > 0 else 0.0)
+            p["qty"] = new_qty
+        else:
+            sold = min(t["qty"], p["qty"])
+            if sold > 0:
+                pnl = (t["fill_price"] - p["avg"]) * sold
+                pnl_pct = ((t["fill_price"] / p["avg"] - 1) * 100
+                           if p["avg"] > 0 else 0.0)
+                events.append({"date": t["timestamp"][:10],
+                               "symbol": t["symbol"], "pnl": pnl,
+                               "pnl_pct": pnl_pct,
+                               "note": (t.get("note") or "").strip()})
+                p["qty"] -= sold
+                if p["qty"] <= 1e-9:
+                    p["qty"], p["avg"] = 0.0, 0.0
+    return events[-limit:]
+
+
 def _briefing_state_summary() -> str:
-    """Compact text snapshot of the Briefing strategy for the proposal prompt."""
-    from stock_toolkit.game import mark_to_market
+    """Text snapshot of the Briefing strategy for the proposal prompt:
+    balances, open positions (with entry price + holding age), recent
+    closed trades with their outcomes and notes, and outcome stats —
+    so Claude can learn from what its past proposals actually did."""
+    import datetime as _dt
+
+    from stock_toolkit.game import get_trades, mark_to_market, trade_stats
     rec = _briefing_strategy_record()
     if rec is None:
         return ("The Briefing strategy has not been created yet — it will be "
                 "spun up the first time the user confirms a proposed trade.")
     mtm = mark_to_market(portfolio_id=rec["id"])
+    trades = get_trades(portfolio_id=rec["id"])
     lines = [
         f"Strategy: {mtm['name']}",
         f"  Cash:          {mtm['cash']:>10,.2f}",
@@ -69,14 +125,38 @@ def _briefing_state_summary() -> str:
         f"  Return:        {mtm['total_return_pct']:+.2f}% from inception",
     ]
     if mtm["holdings"]:
+        opened = _position_opened_dates(trades)
+        today = _dt.date.today()
         lines.append("  Open positions:")
         for h in mtm["holdings"]:
+            age = ""
+            if h["symbol"] in opened:
+                days = (today
+                        - _dt.date.fromisoformat(opened[h["symbol"]])).days
+                age = f"  held={days}d"
             lines.append(
                 f"    {h['symbol']:<8} qty={h['qty']:>8.4f}  "
-                f"value={h['value']:>8.2f}  P/L={h['pnl']:+.2f}"
+                f"entry={h['avg_cost']:>8.2f}  now={h['price']:>8.2f}  "
+                f"value={h['value']:>8.2f}  P/L={h['pnl']:+.2f} "
+                f"({h['pnl_pct']:+.1f}%){age}"
             )
     else:
         lines.append("  Open positions: none")
+
+    closed = _closed_trades(trades)
+    if closed:
+        st_ = trade_stats(portfolio_id=rec["id"])
+        lines.append(
+            f"  Closed trades: {st_['closed_count']} "
+            f"(wins {st_['wins']} / losses {st_['losses']}, "
+            f"win rate {st_['win_rate'] * 100:.0f}%, "
+            f"realized P/L {st_['realized_pnl']:+.2f})")
+        lines.append("  Most recent outcomes (learn from these):")
+        for e in closed:
+            note = f'  — "{e["note"]}"' if e["note"] else ""
+            lines.append(
+                f"    {e['date']} {e['symbol']:<8} "
+                f"{e['pnl']:+8.2f} ({e['pnl_pct']:+.1f}%){note}")
     return "\n".join(lines)
 
 from stock_toolkit import alerts as sal
@@ -135,6 +215,49 @@ def _alerts_to_summary(alerts_ctx: dict) -> str:
         if chg is not None:
             line += f", change={chg:+.1f}%"
         lines.append(line)
+    return "\n".join(lines)
+
+
+def _fees_to_summary(broker_key: str, budget: float) -> str:
+    """Spell out what the strategy's broker actually costs, so Claude
+    sizes trades sensibly instead of proposing fee-toxic small orders.
+    Numbers are computed from the live fee model at the given budget."""
+    from stock_toolkit.game import BROKERS, SLIPPAGE, trade_fee
+
+    b = BROKERS.get(broker_key) or BROKERS["plain"]
+    slip_pct = SLIPPAGE * 100
+    if broker_key == "plain" or not any(
+            b[k] for k in ("commission_fixed", "commission_pct",
+                           "commission_per_share", "commission_min",
+                           "fx_pct")):
+        return (f"FEES: no broker fees (plain) — only ~{slip_pct:.1f}% "
+                "market slippage per side.")
+
+    home = b.get("home", "CHF")
+    # representative per-side cost at the stated budget (US symbol ≈ a
+    # foreign listing; assume ~100/share for per-share schedules)
+    fgn = trade_fee(broker_key, budget, budget / 100.0, "AAPL")
+    hom_sym = {"CHF": "NESN.SW", "EUR": "ENEL.MI"}.get(home, "NESN.SW")
+    hom = trade_fee(broker_key, budget, budget / 100.0, hom_sym)
+    fgn_pct = fgn / budget * 100
+    round_trip = 2 * (fgn_pct + slip_pct)
+    lines = [
+        f"FEES ({b['label']}, last-known {b['as_of']}):",
+        f"  ≈{fgn_pct:.2f}% per side on a {budget:.0f} order in a "
+        f"non-{home} symbol ({fgn:.2f}); {home}-listed symbols pay "
+        f"≈{hom / budget * 100:.2f}%.",
+        f"  Flat round trip on a foreign symbol ≈{round_trip:.1f}% incl. "
+        f"2×{slip_pct:.1f}% slippage — churning and quick flips are "
+        "expensive; a trade needs to move more than that to break even.",
+    ]
+    if b["commission_min"] > 0:
+        # below this size the minimum dominates the percentage
+        floor = (b["commission_min"] / b["commission_pct"]
+                 if b["commission_pct"] > 0 else budget)
+        lines.append(
+            f"  Minimum fee {b['commission_min']:.2f} per order → orders "
+            f"under ≈{floor:.0f} pay proportionally more; prefer fewer, "
+            "larger trades.")
     return "\n".join(lines)
 
 
@@ -503,12 +626,19 @@ Keep responses concise and conversational."""
             news_block = format_for_prompt(sentiment) if sentiment else ""
 
         alert_block = _alerts_to_summary(alerts_ctx)
+        fees_block = _fees_to_summary(
+            st.session_state.get("brief_broker_choice", "plain"),
+            float(brief_budget))
 
         return (
             f"Today's watchlist analysis — {brief_horizon} horizon\n"
             f"Budget: {brief_budget} CHF | Broker: {brief_broker}\n"
             f"Date range: {date_from_str} → {date_to_str}\n\n"
-            f"SCORES (ranked best→worst):\n{_scores_to_summary(scores)}\n\n"
+            f"{fees_block}\n\n"
+            f"SCORES (ranked best→worst):\n{_scores_to_summary(scores)}\n"
+            "Note: the score's own walk-forward backtest shows NO "
+            "statistically reliable predictive edge — treat the ranking "
+            "as a description of past behaviour, not a prediction.\n\n"
             + (f"FUNDAMENTALS (valuation snapshot, yfinance):\n{funda_table}\n\n"
                if funda_table else "")
             + "CURRENT INDICATORS:\n" + alert_block + "\n\n"
