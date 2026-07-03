@@ -701,6 +701,65 @@ class TestDaysSinceBar(unittest.TestCase):
         self.assertGreater(game.STALE_PRICE_DAYS, 0)
 
 
+class TestFeeRoundTrip(GameTestCase):
+    """End-to-end fee arithmetic in closed form: buy pays the slippage
+    fee, the held value tracks the market exactly, sell pays the fee
+    again, and a flat-price round trip costs exactly spend·2s/(1+s) —
+    booked honestly as a LOSS in trade_stats, never as breakeven.
+
+    Individual pieces (buy premium, sell discount, mtm totals) have
+    their own tests; this one pins the composed business invariant that
+    the user-facing numbers hang together across a full trade cycle."""
+
+    START, SPEND, P = 10_000.0, 1_000.0, 200.0   # AAPL fixture close = 200
+
+    def _set_price(self, close, ts="2026-06-13T00:00:00+00:00"):
+        con = sqlite3.connect(self.price_db)
+        con.execute(
+            "INSERT OR REPLACE INTO prices (symbol, source, timestamp, "
+            "interval, close) VALUES ('AAPL', 'yfinance', ?, '1d', ?)",
+            (ts, close),
+        )
+        con.commit(); con.close()
+
+    def test_buy_hold_move_sell_matches_closed_form(self):
+        s = game.SLIPPAGE
+        game.init_portfolio(starting_cash=self.START, db=self.port_db)
+
+        # BUY: fill = P(1+s), and qty·fill == spend to the cent
+        out = game.buy("AAPL", self.SPEND, db=self.port_db)
+        self.assertAlmostEqual(out["fill_price"], self.P * (1 + s), places=9)
+        self.assertAlmostEqual(out["qty"] * out["fill_price"], self.SPEND,
+                               places=6)
+
+        # HOLD: marked at market ⇒ equity == spend/(1+s) (down the buy fee)
+        mtm = game.mark_to_market(db=self.port_db)
+        self.assertAlmostEqual(mtm["equity"], self.SPEND / (1 + s), places=6)
+
+        # MOVE: market +10% ⇒ equity == qty × new market price, exactly
+        self._set_price(self.P * 1.10)
+        mtm = game.mark_to_market(db=self.port_db)
+        self.assertAlmostEqual(mtm["equity"], out["qty"] * self.P * 1.10,
+                               places=6)
+
+        # SELL flat (price back at P): fill = P(1−s)
+        self._set_price(self.P, ts="2026-06-14T00:00:00+00:00")
+        sold = game.sell("AAPL", db=self.port_db)
+        self.assertAlmostEqual(sold["fill_price"], self.P * (1 - s), places=9)
+
+        # ROUND TRIP: total == start − spend·2s/(1+s); equity flat at 0
+        mtm = game.mark_to_market(db=self.port_db)
+        rt_cost = self.SPEND * 2 * s / (1 + s)
+        self.assertAlmostEqual(mtm["equity"], 0.0, places=9)
+        self.assertAlmostEqual(mtm["total"], self.START - rt_cost, places=6)
+
+        # HONESTY: the flat round trip is a loss of exactly the fees
+        st = game.trade_stats(db=self.port_db)
+        self.assertEqual((st["closed_count"], st["wins"], st["losses"]),
+                         (1, 0, 1))
+        self.assertAlmostEqual(st["realized_pnl"], -rt_cost, places=6)
+
+
 if __name__ == "__main__":
     runner = unittest.main(verbosity=2, exit=False)
     sys.exit(0 if runner.result.wasSuccessful() else 1)
