@@ -1153,6 +1153,29 @@ class TestGamePageInteraction(unittest.TestCase):
         caps = " ".join(c.value for c in at.caption)
         self.assertIn("Broker:", caps, "header must caption the fee model")
 
+    def test_fee_reminder_at_buy_and_sell_time(self):
+        # v2.6 — both trade forms remind the user what the strategy's
+        # broker charges: absolute fee + % on buy AND sell, and an
+        # explicit 'no broker fees (plain)' note when there are none.
+        from stock_toolkit import game
+        rec = game.create_portfolio("YuhStrat", starting_cash=10_000,
+                                    broker="yuh")
+        game.buy("AAPL", 1_000, portfolio_id=rec["id"])
+        at = self._page()
+        caps = [c.value for c in at.caption]
+        self.assertTrue(any("broker fee" in c and "%" in c
+                            and "+10 bps" in c for c in caps),
+                        "buy form must show the fee and its %")
+        self.assertTrue(any("broker fee" in c and "%" in c
+                            and "−10 bps" in c for c in caps),
+                        "sell form must show the fee and its %")
+
+        game.create_portfolio("PlainStrat", starting_cash=10_000)
+        at = self._page()
+        caps = " ".join(c.value for c in at.caption)
+        self.assertIn("no broker fees (plain)", caps,
+                      "plain strategies must say fees are absent")
+
     def test_stale_price_warning_in_buy_form(self):
         # the fixture's latest bar is many days old (> STALE_PRICE_DAYS), so
         # the buy form must warn that the symbol isn't being collected rather

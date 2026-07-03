@@ -343,8 +343,9 @@ def render():
                     est_fee = trade_fee(mtm["broker"], amount, amount / fill_buy,
                                         sym_buy)
                     shares = (amount - est_fee) / fill_buy
-                    fee_txt = (f" · broker fee ≈ **{_money(est_fee)}**"
-                               if est_fee > 0 else "")
+                    fee_txt = (f" · broker fee ≈ **{_money(est_fee)}** "
+                               f"({est_fee / amount * 100:.2f}%)"
+                               if est_fee > 0 else " · no broker fees (plain)")
                     st.caption(
                         f"Last close: `{_money(price)}` as of {as_of[:10]} · "
                         f"fill `{_money(fill_buy)}` (+{SLIPPAGE_BPS} bps)"
@@ -362,7 +363,9 @@ def render():
                         st.success(
                             f"Bought **{out['qty']:.4f}** {out['symbol']} "
                             f"@ {_money(out['fill_price'])} for "
-                            f"{_money(out['spent'])}")
+                            f"{_money(out['spent'])}"
+                            + (f" (incl. fee {_money(out['fee'])})"
+                               if out.get("fee") else ""))
                         st.rerun()
                     except GameError as e:
                         st.error(str(e))
@@ -386,11 +389,17 @@ def render():
             )
             if qty_sell > 0:
                 fill_sell = pos["price"] * (1 - SLIPPAGE_BPS / 10000.0)
-                proceeds  = qty_sell * fill_sell
+                gross     = qty_sell * fill_sell
+                est_fee   = min(trade_fee(mtm["broker"], gross, qty_sell,
+                                          sym_sell), gross)
+                proceeds  = gross - est_fee
+                fee_txt = (f" · broker fee ≈ **{_money(est_fee)}** "
+                           f"({est_fee / gross * 100:.2f}%)"
+                           if est_fee > 0 else " · no broker fees (plain)")
                 st.caption(
                     f"Last close: `{_money(pos['price'])}` · fill "
-                    f"`{_money(fill_sell)}` (−{SLIPPAGE_BPS} bps) → "
-                    f"proceeds **{_money(proceeds)}**"
+                    f"`{_money(fill_sell)}` (−{SLIPPAGE_BPS} bps)"
+                    f"{fee_txt} → proceeds **{_money(proceeds)}**"
                 )
             sell_note = st.text_input(
                 "Why? (optional note — your reason for closing/trimming)",
@@ -404,7 +413,9 @@ def render():
                     st.success(
                         f"Sold **{out['qty']:.4f}** {out['symbol']} "
                         f"@ {_money(out['fill_price'])} for "
-                        f"{_money(out['proceeds'])}")
+                        f"{_money(out['proceeds'])}"
+                        + (f" (after fee {_money(out['fee'])})"
+                           if out.get("fee") else ""))
                     st.rerun()
                 except GameError as e:
                     st.error(str(e))
