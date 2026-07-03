@@ -790,6 +790,26 @@ class TestBrokerFees(GameTestCase):
         self.assertAlmostEqual(usd - chf, 9.5, places=9)
         self.assertAlmostEqual(eur, usd, places=9)
 
+    def test_saxo_pct_with_minimum(self):
+        # 0.08% of 10k = 8 > min 3 → pct applies; small trade → min 3
+        self.assertAlmostEqual(game.trade_fee("saxo", 10_000, 5, "NESN.SW"),
+                               8.0, places=9)
+        self.assertAlmostEqual(game.trade_fee("saxo", 1_000, 5, "NESN.SW"),
+                               3.0, places=9)
+        # FX 0.25% on non-CHF
+        self.assertAlmostEqual(game.trade_fee("saxo", 10_000, 5, "AAPL"),
+                               8.0 + 25.0, places=9)
+
+    def test_degiro_flat_fee_with_eur_home(self):
+        # flat ~2 per order; FX relative to EUR home: .MI is FX-free,
+        # US and .SW (CHF) both pay the 0.25% markup
+        self.assertAlmostEqual(game.trade_fee("degiro", 1000, 5, "ENEL.MI"),
+                               2.0, places=9)
+        self.assertAlmostEqual(game.trade_fee("degiro", 1000, 5, "AAPL"),
+                               2.0 + 2.5, places=9)
+        self.assertAlmostEqual(game.trade_fee("degiro", 1000, 5, "NESN.SW"),
+                               2.0 + 2.5, places=9)
+
     def test_create_persists_broker_and_validates(self):
         rec = game.create_portfolio("AtYuh", db=self.port_db, broker="yuh")
         self.assertEqual(rec["broker"], "yuh")

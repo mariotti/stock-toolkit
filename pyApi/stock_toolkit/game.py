@@ -85,7 +85,9 @@ DEFAULT_STARTING_CASH = 10_000.0
 #    commission_min/max    clamp on the commission (max 0 = no cap;
 #                          max as fraction<1 = cap at that share of value)
 #    fx_pct                markup on trade value when the symbol trades in
-#                          a non-CHF currency (inferred from the suffix)
+#                          a currency other than the broker's `home`
+#                          (default CHF; symbol currency inferred from
+#                          the suffix — DEGIRO e.g. is EUR-based)
 #
 #  Currency note: the game is CHF-denominated and currency-naive — fee
 #  minimums quoted in USD are treated at ≈parity with CHF.
@@ -122,6 +124,23 @@ BROKERS = {
         "commission_per_share": 0.0, "commission_min": 9.0,
         "commission_max": 190.0, "fx_pct": 0.0095,
     },
+    "saxo": {
+        "label": "Saxo Bank CH (0.08% min 3, FX 0.25%)",
+        "as_of": "2026-07",
+        "commission_fixed": 0.0, "commission_pct": 0.0008,
+        "commission_per_share": 0.0, "commission_min": 3.0,
+        "commission_max": 0.0, "fx_pct": 0.0025,
+    },
+    "degiro": {
+        # EUR-based: ~€2 flat on US stocks (€1 commission + €1 handling);
+        # FX applies relative to a EUR home, so .MI etc. trade FX-free.
+        "label": "DEGIRO (~2 flat, FX 0.25%, EUR home)",
+        "as_of": "2026-07",
+        "commission_fixed": 2.0, "commission_pct": 0.0,
+        "commission_per_share": 0.0, "commission_min": 0.0,
+        "commission_max": 0.0, "fx_pct": 0.0025,
+        "home": "EUR",
+    },
 }
 
 # Symbol-suffix → trading currency (home = CHF). Suffixless = US/USD.
@@ -151,7 +170,8 @@ def trade_fee(broker: str, trade_value: float, qty: float,
     if cap:
         cap_abs = cap * trade_value if cap < 1 else cap
         commission = min(commission, cap_abs)
-    fx = b["fx_pct"] * trade_value if _symbol_currency(symbol) != "CHF" else 0.0
+    home = b.get("home", "CHF")
+    fx = b["fx_pct"] * trade_value if _symbol_currency(symbol) != home else 0.0
     return commission + fx
 
 
