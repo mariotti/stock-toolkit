@@ -15,6 +15,61 @@ DB schemas are documented in [`SCHEMA.md`](SCHEMA.md).
 
 ---
 
+## 2.5.0 — Self-validating score, self-growing collection, sidebar revamp
+
+The theme of this release is **honesty and self-management**: the score
+now measures (and displays) its own predictive value, the collector
+keeps everything you own or ever bootstrapped fresh without config
+edits, and the portfolio numbers were audited end-to-end against real
+market bars.
+
+### What's new
+
+- **Self-validating score backtest** (`stock_toolkit.score_validation`,
+  surfaced in the Score tab): a point-in-time walk-forward that scores
+  symbols as-of past dates and measures real forward returns. Reports
+  the Information Coefficient with a significance-gated verdict — it
+  cannot overclaim. (Current honest verdict on 46 years of data: no
+  statistically reliable signal.)
+- **Collection universe grows itself** — `SYMBOLS` is now purely a
+  cold-start seed. Steady state collects `SYMBOLS ∪ every symbol in any
+  DB (live + historical) ∪ Game-held symbols − SYMBOLS_IGNORE`, so a
+  bootstrapped or bought ticker never silently ages out.
+- **Sidebar revamp** — filterable scrolling checkbox symbol picker with
+  Select-all/Clear (scales past 20 symbols), plus date-range presets
+  (1M…5Y/Max) and a Custom calendar bounded to the actual data range.
+- **Stale-price buy guard** — the Game warns before you buy a symbol
+  whose latest bar is older than `STALE_PRICE_DAYS`, i.e. one that
+  isn't being collected and would sit on a frozen price.
+
+### Fixed
+
+- **`value_history` zeroed holdings with pre-inception price data** —
+  positions whose latest bar predated the portfolio were valued at 0
+  for the whole curve, so the value graph read far below the
+  mark-to-market headline. It now forward-fills the last known close;
+  the curve's last point reconciles exactly.
+- **Calmar was a dead score component** — the old `/20` divisor gave
+  even the best real asset ~2 of 20 points (empirical Calmar tops out
+  ~2.2). Full marks now at Calmar 3, mirroring Sharpe's calibration.
+- **Short date ranges no longer fail confusingly** — Score and Briefing
+  explain that prices exist but the horizon needs more history, instead
+  of "No data found"; the sidebar default range is 5Y so scoring works
+  out of the box.
+
+### Under the hood
+
+- Test suite 431 → **612 tests**; coverage 59% → **~84%** with a hard
+  CI floor (`--fail-under=80`), Cobertura MR annotations, Codecov
+  upload, and pipeline/coverage badges in both READMEs.
+- Test-count figures in the docs are auto-synced and CI-guarded
+  (`bin/update-test-counts --check`).
+- Game-page tests fully isolated from the developer's real
+  `portfolio.db` (an earlier leak was found, fixed, and the stray data
+  cleaned).
+
+---
+
 ## 2.4.4 — Surface trade + audit row ids in the UI
 
 Tiny UX fix found while exercising v2.4.2's History expander on the
