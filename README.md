@@ -13,6 +13,32 @@ briefing that explains your watchlist in plain English.
 Everything runs locally: your watchlist, API keys, and data never leave your
 machine (except the calls to the data providers you configure).
 
+## Who is this for
+
+**The honest trading sandbox.** Learn how markets, indicators, and — above
+all — *fees* actually behave, with real data and real costs, before any real
+money is at stake.
+
+- **Retail-investing learners (especially Swiss/EU)** — the paper-trading
+  Game charges the *last-known fee schedules of real brokers* (Yuh,
+  Swissquote, Saxo, Interactive Brokers, DEGIRO, incl. FX markups on
+  foreign listings). A flat round trip at Yuh costs ~3%; here you feel
+  that lesson for free.
+- **Educators** — a self-contained instrument for teaching market
+  efficiency: the built-in score *measures its own predictive value*
+  (walk-forward Information Coefficient) and openly reports that it has
+  **no statistically reliable edge**. That admission is the curriculum.
+- **Quant-curious developers** — a tested, readable reference pipeline:
+  multi-source collection with rate budgets, indicator scoring,
+  backtesting, IC validation, audit-logged paper trading, Streamlit UI.
+- **People following AI-built software** — this project was written and
+  is operated end-to-end by AI (code, tests, CI/CD, releases); see
+  [`README_FIRST_HUMAN.md`](README_FIRST_HUMAN.md) for the human's note.
+
+**Who it is *not* for:** anyone looking for a money-making signal. The
+score's own backtest says it doesn't beat chance — and the tool will tell
+you so itself. That honesty is the feature.
+
 ```
 ┌ collect ──────────┐   ┌ analyse ─────────────────┐   ┌ use ──────────────┐
 │ yfinance          │   │ summary · regression     │   │ Streamlit UI      │
