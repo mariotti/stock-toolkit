@@ -72,37 +72,47 @@ def _preset_range(preset, lo, hi):
 def _symbol_picker(all_symbols):
     """Scrollable checkbox list with a filter + Select-all/Clear.
 
-    Selection lives in per-symbol checkbox session_state (keys
-    ``symcb_<SYMBOL>``) so it survives reruns and tab switches. Buttons
-    pre-seed those keys before the checkboxes render — the standard
-    Streamlit pattern that avoids the value=/session_state conflict.
+    The live checkbox keys (``symcb_<SYMBOL>``) are widget-backed, and
+    Streamlit garbage-collects widget state whenever a run doesn't render
+    the widget — i.e. visiting the Admin/Game/Help *pages* wiped them and
+    the selection came back empty. So the selection of record is a plain
+    session key (``sym_selection``) that survives page switches; the
+    checkboxes are re-seeded from it via ``value=`` whenever their widget
+    state has been dropped, and the mirror is refreshed from the actual
+    checkbox states at the end of every run.
     """
-    if not st.session_state.get("_sym_init"):
+    if "sym_selection" not in st.session_state:
         defaults = [s for s in DEFAULT_SYMS if s in all_symbols] or all_symbols[:6]
-        for s in all_symbols:
-            st.session_state[f"symcb_{s}"] = s in defaults
-        st.session_state["_sym_init"] = True
+        st.session_state["sym_selection"] = set(defaults)
+    sel = st.session_state["sym_selection"]
 
     flt = st.text_input("Filter symbols", key="sym_filter",
                         placeholder="🔍  Filter…", label_visibility="collapsed")
     shown = ([s for s in all_symbols if flt.lower() in s.lower()]
              if flt else all_symbols)
 
+    # Buttons mutate the mirror and drop the widget keys, so the
+    # checkboxes below re-seed from the mirror — never setting a widget
+    # key via the Session State API (avoids the default-vs-state warning).
     c1, c2 = st.columns(2)
     if c1.button("Select all", use_container_width=True):
+        sel |= set(shown)
         for s in shown:
-            st.session_state[f"symcb_{s}"] = True
+            st.session_state.pop(f"symcb_{s}", None)
     if c2.button("Clear", use_container_width=True):
+        sel -= set(shown)
         for s in shown:
-            st.session_state[f"symcb_{s}"] = False
+            st.session_state.pop(f"symcb_{s}", None)
 
     with st.container(height=280):
         if not shown:
             st.caption("No symbols match the filter.")
         for s in shown:
-            st.checkbox(s, key=f"symcb_{s}")
+            st.checkbox(s, key=f"symcb_{s}", value=(s in sel))
 
-    selected = [s for s in all_symbols if st.session_state.get(f"symcb_{s}")]
+    selected = [s for s in all_symbols
+                if st.session_state.get(f"symcb_{s}", s in sel)]
+    st.session_state["sym_selection"] = set(selected)
     st.caption(f"**{len(selected)}** selected")
     return selected
 
@@ -117,18 +127,27 @@ def _date_range():
     # (quarter→60 weekly, year→100 weekly, life→120 monthly), so a short
     # default silently penalises every score. 5Y (clamped to available data)
     # restores the old ~3-year default's behaviour.
+    # Like the symbol picker, the widget keys are wiped when another page
+    # renders — the *_persist mirrors keep the choice across page switches.
     preset = st.segmented_control(
         "Range", ["1M", "3M", "6M", "YTD", "1Y", "5Y", "Max", "Custom"],
-        default="5Y", key="date_preset",
+        default=st.session_state.get("date_preset_persist", "5Y"),
+        key="date_preset",
     )
+    preset = preset or st.session_state.get("date_preset_persist", "5Y")
+    st.session_state["date_preset_persist"] = preset
     if preset == "Custom":
         default_from, _ = _preset_range("1Y", lo, hi)
-        rng = st.date_input("Dates", value=(default_from, hi),
-                            min_value=lo, max_value=hi, key="date_range")
+        rng = st.date_input(
+            "Dates",
+            value=st.session_state.get("date_range_persist",
+                                       (default_from, hi)),
+            min_value=lo, max_value=hi, key="date_range")
         if isinstance(rng, (tuple, list)) and len(rng) == 2:
+            st.session_state["date_range_persist"] = (rng[0], rng[1])
             return rng[0], rng[1]
         return default_from, hi
-    frm, to = _preset_range(preset or "1Y", lo, hi)
+    frm, to = _preset_range(preset, lo, hi)
     st.caption(f"{frm}  →  {to}")
     return frm, to
 

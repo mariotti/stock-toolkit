@@ -137,6 +137,37 @@ class TestSidebarSymbolPicker(unittest.TestCase):
         self.assertTrue(all(c.value for c in boxes))
 
 
+class TestSidebarPersistence(unittest.TestCase):
+    """Sidebar choices survive visiting another page and coming back.
+
+    Regression: the checkbox keys (symcb_*) and the date_preset key are
+    widget-backed, and Streamlit garbage-collects widget state whenever a
+    run doesn't render the widget — so app → Admin → app wiped the symbol
+    selection to empty and snapped the date preset back to 5Y. Plain
+    *_persist / sym_selection mirrors now carry them across."""
+
+    @staticmethod
+    def _selected(at):
+        return sorted(c.key[6:] for c in at.sidebar.checkbox if c.value)
+
+    def test_selection_and_preset_survive_admin_round_trip(self):
+        at = run_app(date_preset="Max")
+        click_button(at, "Clear")
+        _checkbox(at, "symcb_AAPL").set_value(True).run()
+        self.assertEqual(self._selected(at), ["AAPL"])
+
+        at.switch_page("pages/01_⚙️_Admin.py")
+        at.run()
+        self.assertEqual([e.value for e in at.exception], [])
+        at.switch_page("app.py")
+        at.run()
+
+        self.assertEqual(self._selected(at), ["AAPL"],
+                         "symbol selection must survive the page switch")
+        self.assertEqual(at.session_state["date_preset_persist"], "Max",
+                         "date preset must survive the page switch")
+
+
 class TestSidebarDateRange(unittest.TestCase):
     """Preset ranges + the Custom calendar."""
 
