@@ -150,6 +150,30 @@ class TestSidebarPersistence(unittest.TestCase):
     def _selected(at):
         return sorted(c.key[6:] for c in at.sidebar.checkbox if c.value)
 
+    @staticmethod
+    def _owner(at):
+        return sorted(at.session_state["sym_selection"])
+
+    def test_view_and_owner_never_diverge(self):
+        # Regression: sym_selection (the owning set) and the checkbox
+        # visuals went out of sync — Clear emptied the set but the boxes
+        # stayed checked, because a keyed widget's stored state wins over
+        # its value= default. The picker now force-renders view := owner
+        # every run, so after ANY mutation path they must be identical.
+        at = run_app()
+        self.assertEqual(self._selected(at), self._owner(at))
+        click_button(at, "Clear")                       # button mutation
+        self.assertEqual(self._selected(at), [])
+        self.assertEqual(self._owner(at), [])
+        _checkbox(at, "symcb_AAPL").set_value(True).run()   # click mutation
+        self.assertEqual(self._selected(at), ["AAPL"])
+        self.assertEqual(self._owner(at), ["AAPL"])
+        click_button(at, "Select all")
+        self.assertEqual(self._selected(at), self._owner(at))
+        _checkbox(at, "symcb_MSFT").set_value(False).run()  # uncheck
+        self.assertNotIn("MSFT", self._owner(at))
+        self.assertEqual(self._selected(at), self._owner(at))
+
     def test_selection_and_preset_survive_admin_round_trip(self):
         at = run_app(date_preset="Max")
         click_button(at, "Clear")

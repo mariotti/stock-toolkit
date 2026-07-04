@@ -69,21 +69,31 @@ def _preset_range(preset, lo, hi):
     return max(lo, frm), hi
 
 
+def _sync_symbol(sym: str) -> None:
+    """on_change: propagate one checkbox click into the owning set."""
+    if st.session_state.get(f"symcb_{sym}"):
+        st.session_state["sym_selection"].add(sym)
+    else:
+        st.session_state["sym_selection"].discard(sym)
+
+
 def _symbol_picker(all_symbols):
     """Scrollable checkbox list with a filter + Select-all/Clear.
 
-    The live checkbox keys (``symcb_<SYMBOL>``) are widget-backed, and
-    Streamlit garbage-collects widget state whenever a run doesn't render
-    the widget — i.e. visiting the Admin/Game/Help *pages* wiped them and
-    the selection came back empty. So the selection of record is a plain
-    session key (``sym_selection``) that survives page switches; the
-    checkboxes are re-seeded from it via ``value=`` whenever their widget
-    state has been dropped, and the mirror is refreshed from the actual
-    checkbox states at the end of every run.
+    OWNERSHIP: ``st.session_state["sym_selection"]`` (a plain set) is the
+    single source of truth. It is a non-widget key, so it survives page
+    switches (Streamlit garbage-collects *widget* state whenever a run
+    doesn't render the widget — which is what used to reset the selection
+    after visiting Admin/Game/Help). The checkboxes are pure views:
+    they render FROM the set via ``value=`` and write INTO it via their
+    ``on_change`` callback; the buttons mutate the set directly. Nothing
+    downstream ever reads the ``symcb_*`` widget keys.
     """
     if "sym_selection" not in st.session_state:
         defaults = [s for s in DEFAULT_SYMS if s in all_symbols] or all_symbols[:6]
         st.session_state["sym_selection"] = set(defaults)
+    # symbols can disappear from the DB between sessions
+    st.session_state["sym_selection"] &= set(all_symbols)
     sel = st.session_state["sym_selection"]
 
     flt = st.text_input("Filter symbols", key="sym_filter",
@@ -91,28 +101,26 @@ def _symbol_picker(all_symbols):
     shown = ([s for s in all_symbols if flt.lower() in s.lower()]
              if flt else all_symbols)
 
-    # Buttons mutate the mirror and drop the widget keys, so the
-    # checkboxes below re-seed from the mirror — never setting a widget
-    # key via the Session State API (avoids the default-vs-state warning).
     c1, c2 = st.columns(2)
     if c1.button("Select all", use_container_width=True):
         sel |= set(shown)
-        for s in shown:
-            st.session_state.pop(f"symcb_{s}", None)
     if c2.button("Clear", use_container_width=True):
         sel -= set(shown)
-        for s in shown:
-            st.session_state.pop(f"symcb_{s}", None)
 
     with st.container(height=280):
         if not shown:
             st.caption("No symbols match the filter.")
         for s in shown:
-            st.checkbox(s, key=f"symcb_{s}", value=(s in sel))
+            # Render model → view, unconditionally, every run. (A value=
+            # default would NOT do this: for keyed widgets the stored
+            # widget state wins and the default is ignored, which is how
+            # the views went stale against the set.) Clicks flow back
+            # view → model through on_change before the rerun.
+            st.session_state[f"symcb_{s}"] = s in sel
+            st.checkbox(s, key=f"symcb_{s}",
+                        on_change=_sync_symbol, args=(s,))
 
-    selected = [s for s in all_symbols
-                if st.session_state.get(f"symcb_{s}", s in sel)]
-    st.session_state["sym_selection"] = set(selected)
+    selected = [s for s in all_symbols if s in sel]
     st.caption(f"**{len(selected)}** selected")
     return selected
 
