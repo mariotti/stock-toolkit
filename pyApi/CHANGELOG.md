@@ -15,6 +15,65 @@ DB schemas are documented in [`SCHEMA.md`](SCHEMA.md).
 
 ---
 
+## 2.6.0 — Real broker fees, a learning Briefing, and the full score
+
+The theme of this release is **making costs and feedback real**: paper
+trades now pay actual broker fee schedules, Claude's briefing learns
+from its own past trades, and the score finally computes all nine of
+its components in the UI.
+
+### What's new
+
+- **Broker fee models** — every strategy is "at" a broker; each
+  buy/sell pays that broker's commission + FX markup on top of market
+  slippage. Last-known snapshots (approximate on purpose): **Yuh**
+  (0.5% min 1 + 0.95% FX), **Interactive Brokers** fixed (0.005/sh
+  min 1 max 1% + 0.03% FX), **Swissquote** (~0.2% min 9 max 190),
+  **Saxo Bank CH** (0.08% min 3 + 0.25% FX), **DEGIRO** (~2 flat +
+  0.25% FX, **EUR home** — Milan listings trade FX-free there), and
+  **plain** (zero fees, the default — existing portfolios keep meaning
+  what they meant). A flat round trip at Yuh on a US stock costs ~3%,
+  so churning finally costs what it costs. Schema: `portfolios.broker`
+  + `trades.fee`, auto-migrated.
+- **Change a strategy's broker** — empty *or* running, with
+  broker-transfer semantics: past trades keep the fees they paid, only
+  future trades pay the new schedule, and the switch is audited.
+- **Fee reminders on both sides of every trade** — the buy and sell
+  forms show the estimated fee (amount + %) before you click, the
+  confirmations echo the fee paid, and Trade history gains a Fee column.
+- **A Briefing that can learn** — the prompt now includes the broker's
+  real fee mechanics (per-side %, round-trip breakeven, min-fee floor),
+  recent closed-trade outcomes **with their archived notes** plus
+  win/loss stats, entry price + holding age per open position, and an
+  honest caveat that the score has no proven predictive edge. The
+  Briefing's broker selector is wired to the Briefing strategy's actual
+  fee model.
+
+### Fixed
+
+- **The UI computed only 5 of the score's 9 components** — momentum and
+  Hurst silently scored zero (16–22 of 100 points dead), so dashboard
+  scores ran 8–16 points below the `stock-score` CLI for identical
+  inputs. All UI paths (Score tab, Briefing, validation backtest) now
+  compute the full score; Mom 12-1, Hurst and a Data-asof freshness
+  column are surfaced.
+- **Sidebar selection reset when visiting Admin/Game/Help** — widget
+  state is garbage-collected on page switches. The selection now lives
+  in a single owning session key with the checkboxes as pure views
+  (force-rendered from it each run), so it survives page round trips
+  and the visuals can never disagree with the actual selection.
+
+### Under the hood
+
+- One shared data-access layer in `common.py` (`discover_price_dbs`,
+  `load_daily_prices`) replaces five hand-copied `discover_dbs` and two
+  `load_prices` variants.
+- The closed-form fee round-trip invariant is pinned by test:
+  flat buy→sell costs exactly `spend·2s/(1+s)` and is booked as a loss.
+- 637 tests, ~84% coverage.
+
+---
+
 ## 2.5.0 — Self-validating score, self-growing collection, sidebar revamp
 
 The theme of this release is **honesty and self-management**: the score
