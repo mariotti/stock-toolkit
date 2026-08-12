@@ -48,6 +48,13 @@ for _mod in (_common, _ss, _sa, _sb, _sal):
 _common.CONFIG_PATH = FIXTURE_DIR / "config.env"
 _sal.STATE_PATH     = FIXTURE_DIR / ".alerts_state.json"
 
+# The Game page's stale-price diagnosis reads the collector's failure
+# tracker — point it at the fixture dir so a developer's real
+# stock_failures.db can't change what the UI tests see.
+import stock_toolkit.collector.config as _scc  # noqa: E402
+_scc.FAILURES_DB_PATH     = FIXTURE_DIR / "stock_failures.db"
+_scc.FAILURES_REPORT_PATH = FIXTURE_DIR / "stock_failures_report.csv"
+
 from streamlit.testing.v1 import AppTest  # noqa: E402
 
 APP_PATH = PKG_ROOT / "stock_toolkit" / "ui" / "app.py"
@@ -1337,13 +1344,42 @@ class TestGamePageInteraction(unittest.TestCase):
     def test_stale_price_warning_in_buy_form(self):
         # the fixture's latest bar is many days old (> STALE_PRICE_DAYS), so
         # the buy form must warn that the symbol isn't being collected rather
-        # than let you trade silently on a frozen price.
+        # than let you trade silently on a frozen price. The fixture has no
+        # config.env watchlist and no suppressions, so the diagnosis is
+        # "add it to your watchlist".
         from stock_toolkit import game
         game.init_portfolio(starting_cash=10_000.0)   # patched temp DB
         at = self._page()
         warns = " ".join(w.value for w in at.warning)
         self.assertIn("days old", warns)
         self.assertIn("watchlist", warns)
+
+    def test_stale_price_warning_names_suppression(self):
+        # when the symbol's sources are auto-suppressed in the failure
+        # tracker, the warning must say THAT — not tell the user to add a
+        # symbol that is usually already on the watchlist.
+        from unittest import mock
+        from stock_toolkit import game
+        from stock_toolkit.collector import config as scc
+        from stock_toolkit.collector.failures import record_failure
+        # Pin the failures DB to this test's temp dir — under discover,
+        # sibling modules rebind scc.FAILURES_DB_PATH to their own (already
+        # cleaned-up) temp dirs.
+        p = mock.patch.object(
+            scc, "FAILURES_DB_PATH",
+            pathlib.Path(self._tmp.name) / "stock_failures.db")
+        p.start()
+        self.addCleanup(p.stop)
+        # AAPL sorts first in the fixture dropdown, so it's the shown symbol
+        for _ in range(scc.FAILURE_THRESHOLD):
+            record_failure("AAPL", "yfinance", "outage")
+        game.init_portfolio(starting_cash=10_000.0)
+        at = self._page()
+        warns = " ".join(w.value for w in at.warning)
+        self.assertIn("days old", warns)
+        self.assertIn("auto-suppressed", warns)
+        self.assertIn("--reset-failures", warns)
+        self.assertIn("outage", warns)
 
 
 class TestGameHistoryExpanderRenders(unittest.TestCase):

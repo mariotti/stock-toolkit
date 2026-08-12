@@ -1661,6 +1661,11 @@ class TestFailureTracker(FixtureTestCase):
         uid = uuid.uuid4().hex[:8]
         self.sc.cfg.FAILURES_DB_PATH     = self.tmp_dir / f"test_failures_{uid}.db"
         self.sc.cfg.FAILURES_REPORT_PATH = self.tmp_dir / f"test_failures_report_{uid}.csv"
+        self._orig_retry_days = self.sc.cfg.FAILURE_RETRY_DAYS
+
+    def tearDown(self):
+        self.sc.cfg.FAILURE_RETRY_DAYS = self._orig_retry_days
+        super().tearDown()
 
     def _hits(self, symbol: str, source: str) -> int:
         """Helper: read hit count directly from the failures DB."""
@@ -1743,6 +1748,107 @@ class TestFailureTracker(FixtureTestCase):
         """flush_failures() does nothing if no failures recorded."""
         self.sc.flush_failures()
         self.assertFalse(self.sc.cfg.FAILURES_REPORT_PATH.exists())
+
+    # ── suppression decay (FAILURE_RETRY_DAYS) ───────────────────────────
+
+    def _suppress(self, symbol: str, source: str):
+        for _ in range(self.sc.cfg.FAILURE_THRESHOLD):
+            self.sc.record_failure(symbol, source, "outage")
+
+    def _backdate(self, symbol: str, source: str, days: int):
+        """Helper: push last_seen into the past."""
+        import sqlite3
+        from datetime import date, timedelta
+        past = str(date.today() - timedelta(days=days))
+        con = sqlite3.connect(self.sc.cfg.FAILURES_DB_PATH)
+        try:
+            con.execute(
+                "UPDATE failures SET last_seen=? WHERE symbol=? AND source=?",
+                (past, symbol.upper(), source))
+            con.commit()
+        finally:
+            con.close()
+
+    def test_suppression_decays_after_retry_window(self):
+        """A suppressed pair is retried once last_seen is old enough."""
+        self.sc.cfg.FAILURE_RETRY_DAYS = 7
+        self._suppress("LDO.MI", "yfinance")
+        self.assertTrue(self.sc.is_suppressed("LDO.MI", "yfinance"))
+        self._backdate("LDO.MI", "yfinance", days=10)
+        self.assertFalse(self.sc.is_suppressed("LDO.MI", "yfinance"))
+
+    def test_suppression_holds_within_retry_window(self):
+        """Inside the window the pair stays suppressed."""
+        self.sc.cfg.FAILURE_RETRY_DAYS = 7
+        self._suppress("ENEL.MI", "yfinance")
+        self._backdate("ENEL.MI", "yfinance", days=3)
+        self.assertTrue(self.sc.is_suppressed("ENEL.MI", "yfinance"))
+
+    def test_retry_disabled_with_zero(self):
+        """FAILURE_RETRY_DAYS=0 restores permanent suppression."""
+        self.sc.cfg.FAILURE_RETRY_DAYS = 0
+        self._suppress("ENI.MI", "yfinance")
+        self._backdate("ENI.MI", "yfinance", days=365)
+        self.assertTrue(self.sc.is_suppressed("ENI.MI", "yfinance"))
+
+    def test_failed_retry_rearms_suppression(self):
+        """A failure during the retry refreshes last_seen and re-suppresses."""
+        self.sc.cfg.FAILURE_RETRY_DAYS = 7
+        self._suppress("SAP.DE", "yfinance")
+        self._backdate("SAP.DE", "yfinance", days=10)
+        self.assertFalse(self.sc.is_suppressed("SAP.DE", "yfinance"))
+        self.sc.record_failure("SAP.DE", "yfinance", "still broken")
+        self.assertTrue(self.sc.is_suppressed("SAP.DE", "yfinance"))
+
+    # ── clear_failures (self-heal on success) ────────────────────────────
+
+    def test_clear_failures_removes_recovered_pairs(self):
+        """Pairs that fetched successfully drop out of the tracker."""
+        self._suppress("AAPL", "yfinance")
+        self._suppress("MSFT", "yfinance")
+        cleared = self.sc.clear_failures({("AAPL", "yfinance")})
+        self.assertEqual(cleared, 1)
+        self.assertEqual(self._hits("AAPL", "yfinance"), 0)
+        self.assertTrue(self.sc.is_suppressed("MSFT", "yfinance"))
+
+    def test_clear_failures_empty_pairs_is_noop(self):
+        self.assertEqual(self.sc.clear_failures(set()), 0)
+
+    # ── reset_failures (--reset-failures) ────────────────────────────────
+
+    def test_reset_failures_all(self):
+        """No source filter clears everything."""
+        self._suppress("AAPL", "yfinance")
+        self._suppress("AAPL", "fmp")
+        self.assertEqual(self.sc.reset_failures(), 2)
+        self.assertFalse(self.sc.is_suppressed("AAPL", "yfinance"))
+        self.assertFalse(self.sc.is_suppressed("AAPL", "fmp"))
+
+    def test_reset_failures_by_source(self):
+        """Source filter leaves other sources' rows alone."""
+        self._suppress("AAPL", "yfinance")
+        self._suppress("AAPL", "fmp")
+        self.assertEqual(self.sc.reset_failures(["yfinance"]), 1)
+        self.assertFalse(self.sc.is_suppressed("AAPL", "yfinance"))
+        self.assertTrue(self.sc.is_suppressed("AAPL", "fmp"))
+
+    # ── suppressed_sources (UI diagnosis) ────────────────────────────────
+
+    def test_suppressed_sources_lists_only_at_threshold(self):
+        """Only pairs at the threshold are reported, with reason + date."""
+        self._suppress("LDO.MI", "yfinance")
+        self.sc.record_failure("LDO.MI", "fmp", "paid plan")  # below threshold
+        rows = self.sc.suppressed_sources("LDO.MI")
+        self.assertEqual([r[0] for r in rows], ["yfinance"])
+        self.assertEqual(rows[0][1], "outage")
+
+    def test_suppressed_sources_ignores_retry_window(self):
+        """Reported even when the decay window has opened — the point is to
+        explain why data is stale, not whether the next run will retry."""
+        self.sc.cfg.FAILURE_RETRY_DAYS = 7
+        self._suppress("LDO.MI", "yfinance")
+        self._backdate("LDO.MI", "yfinance", days=30)
+        self.assertEqual(len(self.sc.suppressed_sources("LDO.MI")), 1)
 
 
 class TestTimestamp(FixtureTestCase):

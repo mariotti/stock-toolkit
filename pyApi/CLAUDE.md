@@ -69,6 +69,15 @@ stock-gap-fill --dry-run         # show what would be re-fetched
 stock-gap-fill                   # fetch only the missing date ranges via yfinance
 ```
 
+**Recover from a source outage (reset the failure tracker):**
+```bash
+stock-collect --reset-failures yfinance --sources yfinance   # clear one source's suppressions + recollect
+stock-collect --reset-failures                               # clear ALL suppressed (symbol, source) pairs
+```
+Suppressed pairs also self-heal: they are retried once their last failure is
+`FAILURE_RETRY_DAYS` old (config, default 7; 0 = never retry), and a successful
+fetch clears the pair from `stock_failures.db`.
+
 **Backup the state directory (v2.4.1+):**
 ```bash
 stock-backup                     # VACUUM INTO every live DB + copy JSON state → data/backups/<ts>/
@@ -99,7 +108,7 @@ and `rust-fetcher/src/main.rs` `match source_name`).
 - Fetches OHLCV data from 7 sources: yfinance, Alpha Vantage, Finnhub, Polygon/Massive, FMP, Twelve Data, Marketstack
 - Stores in SQLite with `UNIQUE(symbol, source, timestamp)` deduplication
 - Per-source rate limiting; tiered cron scheduling (real-time / hourly / daily)
-- Tracks failures in `stock_failures.db`; suppresses broken `(symbol, source)` pairs after N failures
+- Tracks failures in `stock_failures.db`; suppresses broken `(symbol, source)` pairs after N failures (retried after `FAILURE_RETRY_DAYS`, cleared on a successful fetch, or manually via `--reset-failures`)
 
 **Phase 2 — Analysis (`stock_toolkit/analysis.py`, `stock_toolkit/score.py`, `stock_toolkit/backtest.py`)**
 - 11 analysis tools: summary, regression, returns, volatility, correlation, SMA, drawdown, RSI, Bollinger Bands, Monte Carlo, Hurst

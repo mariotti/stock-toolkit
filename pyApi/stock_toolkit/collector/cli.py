@@ -9,7 +9,7 @@ from .db import (
     csv_append_rows, db_insert_rows, load_existing_keys,
 )
 from .engine import RUST_SUPPORTED_SOURCES, run_rust
-from .failures import flush_failures, is_suppressed
+from .failures import clear_failures, flush_failures, is_suppressed, reset_failures
 from .historical import run_historical
 from .plotting import PLOT_FIELDS, plot_gnuplot, plot_matplotlib
 from .sources.alphavantage import fetch_alphavantage
@@ -50,6 +50,18 @@ def main():
             "  --sources yfinance alphavantage polygon fmp twelvedata marketstack\n"
             "                               (23:00 — full EOD sweep after US close)"
         )
+    )
+    parser.add_argument(
+        "--reset-failures",
+        nargs="*",
+        metavar="SOURCE",
+        choices=["yfinance","alphavantage","finnhub","polygon","fmp","twelvedata","marketstack"],
+        help=(
+            "Reset the failure tracker before collecting: with no argument "
+            "clears ALL suppressed (symbol, source) pairs; with source names "
+            "clears only those sources. Recovery workflow after an outage:\n"
+            "  stock-collect --reset-failures yfinance --sources yfinance"
+        ),
     )
     parser.add_argument(
         "--historical",
@@ -97,6 +109,13 @@ def main():
         ),
     )
     args = parser.parse_args()
+
+    # ── failure-tracker reset (runs first so the collection below retries) ────
+    if args.reset_failures is not None:
+        which = args.reset_failures or None
+        n = reset_failures(which)
+        log.info(f"--reset-failures: cleared {n} row(s) "
+                 f"({', '.join(which) if which else 'all sources'})")
 
     # ── symbol resolution ─────────────────────────────────────────────────────
     # Priority:
@@ -277,6 +296,10 @@ def main():
     else:
         added = db_insert_rows(all_rows)
         log.info(f"Fetched {len(all_rows)} rows | {added} new rows inserted into {cfg.DB_PATH.name}")
+
+    # A pair that returned data has recovered — drop its failure row so it
+    # isn't re-flagged as suppressed in reports or retried on a decay window.
+    clear_failures({(r["symbol"], r["source"]) for r in all_rows})
 
     log.info(f"Updated call counts: {state['calls']}")
     if state.get('monthly_calls'):

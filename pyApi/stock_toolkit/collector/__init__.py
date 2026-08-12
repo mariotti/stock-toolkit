@@ -26,7 +26,10 @@ from .db import (                                      # noqa: F401
     _symbols_from_portfolios,
     _hist_has_data, _live_has_today, _quote_is_fresh, _hourly_bar_is_current,
 )
-from .failures import record_failure, is_suppressed, flush_failures  # noqa: F401
+from .failures import (  # noqa: F401
+    record_failure, is_suppressed, flush_failures,
+    clear_failures, reset_failures, suppressed_sources,
+)
 from .historical import parse_historical_arg, run_historical         # noqa: F401
 from .sources import LIVE_FETCHERS, HIST_FETCHERS                    # noqa: F401
 from .state import load_state, save_state, budget_ok, record_call    # noqa: F401

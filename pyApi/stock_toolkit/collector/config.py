@@ -37,6 +37,14 @@ SYMBOLS_IGNORE = {s.strip().upper() for s in _ignore_raw.split(",") if s.strip()
 # consecutive failures. Recorded in stock_failures.csv, editable by hand.
 FAILURE_THRESHOLD = int(_cfg.get("FAILURE_THRESHOLD", "5"))
 
+# FAILURE_RETRY_DAYS — a suppressed (symbol, source) pair is retried once its
+# last failure is at least this many days old. A transient outage (e.g. a
+# Yahoo API change that later heals) then self-recovers instead of being
+# suppressed forever; a still-broken pair fails again, which refreshes
+# last_seen and re-arms the suppression for another window.
+# 0 restores the old behaviour: suppressed pairs are never retried.
+FAILURE_RETRY_DAYS = int(_cfg.get("FAILURE_RETRY_DAYS", "7"))
+
 
 # ── per-source symbol aliases ─────────────────────────────────────────────────
 # Some APIs name the same instrument differently (e.g. Marketstack returns the

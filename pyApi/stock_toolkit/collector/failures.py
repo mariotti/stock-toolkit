@@ -73,6 +73,11 @@ def is_suppressed(symbol: str, source: str) -> bool:
     """
     Return True if (symbol, source) has reached the failure threshold.
     Queries the failures DB directly — no in-memory cache needed.
+
+    Suppression decays: once the last failure is FAILURE_RETRY_DAYS old the
+    pair is retried. A failed retry refreshes last_seen (re-suppressing for
+    another window); a successful fetch clears the row via clear_failures().
+    FAILURE_RETRY_DAYS=0 disables decay (never retry).
     """
     if not cfg.FAILURES_DB_PATH.exists():
         return False
@@ -80,14 +85,99 @@ def is_suppressed(symbol: str, source: str) -> bool:
         con = _failures_db_connect()
         try:
             row = con.execute(
-                "SELECT hits FROM failures WHERE symbol=? AND source=?",
+                "SELECT hits, last_seen FROM failures WHERE symbol=? AND source=?",
                 (symbol.upper(), source)
             ).fetchone()
         finally:
             con.close()
-        return row is not None and row[0] >= cfg.FAILURE_THRESHOLD
+        if row is None or row[0] < cfg.FAILURE_THRESHOLD:
+            return False
+        if cfg.FAILURE_RETRY_DAYS > 0:
+            try:
+                age = (date.today() - date.fromisoformat(row[1])).days
+            except (TypeError, ValueError):
+                return True   # unparseable last_seen — keep suppressed
+            if age >= cfg.FAILURE_RETRY_DAYS:
+                log.info(f"[failures] {symbol.upper()}/{source}: last failure "
+                         f"{age}d ago (≥ {cfg.FAILURE_RETRY_DAYS}d) — retrying")
+                return False
+        return True
     except Exception:
         return False
+
+
+def clear_failures(pairs) -> int:
+    """
+    Delete failure rows for (symbol, source) pairs that just fetched
+    successfully, so a recovered pair stops being retried as "suppressed".
+    Returns the number of rows cleared.
+    """
+    if not pairs or not cfg.FAILURES_DB_PATH.exists():
+        return 0
+    try:
+        con = _failures_db_connect()
+        try:
+            cleared = 0
+            for symbol, source in pairs:
+                cur = con.execute(
+                    "DELETE FROM failures WHERE symbol=? AND source=?",
+                    (symbol.upper(), source)
+                )
+                cleared += cur.rowcount
+            con.commit()
+        finally:
+            con.close()
+        if cleared:
+            log.info(f"[failures] cleared {cleared} recovered (symbol, source) pair(s)")
+        return cleared
+    except sqlite3.OperationalError as e:
+        log.warning(f"[failures] could not clear recovered pairs: {e}")
+        return 0
+
+
+def reset_failures(sources=None) -> int:
+    """
+    Manually reset the failure tracker: delete every row, or only rows for
+    the given sources. Returns the number of rows deleted.
+    Used by `stock-collect --reset-failures [SOURCE ...]`.
+    """
+    if not cfg.FAILURES_DB_PATH.exists():
+        return 0
+    con = _failures_db_connect()
+    try:
+        if sources:
+            marks = ",".join("?" * len(sources))
+            cur = con.execute(
+                f"DELETE FROM failures WHERE source IN ({marks})", list(sources))
+        else:
+            cur = con.execute("DELETE FROM failures")
+        con.commit()
+        return cur.rowcount
+    finally:
+        con.close()
+
+
+def suppressed_sources(symbol: str) -> list[tuple[str, str, str]]:
+    """
+    Return [(source, reason, last_seen), ...] for every source currently at
+    the failure threshold for this symbol — regardless of the retry window,
+    since the point is to explain why data is stale. Used by the UI.
+    """
+    if not cfg.FAILURES_DB_PATH.exists():
+        return []
+    try:
+        con = _failures_db_connect()
+        try:
+            rows = con.execute("""
+                SELECT source, reason, last_seen FROM failures
+                WHERE symbol=? AND hits >= ?
+                ORDER BY source
+            """, (symbol.upper(), cfg.FAILURE_THRESHOLD)).fetchall()
+        finally:
+            con.close()
+        return [(r[0], r[1] or "", r[2]) for r in rows]
+    except Exception:
+        return []
 
 
 def flush_failures() -> None:

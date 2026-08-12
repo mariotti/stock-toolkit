@@ -24,6 +24,43 @@ from stock_toolkit.ui.theme import (
 )
 
 
+def _stale_price_diagnosis(symbol: str, in_config: bool) -> str:
+    """
+    Explain WHY a symbol's price is stale, in likelihood order:
+    suppressed (symbol, source) pairs in the failure tracker beat the
+    generic "add it to your watchlist" advice — a suppressed symbol is
+    usually already on the watchlist.
+    """
+    try:
+        from stock_toolkit.collector.failures import suppressed_sources
+        suppressed = suppressed_sources(symbol)
+    except Exception:
+        suppressed = []
+    if suppressed:
+        pairs = " · ".join(
+            f"`{src}` ({reason or 'no reason recorded'}, last {seen})"
+            for src, reason, seen in suppressed
+        )
+        return (
+            "Collection for it is **auto-suppressed** after repeated "
+            f"failures: {pairs}. If the source has recovered, reset with "
+            f"`stock-collect --reset-failures` and run a collection "
+            "(suppressed pairs also retry on their own after "
+            "`FAILURE_RETRY_DAYS`, default 7 days)."
+        )
+    if not in_config:
+        return (
+            f"It isn't being collected — add `{symbol}` to your watchlist "
+            "(**Admin → Watchlist**, or `SYMBOLS` in config.env) and run "
+            "a collection."
+        )
+    return (
+        "It is on your watchlist with no suppressed sources, so the "
+        "configured sources are simply not returning data for it — check "
+        "the collector log and `stock_failures_report.csv`."
+    )
+
+
 def _money(v: float) -> str:
     return f"{v:,.2f}"
 
@@ -287,11 +324,11 @@ def render():
                 if age is not None and age > STALE_PRICE_DAYS:
                     st.warning(
                         f"⚠️  Latest price for `{sym_buy}` is **{age} days old** "
-                        f"({as_of[:10]}) — it doesn't look like it's being "
-                        "collected. This trade (and its future valuation) will "
-                        "sit on a **stale price** that won't move until you add "
-                        f"`{sym_buy}` to your watchlist (**Admin → Watchlist**, "
-                        "or `SYMBOLS` in config.env) and run a collection."
+                        f"({as_of[:10]}). This trade (and its future valuation) "
+                        "will sit on a **stale price** until a collection "
+                        "brings in fresh bars. "
+                        + _stale_price_diagnosis(sym_buy,
+                                                 sym_buy in config_symbols)
                     )
                 fill_buy = price * (1 + SLIPPAGE_BPS / 10000.0)
                 max_cash = float(mtm["cash"])
