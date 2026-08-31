@@ -496,6 +496,66 @@ class TestTradeNotesAndStats(GameTestCase):
         self.assertAlmostEqual(s["realized_pnl"], 300.0)
 
 
+class TestClosedTradeEvents(GameTestCase):
+    """closed_trade_events — the shared entry/exit pairing behind the
+    Game page's Closed trades table and the Briefing learning loop."""
+
+    def setUp(self):
+        super().setUp()
+        game.init_portfolio(starting_cash=10_000.0, db=self.port_db)
+        import sqlite3
+        con = sqlite3.connect(self.port_db)
+        # Two symbols, interleaved, with notes; fixed fills (no slippage).
+        con.execute(
+            "INSERT INTO trades (portfolio_id, timestamp, symbol, side, qty, "
+            "price, fill_price, cash_delta, note) VALUES "
+            "(1, '2026-01-01', 'AAPL', 'buy',  10, 100, 100, -1000, 'lot A'),"
+            "(1, '2026-01-02', 'MSFT', 'buy',   5, 200, 200, -1000, 'msft thesis'),"
+            "(1, '2026-01-03', 'AAPL', 'buy',  10, 110, 110, -1100, 'lot B'),"
+            "(1, '2026-01-04', 'AAPL', 'sell', 15, 150, 150,  2250, 'take profit'),"
+            "(1, '2026-01-05', 'MSFT', 'sell',  5, 180, 180,   900, 'stop out'),"
+            "(1, '2026-01-06', 'AAPL', 'sell',  5, 120, 120,   600, 'close rest')"
+        )
+        con.commit(); con.close()
+
+    def test_events_match_trade_stats_totals(self):
+        # The pairing must never drift from the Outcome stats math:
+        # same event count, same realized P/L, same win/loss split.
+        trades = game.get_trades(db=self.port_db)
+        events = game.closed_trade_events(trades)
+        stats = game.trade_stats(db=self.port_db)
+        self.assertEqual(len(events), stats["closed_count"])
+        self.assertAlmostEqual(sum(e["pnl"] for e in events),
+                               stats["realized_pnl"])
+        self.assertEqual(sum(1 for e in events if e["pnl"] > 0),
+                         stats["wins"])
+        self.assertEqual(sum(1 for e in events if e["pnl"] < 0),
+                         stats["losses"])
+
+    def test_entry_notes_follow_fifo_lots(self):
+        trades = game.get_trades(db=self.port_db)
+        events = game.closed_trade_events(trades)
+        by_key = {(e["symbol"], e["date"]): e for e in events}
+        # Sell of 15 AAPL consumes lot A fully + lot B half.
+        e1 = by_key[("AAPL", "2026-01-04")]
+        self.assertEqual(e1["entry_note"], "lot A; lot B")
+        self.assertEqual(e1["note"], "take profit")
+        # Final 5 AAPL come only from what's left of lot B.
+        e2 = by_key[("AAPL", "2026-01-06")]
+        self.assertEqual(e2["entry_note"], "lot B")
+        self.assertEqual(e2["note"], "close rest")
+        # MSFT round-trip keeps its own notes.
+        e3 = by_key[("MSFT", "2026-01-05")]
+        self.assertEqual(e3["entry_note"], "msft thesis")
+        self.assertEqual(e3["note"], "stop out")
+
+    def test_limit_keeps_newest_tail(self):
+        trades = game.get_trades(db=self.port_db)
+        events = game.closed_trade_events(trades, limit=1)
+        self.assertEqual(len(events), 1)
+        self.assertEqual(events[0]["date"], "2026-01-06")
+
+
 class TestRiskStats(GameTestCase):
     """v1.8 — CAGR / Sharpe / Sortino / max DD from the value_history curve."""
 

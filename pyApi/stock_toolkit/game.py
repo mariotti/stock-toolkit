@@ -32,7 +32,7 @@ Pricing model (deliberately simple):
 import datetime
 import json
 import sqlite3
-from collections import defaultdict
+from collections import defaultdict, deque
 from pathlib import Path
 
 from stock_toolkit.analysis import discover_dbs as _discover_data_dbs
@@ -57,7 +57,7 @@ __all__ = [
     # broker fee models (v2.6+)
     "BROKERS", "trade_fee", "set_broker",
     # analytics
-    "mark_to_market", "trade_stats", "value_history",
+    "mark_to_market", "trade_stats", "closed_trade_events", "value_history",
     "benchmark_history", "risk_stats",
     # audit (v2.4.0+)
     "get_audit_log", "get_audit_event",
@@ -968,6 +968,55 @@ def trade_stats(portfolio_id: int = None, db: Path = None) -> dict:
         "expectancy":    expectancy,
         "realized_pnl":  sum(realized),
     }
+
+
+def closed_trade_events(trades: list, limit: int = None) -> list:
+    """Per-sell realized P&L events with the notes of BOTH sides.
+
+    Same avg-cost matching as trade_stats (their P&L sums are identical
+    by construction), plus a FIFO lot queue that only decides which buy
+    note(s) each sell closed — so a closed trade can show its entry
+    thesis next to its exit reason. Newest last; `limit` keeps the tail.
+    Returns dicts: {date, symbol, pnl, pnl_pct, note, entry_note}.
+    """
+    pos = defaultdict(lambda: {"qty": 0.0, "avg": 0.0})
+    lots = defaultdict(deque)                    # FIFO buy lots
+    events = []
+    for t in trades:
+        p = pos[t["symbol"]]
+        if t["side"] == "buy":
+            new_qty = p["qty"] + t["qty"]
+            p["avg"] = ((p["qty"] * p["avg"] + t["qty"] * t["fill_price"])
+                        / new_qty if new_qty > 0 else 0.0)
+            p["qty"] = new_qty
+            lots[t["symbol"]].append(
+                {"qty": t["qty"], "note": (t.get("note") or "").strip()})
+        else:
+            sold = min(t["qty"], p["qty"])
+            if sold > 0:
+                entry_notes, left = [], sold
+                q = lots[t["symbol"]]
+                while q and left > 1e-9:
+                    lot = q[0]
+                    take = min(lot["qty"], left)
+                    if lot["note"] and lot["note"] not in entry_notes:
+                        entry_notes.append(lot["note"])
+                    lot["qty"] -= take
+                    left -= take
+                    if lot["qty"] <= 1e-9:
+                        q.popleft()
+                pnl = (t["fill_price"] - p["avg"]) * sold
+                pnl_pct = ((t["fill_price"] / p["avg"] - 1) * 100
+                           if p["avg"] > 0 else 0.0)
+                events.append({"date": t["timestamp"][:10],
+                               "symbol": t["symbol"], "pnl": pnl,
+                               "pnl_pct": pnl_pct,
+                               "note": (t.get("note") or "").strip(),
+                               "entry_note": "; ".join(entry_notes)})
+                p["qty"] -= sold
+                if p["qty"] <= 1e-9:
+                    p["qty"], p["avg"] = 0.0, 0.0
+    return events if limit is None else events[-limit:]
 
 
 def get_positions(portfolio_id: int = None, db: Path = None) -> dict:

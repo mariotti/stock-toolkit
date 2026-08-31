@@ -641,6 +641,32 @@ def render():
         )
 
     # ─────────────────────────────────────────────────────────────────────
+    #  Closed trades — each exit paired with the entry thesis it closed
+    # ─────────────────────────────────────────────────────────────────────
+    from stock_toolkit.game import closed_trade_events
+    closed = closed_trade_events(trades) if trades else []
+    if closed:
+        st.markdown(heading("closed_trades",
+                            "Closed trades (entry thesis vs outcome)"))
+        c_df = pd.DataFrame({
+            "Date":     [e["date"] for e in closed],
+            "Symbol":   [e["symbol"] for e in closed],
+            "P/L":      [_money(e["pnl"]) for e in closed],
+            "P/L %":    [f"{e['pnl_pct']:+.1f}%" for e in closed],
+            "Entered because": [e["entry_note"] for e in closed],
+            "Exited because":  [e["note"] for e in closed],
+        })
+        st.dataframe(
+            c_df.iloc[::-1].reset_index(drop=True),        # newest first
+            width="stretch", hide_index=True,
+        )
+        st.caption(
+            "One row per sell, matched to the buy lot(s) it closed "
+            "(FIFO); P/L uses the position's average cost, so the total "
+            "matches the realized P/L in Outcome stats below."
+        )
+
+    # ─────────────────────────────────────────────────────────────────────
     #  Outcome stats — win rate, average win/loss, expectancy
     # ─────────────────────────────────────────────────────────────────────
     stats = trade_stats()

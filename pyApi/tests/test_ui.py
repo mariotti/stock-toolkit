@@ -1372,6 +1372,26 @@ class TestGamePageInteraction(unittest.TestCase):
         self.assertIn("no broker fees (plain)", caps,
                       "plain strategies must say fees are absent")
 
+    def test_closed_trades_table_pairs_notes(self):
+        # v2.6.1 — the Game page shows one row per exit with the entry
+        # thesis it closed next to the exit reason (same pairing the
+        # Briefing learning loop feeds to Claude).
+        from stock_toolkit import game
+        rec = game.create_portfolio("PairStrat", starting_cash=10_000)
+        game.buy("AAPL", 1_000, portfolio_id=rec["id"],
+                 note="entry thesis: oversold")
+        game.sell("AAPL", portfolio_id=rec["id"],
+                  note="exit reason: thesis played out")
+        at = self._page()
+        md = " ".join(m.value for m in at.markdown)
+        self.assertIn("Closed trades", md)
+        tables = [d.value for d in at.dataframe
+                  if "Entered because" in getattr(d.value, "columns", [])]
+        self.assertTrue(tables, "closed-trades table missing")
+        row = tables[0].iloc[0]
+        self.assertIn("entry thesis: oversold", row["Entered because"])
+        self.assertIn("exit reason: thesis played out", row["Exited because"])
+
     def test_stale_price_warning_in_buy_form(self):
         # the fixture's latest bar is many days old (> STALE_PRICE_DAYS), so
         # the buy form must warn that the symbol isn't being collected rather

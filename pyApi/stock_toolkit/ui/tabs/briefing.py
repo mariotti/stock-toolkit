@@ -73,52 +73,10 @@ def _position_opened_dates(trades: list) -> dict:
 
 
 def _closed_trades(trades: list, limit: int = 8) -> list:
-    """FIFO-matched realized P&L events (same matching as trade_stats),
-    newest last, keeping the sell's date and note AND the note(s) of the
-    buy lots the sell closed — so Claude sees which entry thesis led to
-    which outcome, not just why it exited. Returns dicts:
-    {date, symbol, pnl, pnl_pct, note, entry_note}."""
-    import collections
-    pos = collections.defaultdict(lambda: {"qty": 0.0, "avg": 0.0})
-    lots = collections.defaultdict(collections.deque)  # FIFO buy lots
-    events = []
-    for t in trades:
-        p = pos[t["symbol"]]
-        if t["side"] == "buy":
-            new_qty = p["qty"] + t["qty"]
-            p["avg"] = ((p["qty"] * p["avg"] + t["qty"] * t["fill_price"])
-                        / new_qty if new_qty > 0 else 0.0)
-            p["qty"] = new_qty
-            lots[t["symbol"]].append(
-                {"qty": t["qty"], "note": (t.get("note") or "").strip()})
-        else:
-            sold = min(t["qty"], p["qty"])
-            if sold > 0:
-                # P&L stays average-cost (matches trade_stats); the FIFO
-                # lot queue only decides which buy notes this sell closed.
-                entry_notes, left = [], sold
-                q = lots[t["symbol"]]
-                while q and left > 1e-9:
-                    lot = q[0]
-                    take = min(lot["qty"], left)
-                    if lot["note"] and lot["note"] not in entry_notes:
-                        entry_notes.append(lot["note"])
-                    lot["qty"] -= take
-                    left -= take
-                    if lot["qty"] <= 1e-9:
-                        q.popleft()
-                pnl = (t["fill_price"] - p["avg"]) * sold
-                pnl_pct = ((t["fill_price"] / p["avg"] - 1) * 100
-                           if p["avg"] > 0 else 0.0)
-                events.append({"date": t["timestamp"][:10],
-                               "symbol": t["symbol"], "pnl": pnl,
-                               "pnl_pct": pnl_pct,
-                               "note": (t.get("note") or "").strip(),
-                               "entry_note": "; ".join(entry_notes)})
-                p["qty"] -= sold
-                if p["qty"] <= 1e-9:
-                    p["qty"], p["avg"] = 0.0, 0.0
-    return events[-limit:]
+    """Realized P&L events with entry + exit notes — shared with the
+    Game page's Closed trades table (see game.closed_trade_events)."""
+    from stock_toolkit.game import closed_trade_events
+    return closed_trade_events(trades, limit=limit)
 
 
 def _briefing_state_summary() -> str:
