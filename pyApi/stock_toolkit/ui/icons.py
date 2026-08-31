@@ -43,6 +43,7 @@ GLYPHS: dict[str, str] = {
     "remove":       "✕",      # close, delete
     "settings":     "⚙️",     # admin, settings (user kept)
     "game":         "🎮",     # paper-trading (user kept)
+    "rewind":       "⏪",     # replay / time-travel game
     "help":         "❓",     # help (user kept)
     "chat":         "🤖",     # assistant chat avatar (Streamlit idiom)
     "app":          "●",      # main app brand mark (favicon, sidebar title)
@@ -65,7 +66,16 @@ SEMANTIC: dict[str, str] = {
     # sidebar pages
     "page.admin":        "settings",
     "page.game":         "game",
+    "page.replay":       "rewind",
     "page.help":         "help",
+
+    # replay page sections + buttons
+    "replay_setup":      "settings",
+    "replay_chart":      "data",
+    "replay_bet":        "execute",
+    "replay_summary":    "achievement",
+    "replay_start":      "execute",
+    "replay_place":      "commit",
 
     # admin page sections + buttons
     "watchlist":         "list",

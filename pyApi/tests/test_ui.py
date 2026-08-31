@@ -1467,6 +1467,53 @@ class TestGameHistoryExpanderRenders(unittest.TestCase):
                       "History expander caption missing")
 
 
+class TestReplayPageRenders(unittest.TestCase):
+    """⏪ Replay page — setup renders, and a full single-mode round
+    trip works against the fixture DB: start → bet Higher → reveal →
+    end → summary. Sessions live only in st.session_state."""
+
+    PAGE = PKG_ROOT / "stock_toolkit" / "ui" / "pages" / "03_⏪_Replay.py"
+
+    def _page(self):
+        from streamlit.testing.v1 import AppTest as _AppTest
+        at = _AppTest.from_file(str(self.PAGE), default_timeout=60)
+        at.run()
+        return at
+
+    def _click(self, at, key):
+        btn = [b for b in at.button if b.key == key]
+        self.assertTrue(btn, f"button {key} not found")
+        btn[0].click()
+        at.run()
+        return at
+
+    def test_setup_form_renders(self):
+        at = self._page()
+        self.assertEqual([e.value for e in at.exception], [])
+        md = "\n".join(m.value for m in at.markdown)
+        self.assertIn("New replay session", md)
+        self.assertTrue([b for b in at.button if b.key == "replay_start_btn"])
+
+    def test_single_mode_round_trip(self):
+        at = self._page()
+        at = self._click(at, "replay_start_btn")     # random start, single
+        self.assertEqual([e.value for e in at.exception], [])
+        state = at.session_state["replay_state"]
+        self.assertEqual(state["mode"], "single")
+        self.assertEqual(state["rounds"], [])
+
+        at = self._click(at, "replay_bet_up")        # call Higher
+        state = at.session_state["replay_state"]
+        self.assertEqual(len(state["rounds"]), 1)
+        self.assertIn(state["rounds"][0]["outcome"], ("hit", "miss", "push"))
+        self.assertEqual(state["i"], state["start_i"] + 1)
+
+        at = self._click(at, "replay_end_btn")       # wrap up
+        md = "\n".join(m.value for m in at.markdown)
+        self.assertIn("Session summary", md)
+        self.assertTrue([b for b in at.button if b.key == "replay_again_btn"])
+
+
 class TestHelpPageRenders(unittest.TestCase):
     """Help page (❓) renders and contains the orientation sections.
 
@@ -1477,7 +1524,7 @@ class TestHelpPageRenders(unittest.TestCase):
     def test_renders_without_exceptions(self):
         from streamlit.testing.v1 import AppTest as _AppTest
 
-        page = PKG_ROOT / "stock_toolkit" / "ui" / "pages" / "03_❓_Help.py"
+        page = PKG_ROOT / "stock_toolkit" / "ui" / "pages" / "04_❓_Help.py"
         self.assertTrue(page.exists(), f"missing page file: {page}")
 
         at = _AppTest.from_file(str(page), default_timeout=60)
