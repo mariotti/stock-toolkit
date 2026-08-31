@@ -722,15 +722,46 @@ class TestBriefingStateSummary(unittest.TestCase):
 
         rec = create_portfolio(BRIEFING_STRATEGY_NAME, starting_cash=10_000.0,
                                activate=False)
-        buy("AAPL", 1_000.0, portfolio_id=rec["id"])
+        buy("AAPL", 1_000.0, portfolio_id=rec["id"],
+            note="[Claude] oversold at RSI 28")
         sell("AAPL", portfolio_id=rec["id"],
              note="[Claude] cutting the flat position")
         out = _briefing_state_summary()
         self.assertIn("Closed trades: 1", out)
         self.assertIn("Most recent outcomes", out)
-        self.assertIn("cutting the flat position", out)
+        # v2.6.1 — each outcome pairs the entry thesis with the exit reason
+        self.assertIn('entered because: "[Claude] oversold at RSI 28"', out)
+        self.assertIn('exited because:  "[Claude] cutting the flat position"',
+                      out)
         # flat round trip at slippage-only broker → a small realized loss
         self.assertIn("losses 1", out)
+
+    def test_closed_trades_pair_entry_notes_fifo(self):
+        # Pure-function check: a sell consumes buy lots FIFO, so the
+        # outcome carries the note(s) of the lots it actually closed.
+        from stock_toolkit.ui.tabs.briefing import _closed_trades
+
+        def _t(side, qty, price, note=None, ts="2026-06-01T10:00:00"):
+            return {"side": side, "symbol": "AAPL", "qty": qty,
+                    "fill_price": price, "note": note, "timestamp": ts}
+
+        trades = [
+            _t("buy", 10, 100.0, note="first lot: breakout thesis"),
+            _t("buy", 10, 110.0, note="second lot: added on dip"),
+            # Sells 15: closes all of lot 1 + half of lot 2.
+            _t("sell", 15, 120.0, note="taking profit",
+               ts="2026-06-10T10:00:00"),
+            # Sells the remaining 5: only lot 2 is left.
+            _t("sell", 5, 90.0, note="stopping out",
+               ts="2026-06-20T10:00:00"),
+        ]
+        events = _closed_trades(trades)
+        self.assertEqual(len(events), 2)
+        self.assertEqual(events[0]["entry_note"],
+                         "first lot: breakout thesis; second lot: added on dip")
+        self.assertEqual(events[0]["note"], "taking profit")
+        self.assertEqual(events[1]["entry_note"], "second lot: added on dip")
+        self.assertEqual(events[1]["note"], "stopping out")
 
 
 class TestBriefingFeesSummary(unittest.TestCase):
