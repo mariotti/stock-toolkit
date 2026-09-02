@@ -15,6 +15,17 @@ DB schemas are documented in [`SCHEMA.md`](SCHEMA.md).
 
 ---
 
+## 2.7.1 — Green tag pipeline under current streamlit
+
+Patch release: no product changes. Two Game-page AppTests clicked the
+name-gated "Create & activate" button in the same render where it was
+still drawn disabled; streamlit's current releases (1.63+) reject
+that, which turned the v2.7.0 tag pipeline red on CI's fresh-resolve
+install. The tests now rerun between typing and clicking — what a
+real browser user does anyway.
+
+---
+
 ## 2.7.0 — A Briefing that learns from its exits, and the ⏪ Replay game
 
 The theme of this release is **closing feedback loops**: every closed
