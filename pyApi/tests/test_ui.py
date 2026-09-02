@@ -1309,9 +1309,13 @@ class TestGamePageInteraction(unittest.TestCase):
         name = f"AppTestStrat{int(time.time() * 1000) % 100000}"
 
         at = self._page()
-        # create + activate a fresh strategy
+        # create + activate a fresh strategy. The rerun between typing
+        # and clicking matters: the button renders disabled while the
+        # name is empty, and current streamlit refuses AppTest clicks
+        # on a widget that was drawn disabled.
         at.text_input(key="game_new_name").set_value(name)
         at.number_input(key="game_new_cash").set_value(10_000.0)
+        at.run()
         at = self._click(at, "game_new_btn")
         self.assertEqual([e.value for e in at.exception], [])
 
@@ -1322,6 +1326,7 @@ class TestGamePageInteraction(unittest.TestCase):
             amt = [n for n in at.number_input if n.key == "game_buy_amt"]
             if amt:
                 amt[0].set_value(1_000.0)
+            at.run()
             at = self._click(at, "game_buy_btn")
             self.assertEqual([e.value for e in at.exception], [])
 
@@ -1342,6 +1347,7 @@ class TestGamePageInteraction(unittest.TestCase):
         self.assertTrue(any("Yuh" in o for o in sel[0].options))
         at.text_input(key="game_new_name").set_value("BrokeredStrat")
         sel[0].set_value("yuh")
+        at.run()   # re-render so the name-gated button is enabled
         at = self._click(at, "game_new_btn")
         self.assertEqual([e.value for e in at.exception], [])
         brokers = {p["name"]: p["broker"] for p in game.list_portfolios()}
