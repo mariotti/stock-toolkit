@@ -85,7 +85,7 @@ def render() -> None:
 |---|---|
 | **{icon("page.admin")} Admin** | Edit your watchlist, kick off collections, inspect the DB (sources, intervals, rows per symbol), see which `(symbol, source)` pairs are suppressed by the failure tracker. |
 | **{icon("page.game")} Game** | Paper-trading portfolios. Multiple named "strategies" in parallel: each has its own cash, positions, return curve. Compare them side-by-side; track win rate, expectancy, CAGR, Sharpe, Sortino, max drawdown per strategy. The Briefing tab can feed trades here. |
-| **{icon("page.replay")} Replay** | Time-travel betting game. Rewind to a past trading day (pick it, or go random — even blind, with dates hidden), see only the chart and indicators that were knowable then, and bet on the next bar: call one symbol Higher/Lower, or allocate a portfolio and race the equal-weight basket. Nothing is stored — it's practice, not history. |
+| **{icon("page.replay")} Replay** | Time-travel betting game. Rewind to a past trading day (pick it, or go random — even blind, with dates hidden), see only the chart and indicators that were knowable then, and bet on the next bar: call one symbol Higher/Lower, allocate a portfolio and race the equal-weight basket, or play the 👥 Minority game against a crowd of Challet–Zhang bots (the minority side wins each round; the bots see only crowd history — the chart is your edge). Nothing is stored — it's practice, not history. |
 | **{icon("page.help")} Help** | This page. |
         """
     )

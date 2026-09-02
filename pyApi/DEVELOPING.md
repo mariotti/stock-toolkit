@@ -83,6 +83,7 @@ ruff check .                                  # lint (CI also runs this)
 | `tests/test_collector_units.py` | Budgets, retry/backoff, the safe_get wrapper. |
 | `tests/test_game.py`       | Game engine (`game.py`) + the Game UI render. Pattern is `GameTestCase` with a tmp `portfolio.db` and a tmp price DB. |
 | `tests/test_replay.py`     | ⏪ Replay betting engine (`replay.py`): panel loading/ffill, anti-leak windowing, bet resolution, benchmark math. Deterministic tmp price DB. |
+| `tests/test_minority.py`   | 👥 Minority-game crowd (`minority.py`): Challet–Zhang bots with rigged strategy tables for deterministic rounds — minority resolution, virtual-score updates, leaderboard. No DB. |
 | `tests/test_engine_rust.py`| Dispatcher for `stock-collect --engine rust` (`collector/engine.py`). Mocks `subprocess.run` + `shutil.which` — never spawns the real Rust binary. Covers binary discovery, source allow-list, argv shape, exit-code propagation. |
 | `tests/test_audit_log.py`  | v2.4.0 audit log: bootstrap markers, every game.py mutation, destructive recovery-source guarantee (full pre-state in `before_json`), v1→v2 migration audit, atomicity (failed op rolls back the audit row), reader API. |
 | `tests/test_backup.py`     | v2.4.1 `stock_toolkit.backup`: snapshot round-trip (`VACUUM INTO` opens as a working DB), manifest method per entry, rotation preserving pre-destructive snapshots, config opt-out, game-level integration (delete + reset hooks fire, audit row links the path, failure isolation). |
@@ -216,7 +217,7 @@ comments. Only add one when the WHY is non-obvious." Don't restate
 what the code does; explain the constraint that made it non-obvious.
 
 **Test count is meaningful.** Every release commit message includes
-the test count after the change (`+8 tests → 665 green`). When you
+the test count after the change (`+8 tests → 674 green`). When you
 add a behaviour, add the test that protects it.
 
 ---

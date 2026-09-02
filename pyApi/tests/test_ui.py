@@ -1519,6 +1519,35 @@ class TestReplayPageRenders(unittest.TestCase):
         self.assertIn("Session summary", md)
         self.assertTrue([b for b in at.button if b.key == "replay_again_btn"])
 
+    def test_minority_mode_round_trip(self):
+        # v2.8 — 👥 Minority: the human + an even crowd of basic-
+        # strategy bots; a bet resolves a full Challet–Zhang round and
+        # advances the market day.
+        at = self._page()
+        at.radio(key="replay_mode_choice").set_value("minority")
+        at.run()
+        at = self._click(at, "replay_start_btn")
+        self.assertEqual([e.value for e in at.exception], [])
+        state = at.session_state["replay_state"]
+        self.assertEqual(state["mode"], "minority")
+        self.assertEqual(len(state["crowd"]["bots"]), 8)   # default crowd
+
+        at = self._click(at, "replay_mg_up")
+        state = at.session_state["replay_state"]
+        self.assertEqual(len(state["rounds"]), 1)
+        rnd = state["rounds"][0]
+        # odd headcount: the split must cover all 9 players
+        self.assertEqual(rnd["ups"] + rnd["downs"], 9)
+        self.assertIn(rnd["minority"], (0, 1))
+        self.assertEqual(state["points"], 1 if rnd["human_won"] else 0)
+        self.assertEqual(state["i"], state["start_i"] + 1)
+        self.assertEqual(state["crowd"]["rounds"], 1)
+
+        at = self._click(at, "replay_end_btn")
+        md = "\n".join(m.value for m in at.markdown)
+        self.assertIn("Session summary", md)
+        self.assertIn("rank", md)
+
 
 class TestHelpPageRenders(unittest.TestCase):
     """Help page (❓) renders and contains the orientation sections.
