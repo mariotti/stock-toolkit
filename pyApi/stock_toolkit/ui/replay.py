@@ -89,8 +89,8 @@ def _setup_form():
             "single": "🎯 Single symbol — call the next bar Higher/Lower",
             "portfolio": "🧺 Portfolio — allocate percentages for the "
                          "next bar",
-            "minority": "👥 Minority game — you vs a crowd of "
-                        "Challet–Zhang bots; the minority side wins",
+            "minority": "👥 Crowd — Challet–Zhang bots bet on the SAME "
+                        "next bar; the market referees everyone",
         }[m],
         key="replay_mode_choice", horizontal=False,
     )
@@ -108,14 +108,15 @@ def _setup_form():
         n_bots = mg1.selectbox(
             "Bots in the crowd", [4, 8, 16, 32], index=1,
             key="replay_mg_bots",
-            help="Even on purpose: bots + you = odd headcount, so a "
-                 "minority always exists. Each bot plays the basic "
-                 "minority strategy (memory-m lookup tables with "
-                 "virtual scores).")
+            help="Each bot plays the basic Challet–Zhang strategy "
+                 "(memory-m lookup tables with virtual scores) — but "
+                 "against the real market: it bets on the same next "
+                 "bar you do, and a correct call wins the round.")
         memory = mg2.slider(
             "Bot memory m", 2, 4, 3, key="replay_mg_memory",
-            help="Bots see only the last m minority outcomes — never "
-                 "the chart. The chart is YOUR private edge.")
+            help="Bots see only the last m real up/down outcomes — "
+                 "never the chart. The chart is YOUR private edge. "
+                 "They arrive pre-trained on the warm-up history.")
 
     c1, c2, c3 = st.columns(3)
     random_start = c1.checkbox(
@@ -163,8 +164,15 @@ def _setup_form():
             "panel_index": list(panel.index),
         }
         if mode == "minority":
-            from stock_toolkit.minority import new_crowd
-            state["crowd"] = new_crowd(int(n_bots), memory=int(memory))
+            from stock_toolkit.minority import new_crowd, warmup
+            crowd = new_crowd(int(n_bots), memory=int(memory))
+            # pre-train on the real directions of the warm-up window,
+            # so round 1 faces an adapted crowd, not coin-flippers
+            closes = panel[panel.columns[0]].iloc[:i + 1].dropna()
+            dirs = [1 if b > a else 0
+                    for a, b in zip(closes.iloc[:-1], closes.iloc[1:])]
+            warmup(crowd, dirs[-rp.MIN_HISTORY:])
+            state["crowd"] = crowd
             state["points"] = 0
         st.session_state.replay_state = state
         st.rerun()
@@ -183,14 +191,12 @@ def _reveal_last(state):
         st.info(f"⏭ Skipped {last['label']} — no bet, no lesson.")
         return
     if state["mode"] == "minority":
-        side = "UP" if last["minority"] == 1 else "DOWN"
-        msg = (f"Crowd split **{last['ups']}▲ / {last['downs']}▼** → "
-               f"minority was **{side}** ({last['minority_size']} "
-               f"player{'s' if last['minority_size'] != 1 else ''}) — "
-               f"you **{'won' if last['human_won'] else 'lost'}** the "
-               f"round. Market actually moved "
-               f"{last['market_ret']:+.2f}% "
-               f"({'crowd minority agreed' if last['market_agreed'] else 'crowd minority disagreed'}).")
+        side = "UP" if last["outcome"] == 1 else "DOWN"
+        msg = (f"Market moved **{last['market_ret']:+.2f}%** → "
+               f"**{side}**. You **"
+               f"{'called it' if last['human_won'] else 'missed'}**; "
+               f"{last['bots_correct']} of {last['n_bots']} bots "
+               f"called it too.")
         (st.success if last["human_won"] else st.error)(msg)
     elif state["mode"] == "single":
         arrow = "📈" if last["ret_pct"] > 0 else (
@@ -270,10 +276,11 @@ def _play(state):
         recent = "".join("▲" if b else "▼"
                          for b in crowd["history"][-crowd["memory"]:])
         st.caption(
-            f"{len(crowd['bots'])} bots are choosing from the last "
-            f"{crowd['memory']} minority outcomes only: `{recent}`. "
-            "They can't see the chart — that's your private edge. "
-            "Land on the minority side to win the round.")
+            f"{len(crowd['bots'])} bots are betting on the SAME next "
+            f"bar as you, seeing only the last {crowd['memory']} real "
+            f"directions: `{recent}`. They can't see the chart — "
+            "that's your private edge. A correct call wins the round; "
+            "flat days count as Down.")
         sym = state["symbols"][0]
         b1, b2, b3 = st.columns(3)
         pick = None
@@ -287,12 +294,9 @@ def _play(state):
             state["i"] = i + 1
             st.rerun()
         if pick is not None:
-            res = play_round(crowd, pick)
             ret = rp.next_return(panel, sym, i) or 0.0
+            res = play_round(crowd, pick, 1 if ret > 0 else 0)
             res["market_ret"] = ret
-            res["market_agreed"] = (
-                (res["minority"] == 1 and ret > 0)
-                or (res["minority"] == 0 and ret < 0))
             if res["human_won"]:
                 state["points"] += 1
             state["rounds"].append(
@@ -366,20 +370,21 @@ def _summary(state):
         from stock_toolkit.minority import leaderboard
         lb = leaderboard(state["crowd"], state["points"])
         n = len(state["rounds"])
-        agreed = sum(1 for r in state["rounds"] if r.get("market_agreed"))
+        crowd_hits = sum(r["bots_correct"] for r in state["rounds"])
+        crowd_rate = (crowd_hits
+                      / (n * len(state["crowd"]["bots"])) * 100
+                      if n else 0.0)
         st.markdown(
-            f"- **{n}** rounds — you won **{state['points']}** "
-            f"({state['points'] / n * 100:.0f}% of rounds)\n"
+            f"- **{n}** rounds — you called **{state['points']}** "
+            f"({state['points'] / n * 100:.0f}%); the crowd averaged "
+            f"{crowd_rate:.0f}%\n"
             f"- Final rank: **{lb['rank']} of {lb['players']}** players "
             f"(best bot {lb['best_bot']}, median bot "
             f"{lb['median_bot']})\n"
-            f"- The crowd's minority matched the REAL market direction "
-            f"in **{agreed} of {n}** rounds — the econophysics claim "
-            f"in miniature: markets behave like minority games when "
-            f"everyone chases the same signal.\n"
-            f"- By construction fewer than half the players win each "
-            f"round, so a sustained win rate near 50% means you're "
-            f"beating the crowd."
+            f"- The bots only ever saw the up/down history; you also "
+            f"had the chart and indicators. If the best bot still beat "
+            f"you, the extra information didn't buy an edge on this "
+            f"stretch — the uncomfortable minority-game lesson."
             if n else "- No rounds played.")
     elif state["mode"] == "single":
         s = rp.single_summary(state["rounds"])

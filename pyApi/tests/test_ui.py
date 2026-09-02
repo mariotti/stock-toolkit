@@ -1520,9 +1520,9 @@ class TestReplayPageRenders(unittest.TestCase):
         self.assertTrue([b for b in at.button if b.key == "replay_again_btn"])
 
     def test_minority_mode_round_trip(self):
-        # v2.8 — 👥 Minority: the human + an even crowd of basic-
-        # strategy bots; a bet resolves a full Challet–Zhang round and
-        # advances the market day.
+        # v2.8 — 👥 Crowd: Challet–Zhang bots bet on the SAME next bar
+        # as the human; the real market referees everyone. Bots arrive
+        # pre-trained on the warm-up window's real directions.
         at = self._page()
         at.radio(key="replay_mode_choice").set_value("minority")
         at.run()
@@ -1530,15 +1530,24 @@ class TestReplayPageRenders(unittest.TestCase):
         self.assertEqual([e.value for e in at.exception], [])
         state = at.session_state["replay_state"]
         self.assertEqual(state["mode"], "minority")
-        self.assertEqual(len(state["crowd"]["bots"]), 8)   # default crowd
+        crowd = state["crowd"]
+        self.assertEqual(len(crowd["bots"]), 8)            # default crowd
+        # warmup happened: history extends past the random m-bit seed
+        # and virtual scores are no longer all zero
+        self.assertGreater(len(crowd["history"]), crowd["memory"])
+        self.assertTrue(any(any(v > 0 for v in b["vscores"])
+                            for b in crowd["bots"]))
 
         at = self._click(at, "replay_mg_up")
         state = at.session_state["replay_state"]
         self.assertEqual(len(state["rounds"]), 1)
         rnd = state["rounds"][0]
-        # odd headcount: the split must cover all 9 players
-        self.assertEqual(rnd["ups"] + rnd["downs"], 9)
-        self.assertIn(rnd["minority"], (0, 1))
+        # the market refereed: the round's outcome matches the sign of
+        # the revealed move, and every bot was scored against it
+        self.assertEqual(rnd["outcome"],
+                         1 if rnd["market_ret"] > 0 else 0)
+        self.assertEqual(rnd["n_bots"], 8)
+        self.assertTrue(0 <= rnd["bots_correct"] <= 8)
         self.assertEqual(state["points"], 1 if rnd["human_won"] else 0)
         self.assertEqual(state["i"], state["start_i"] + 1)
         self.assertEqual(state["crowd"]["rounds"], 1)

@@ -1,8 +1,10 @@
 """
 test_minority.py
 ================
-Unit tests for stock_toolkit.minority — the Challet–Zhang bot crowd
-behind the Replay page's 👥 Minority mode. Pure logic, no DB.
+Unit tests for stock_toolkit.minority — the Challet–Zhang crowd that
+competes with the human at calling the next bar on the Replay page.
+The real market referees; bots learn from the direction history via
+the basic minority-game strategy machinery. Pure logic, no DB.
 """
 
 import pathlib
@@ -12,7 +14,9 @@ import unittest
 SCRIPT_DIR = pathlib.Path(__file__).parent
 sys.path.insert(0, str(SCRIPT_DIR.parent))
 
-from stock_toolkit.minority import leaderboard, new_crowd, play_round  # noqa: E402
+from stock_toolkit.minority import (                             # noqa: E402
+    leaderboard, new_crowd, play_round, warmup,
+)
 
 
 def _rigged_crowd(n_bots=2, memory=2, tables=None):
@@ -28,8 +32,8 @@ def _rigged_crowd(n_bots=2, memory=2, tables=None):
 
 class TestNewCrowd(unittest.TestCase):
 
-    def test_odd_or_tiny_bot_count_raises(self):
-        for bad in (1, 3, 5, 0, -2):
+    def test_zero_bots_raises(self):
+        for bad in (0, -1):
             with self.assertRaises(ValueError):
                 new_crowd(bad)
 
@@ -49,65 +53,79 @@ class TestNewCrowd(unittest.TestCase):
         self.assertEqual(a["history"], b["history"])
 
 
-class TestPlayRound(unittest.TestCase):
+class TestWarmup(unittest.TestCase):
 
-    def test_human_on_minority_side_wins(self):
-        # Both bots always vote down (all-zero tables): human voting up
-        # is a minority of one and wins; bots (majority) get nothing.
-        crowd = _rigged_crowd(tables=[[0, 0, 0, 0], [0, 0, 0, 0]])
-        res = play_round(crowd, 1)
-        self.assertEqual((res["ups"], res["downs"]), (1, 2))
-        self.assertEqual(res["minority"], 1)
-        self.assertTrue(res["human_won"])
-        self.assertEqual(res["minority_size"], 1)
-        self.assertEqual([b["points"] for b in crowd["bots"]], [0, 0])
-
-    def test_unanimous_round_has_empty_minority(self):
-        # Everyone votes down → the up side is the (empty) minority:
-        # canonical MG, nobody wins the round.
-        crowd = _rigged_crowd(tables=[[0, 0, 0, 0], [0, 0, 0, 0]])
-        res = play_round(crowd, 0)
-        self.assertEqual((res["ups"], res["downs"]), (0, 3))
-        self.assertEqual(res["minority"], 1)
-        self.assertFalse(res["human_won"])
-        self.assertEqual(res["minority_size"], 0)
-        self.assertEqual([b["points"] for b in crowd["bots"]], [0, 0])
-
-    def test_virtual_scores_reward_would_be_minority_calls(self):
-        # Strategy 0 always says up, strategy 1 always says down. The
-        # bots play... whichever, but after a round whose minority was
-        # UP, every bot's strategy 0 must gain a virtual point and
-        # strategy 1 must not.
+    def test_trains_vscores_and_history_without_points(self):
+        # Strategy 0 always calls up, strategy 1 always down. Feeding
+        # 5 up-days must give table 0 five virtual points, table 1
+        # none — and no bot earns ROUND points from studying.
         crowd = _rigged_crowd(tables=[[1, 1, 1, 1], [0, 0, 0, 0]])
-        # both bots vote up (tie-break picks either table; both bots'
-        # table 0 and 1 disagree, but vscores are equal → rng decides).
-        # Rig further: make vscores force table 1 (down) so the round
-        # is deterministic: bots down, human up → minority up.
-        for bot in crowd["bots"]:
-            bot["vscores"] = [0, 5]
-        res = play_round(crowd, 1)
-        self.assertEqual(res["minority"], 1)
-        for bot in crowd["bots"]:
-            self.assertEqual(bot["vscores"][0], 1)   # 0 + reward
-            self.assertEqual(bot["vscores"][1], 5)   # unchanged
-
-    def test_history_grows_and_best_table_is_played(self):
-        crowd = _rigged_crowd(tables=[[1, 1, 1, 1], [0, 0, 0, 0]])
-        for bot in crowd["bots"]:
-            bot["vscores"] = [10, 0]                 # force "always up"
         h0 = len(crowd["history"])
-        res = play_round(crowd, 0)
-        # bots up (2), human down (1) → minority down, human wins
-        self.assertEqual((res["ups"], res["downs"]), (2, 1))
-        self.assertTrue(res["human_won"])
-        self.assertEqual(len(crowd["history"]), h0 + 1)
-        self.assertEqual(crowd["history"][-1], res["minority"])
-        self.assertEqual(crowd["rounds"], 1)
+        warmup(crowd, [1, 1, 1, 1, 1])
+        for bot in crowd["bots"]:
+            self.assertEqual(bot["vscores"], [5, 0])
+            self.assertEqual(bot["points"], 0)
+        self.assertEqual(len(crowd["history"]), h0 + 5)
+        self.assertEqual(crowd["history"][-5:], [1, 1, 1, 1, 1])
+        self.assertEqual(crowd["rounds"], 0)
 
-    def test_bad_human_choice_raises(self):
+    def test_bad_outcome_raises(self):
         crowd = new_crowd(2, seed=1)
         with self.assertRaises(ValueError):
-            play_round(crowd, 2)
+            warmup(crowd, [1, 2])
+
+
+class TestPlayRound(unittest.TestCase):
+
+    def test_market_referees_everyone(self):
+        # Bots forced onto "always down" (table 1 has the higher
+        # vscore); the market goes up → bots all miss, human up wins.
+        crowd = _rigged_crowd(tables=[[1, 1, 1, 1], [0, 0, 0, 0]])
+        for bot in crowd["bots"]:
+            bot["vscores"] = [0, 5]
+        res = play_round(crowd, human_choice=1, outcome=1)
+        self.assertTrue(res["human_won"])
+        self.assertEqual(res["bots_correct"], 0)
+        self.assertEqual(res["n_bots"], 2)
+        self.assertEqual([b["points"] for b in crowd["bots"]], [0, 0])
+
+    def test_correct_bots_score_and_tables_learn(self):
+        # Bots forced onto "always up"; market up → every bot scores,
+        # and the up-table gains a virtual point on top.
+        crowd = _rigged_crowd(tables=[[1, 1, 1, 1], [0, 0, 0, 0]])
+        for bot in crowd["bots"]:
+            bot["vscores"] = [5, 0]
+        res = play_round(crowd, human_choice=0, outcome=1)
+        self.assertFalse(res["human_won"])
+        self.assertEqual(res["bots_correct"], 2)
+        for bot in crowd["bots"]:
+            self.assertEqual(bot["points"], 1)
+            self.assertEqual(bot["vscores"], [6, 0])
+
+    def test_history_grows_with_market_outcomes(self):
+        crowd = _rigged_crowd(tables=[[1, 1, 1, 1], [0, 0, 0, 0]])
+        h0 = len(crowd["history"])
+        play_round(crowd, 1, 0)
+        play_round(crowd, 0, 1)
+        self.assertEqual(crowd["history"][-2:], [0, 1])
+        self.assertEqual(len(crowd["history"]), h0 + 2)
+        self.assertEqual(crowd["rounds"], 2)
+
+    def test_adaptation_switches_the_played_table(self):
+        # After a long down-streak in warmup, a bot whose tables are
+        # "always up" vs "always down" must be playing "always down".
+        crowd = _rigged_crowd(n_bots=1,
+                              tables=[[1, 1, 1, 1], [0, 0, 0, 0]])
+        warmup(crowd, [0] * 10)
+        res = play_round(crowd, human_choice=1, outcome=0)
+        self.assertEqual(res["bots_correct"], 1)   # bot called down
+
+    def test_bad_args_raise(self):
+        crowd = new_crowd(2, seed=1)
+        with self.assertRaises(ValueError):
+            play_round(crowd, 2, 1)
+        with self.assertRaises(ValueError):
+            play_round(crowd, 1, 5)
 
 
 class TestLeaderboard(unittest.TestCase):
