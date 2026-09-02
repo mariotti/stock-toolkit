@@ -15,6 +15,48 @@ DB schemas are documented in [`SCHEMA.md`](SCHEMA.md).
 
 ---
 
+## 2.7.0 — A Briefing that learns from its exits, and the ⏪ Replay game
+
+The theme of this release is **closing feedback loops**: every closed
+trade now tells the story of why it was opened *and* how it ended —
+both to you and to Claude — and a new page lets you rewind the market
+and test your own read of a chart without hindsight.
+
+### What's new
+
+- **⏪ Replay — time-travel betting game** (new sidebar page). Rewind
+  to a past trading day — chosen, 🎲 random, or 🙈 **blind** with all
+  dates hidden — and see only the chart and indicators that were
+  knowable then. Bet on the next bar: call a single symbol
+  Higher/Lower at a fixed stake, or allocate a portfolio in
+  percentages and race an equal-weight benchmark basket. Ephemeral by
+  design: a session lives in the browser tab, touches no portfolio,
+  and stores nothing. Blind sessions reveal *when* you were playing
+  only in the summary. Engine is pure and separately testable
+  (`stock_toolkit/replay.py`) with an anti-leak guarantee: everything
+  shown "today" is computed from bars ≤ today.
+- **Closed trades pair the entry thesis with the exit** — realized
+  P&L events now carry the note(s) of the buy lot(s) each sell closed
+  (FIFO), alongside the sell's own note. The Game page gains a
+  **Closed trades** table ("entered because / exited because"), and
+  the Briefing's proposal prompt shows Claude the same pairing — so
+  it can see which entry arguments actually worked, not just why
+  positions were exited. The pairing math is locked to
+  `trade_stats` by construction and by test: same event count, same
+  realized P/L, same win/loss split.
+- **Failure suppression self-heals** — suppressed `(symbol, source)`
+  pairs retry on their own after `FAILURE_RETRY_DAYS` (default 7) and
+  clear on a successful fetch; the stale-price warning now explains
+  *why* a price is stale (suppressed vs not collected vs source
+  silence).
+
+### Test suite
+
+665 tests green (from 637), including the new Replay engine suite and
+a full AppTest round-trip of the Replay page.
+
+---
+
 ## 2.6.0 — Real broker fees, a learning Briefing, and the full score
 
 The theme of this release is **making costs and feedback real**: paper
